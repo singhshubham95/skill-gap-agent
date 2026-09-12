@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Seed data (user-supplied, not for git)
+data/
+
+# Outputs (pipeline artifacts, regenerable)
+output/
+
+# OS
+.DS_Store
+Thumbs.db
