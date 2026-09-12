@@ -14,4 +14,4 @@ added, superseded ones are marked, never silently rewritten.
 | Human-in-the-loop | Simple stdin prompt loop (print low-confidence items → ask → record override) | True LangGraph `interrupt()` + checkpointer adds resumable-runtime complexity a CLI doesn't need yet (deferred-enhancements #2) |
 | Sourcing | LLM project-idea synthesis only | GitHub Issues API is a fragile external dependency (deferred-enhancements #3) |
 | Seed data | Skills JSON + 13 JDs from the manual session (user-supplied files) | Doubles as the validation set — the project's own test data |
-| Spec structure | Modular docs in flat `docs/`, no nested subdirectories | Each doc evolves independently (deferred-enhancements churns; decisions is append-only); ~6 files is the right granularity — finer splitting would hurt navigation |
+| Spec structure | Modular specs in flat `specs/`, no nested subdirectories | Each spec evolves independently (deferred-enhancements churns; decisions is append-only); ~6 files is the right granularity — finer splitting would hurt navigation |

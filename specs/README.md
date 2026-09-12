@@ -1,4 +1,4 @@
-# Skill-Gap Agent — Documentation Index
+# Skill-Gap Agent — Specification Index
 
 Minimal v1 build of the Skill-Gap Agent, derived from the full spec
 (`../skill-gap-agent-spec.md`): the smallest system that runs the pipeline
