@@ -21,6 +21,9 @@ JD texts ────▶ Target-      │                                       
 3. **Normalize/dedup** — exact + alias match (case-insensitive, alias table);
    LLM-assisted merge only for ambiguous pairs. **Load-bearing:** judge quality
    depends entirely on this, so it is a first-class step, not an afterthought.
+   Known input quirk (from milestone 1): the skills JSON contains long
+   descriptive phrases, not clean names — canonical skill terms must be
+   extracted here.
 4. **Transferability judge** — for each unmatched target skill, score
    confidence (0–1) that an existing skill transfers, with a short rationale.
    **Pairwise pruning required:** embedding or keyword pre-filter to top-k
