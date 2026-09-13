@@ -23,11 +23,19 @@ from .normalize import canonical_term, normalize_name
 # ---------------------------------------------------------------------------
 
 
-def ingest_skills_json(sg: SkillGraph, path: str | Path) -> dict[str, int]:
+def ingest_skills_json(
+    sg: SkillGraph,
+    path: str | Path,
+    taxonomy=None,
+    approvals_path: str | Path = Path("output/implied_skills.json"),
+    auto_accept_implied: bool = False,
+) -> dict[str, int]:
     """Parse skills JSON -> canonical Skill nodes + HAS_SKILL edges.
 
     Dedup: two raw phrases mapping to the same canonical term collapse into
-    one Skill node. Returns {"raw": n_raw, "canonical": n_canonical}.
+    one Skill node. After explicit skills, runs implied-skill detection and
+    proposes each to the user (with evidence) unless auto_accept_implied.
+    Returns {"raw": n_raw, "canonical": n_canonical, "implied": n_implied}.
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     raw_phrases: list[tuple[str, str]] = []
@@ -55,7 +63,25 @@ def ingest_skills_json(sg: SkillGraph, path: str | Path) -> dict[str, int]:
             sg.add_skill(Skill(name=canon, category=category, source=SkillSource.CURRENT))
         sg.add_has_skill(seen[key])
 
-    return {"raw": len(raw_phrases), "canonical": len(seen)}
+    # Implied-skill detection + user proposal flow (replaces static set)
+    from .implied import detect_implied, propose_implied
+
+    implied = detect_implied([r for r, _ in raw_phrases], set(seen.values()), taxonomy)
+    accepted = propose_implied(
+        implied, approvals_path=approvals_path, auto_accept=auto_accept_implied
+    )
+    for skill in sorted(accepted):
+        if not sg.g.has_node(f"skill:{skill}"):
+            sg.add_skill(
+                Skill(name=skill, category="implied", source=SkillSource.CURRENT)
+            )
+        sg.add_has_skill(skill)
+
+    return {
+        "raw": len(raw_phrases),
+        "canonical": len(seen),
+        "implied": len(accepted),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -151,11 +177,20 @@ def ingest_jds(sg: SkillGraph, jd_dir: str | Path) -> dict[str, int]:
     return {"jds": n_jds, "target_skills": len(sg.target_skills())}
 
 
-def build_seed_graph(skills_path: str | Path, jd_dir: str | Path) -> tuple[SkillGraph, dict]:
+def build_seed_graph(
+    skills_path: str | Path,
+    jd_dir: str | Path,
+    taxonomy=None,
+    auto_accept_implied: bool = False,
+) -> tuple[SkillGraph, dict]:
     """Full milestone-2 build: ingest skills + JDs into one graph."""
     sg = SkillGraph()
     stats = {}
-    stats.update(ingest_skills_json(sg, skills_path))
+    stats.update(
+        ingest_skills_json(
+            sg, skills_path, taxonomy=taxonomy, auto_accept_implied=auto_accept_implied
+        )
+    )
     jd_stats = ingest_jds(sg, jd_dir)
     stats.update(jd_stats)
     return sg, stats

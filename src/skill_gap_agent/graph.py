@@ -103,10 +103,48 @@ class SkillGraph:
             if d.get("kind") == "Skill" and d.get("source") == SkillSource.TARGET
         ]
 
+    def match_current(self, target_name: str) -> str | None:
+        """Find a current skill matching a target skill, or None.
+
+        Matching ladder (v1, specs/architecture.md #3):
+        1. exact (case-insensitive)
+        2. alias table (both sides through canonical_term)
+        3. substring containment (either direction, min 4 chars)
+        """
+        from .normalize import canonical_term
+
+        current = self.current_skills()
+        t_low = target_name.lower()
+        t_canon = canonical_term(target_name).lower()
+
+        # 1. exact
+        for c in current:
+            if c.lower() == t_low:
+                return c
+        # 2. alias/canonical equivalence
+        for c in current:
+            if canonical_term(c).lower() == t_canon and t_canon:
+                return c
+        # 3. substring containment (e.g. current "RAG (Retrieval-Augmented
+        #    Generation) architecture design" vs target "RAG")
+        for c in current:
+            c_low = c.lower()
+            if len(t_low) >= 4 and t_low in c_low:
+                return c
+            c_canon = canonical_term(c).lower()
+            if len(t_low) >= 4 and t_low in c_canon:
+                return c
+            if len(c_canon) >= 4 and c_canon in t_low:
+                return c
+        return None
+
     def unmatched_target_skills(self) -> list[str]:
-        """Target skills with no exact HAS_SKILL match — judge-node input."""
-        current = {s.lower() for s in self.current_skills()}
-        return [s for s in self.target_skills() if s.lower() not in current]
+        """Target skills with no current-skill match — judge-node input.
+
+        Implied skills accepted during ingestion (with user approval) are
+        already in the graph as HAS_SKILL, so they are naturally excluded.
+        """
+        return [s for s in self.target_skills() if self.match_current(s) is None]
 
     def requires_weights(self) -> dict[str, int]:
         """Skill name -> total REQUIRES weight across JDs."""

@@ -15,11 +15,27 @@ from .normalize import canonical_term
 
 
 def main() -> None:
-    skills_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/skillsdataset.json")
-    jds_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("data/jds")
+    args = [a for a in sys.argv[1:] if a != "--auto"]
+    skills_path = Path(args[0]) if len(args) > 0 else Path("data/skillsdataset.json")
+    jds_path = Path(args[1]) if len(args) > 1 else Path("data/jds")
+    # --auto: accept all implied skills without prompting (for scripted runs)
+    auto = "--auto" in sys.argv
 
-    sg, stats = build_seed_graph(skills_path, jds_path)
-    print(f"ingestion: {stats['raw']} raw phrases -> {stats['canonical']} canonical skills")
+    from .taxonomy import load_taxonomy
+
+    taxonomy = load_taxonomy()
+    if taxonomy:
+        print(f"Taxonomy loaded: {taxonomy.source} ({len(taxonomy.skills)} skills)")
+    else:
+        print("No external taxonomy found — using built-in alias/pattern tables")
+
+    sg, stats = build_seed_graph(
+        skills_path, jds_path, taxonomy=taxonomy, auto_accept_implied=auto
+    )
+    print(
+        f"ingestion: {stats['raw']} raw phrases -> {stats['canonical']} canonical "
+        f"+ {stats['implied']} implied (user-approved)"
+    )
     print(f"target-ingestion: {stats['jds']} JDs -> {stats['target_skills']} target skills")
 
     # Frequency tally (the manual run's "X/13 JDs" numbers)
@@ -34,6 +50,13 @@ def main() -> None:
     print(f"\nUnmatched target skills ({len(unmatched)}):")
     for name in sorted(unmatched):
         print(f"  {name} ({weights.get(name, 0)}/{n_jds})")
+
+    # Show how the matched ones resolved (dedup audit)
+    matched = [s for s in sg.target_skills() if s not in unmatched]
+    print(f"\nMatched target skills ({len(matched)}):")
+    for name in sorted(matched):
+        m = sg.match_current(name)
+        print(f"  {name} -> {m!r} ({weights.get(name, 0)}/{n_jds})")
 
     # Normalization spot-check
     print("\nCanonical-term spot checks:")

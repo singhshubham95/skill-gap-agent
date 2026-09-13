@@ -14,7 +14,13 @@ JD texts ────▶ Target-      │                                       
 
 1. **Ingestion node** — parse skills JSON → `Skill` records (`name`, `category`,
    `source: current`). Also accepts a plain resume text dump (best-effort —
-   deferred-enhancements #7).
+   deferred-enhancements #7). **Implied-skill detection:** a CV rarely states
+   every skill explicitly (e.g. "Custom Airflow operator authoring (Python)"
+   implies Python without listing it). After explicit skills, the node scans
+   raw phrases for implied skills and **proposes each to the user with its
+   evidence** ("'…(Python)' implies Python — add? [y/n/a]"); approvals persist
+   to `output/implied_skills.json` so re-runs don't re-ask. Accepted implied
+   skills enter the graph as `HAS_SKILL` with `category: implied`.
 2. **Target-ingestion node** — parse JD texts → `Skill` records
    (`source: target`) + `REQUIRES` edges with `weight` = number of JDs
    mentioning the skill.
@@ -23,7 +29,11 @@ JD texts ────▶ Target-      │                                       
    depends entirely on this, so it is a first-class step, not an afterthought.
    Known input quirk (from milestone 1): the skills JSON contains long
    descriptive phrases, not clean names — canonical skill terms must be
-   extracted here.
+   extracted here. **External taxonomy:** where available, an external skill
+   taxonomy (ESCO ICT subset) supplies preferred labels + alt-labels, feeding
+   the alias table and implied-skill patterns; the loader falls back gracefully
+   to the built-in tables when the taxonomy file is absent
+   (see [open-items.md](open-items.md)).
 4. **Transferability judge** — for each unmatched target skill, score
    confidence (0–1) that an existing skill transfers, with a short rationale.
    **Pairwise pruning required:** embedding or keyword pre-filter to top-k
