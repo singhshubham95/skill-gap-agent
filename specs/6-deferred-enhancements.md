@@ -1,12 +1,12 @@
 # Deferred Enhancements (Traded Off for v1)
 
 Every simplification made in v1, recorded so each can be restored without
-re-deriving the reasoning. This file churns; [decisions.md](decisions.md) is
+re-deriving the reasoning. This file churns; [3-decisions.md](3-decisions.md) is
 append-only.
 
 | # | Deferred | v1 Simplification | Why deferred / trigger to restore |
 |---|---|---|---|
-| 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in [architecture.md](architecture.md) is already Neo4j-shaped. |
+| 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in [2-architecture.md](2-architecture.md) is already Neo4j-shaped. |
 | 2 | **True LangGraph `interrupt()` + checkpointer** | stdin prompt loop in the confidence gate | Resumable runtime adds complexity for a CLI. Restore when moving to a web UI or long-running/resumable runs. |
 | 3 | **GitHub Issues sourcing node** (`good-first-issue`/`help-wanted` search) | LLM project synthesis only | Fragile external dependency (rate limits, label quality varies by repo). Add in v1.1 alongside synthesis, run in parallel. |
 | 4 | **Chat refinement over the built graph** ("why is X a gap", "re-rank assuming I know Y") | None — static plan output | A second app (tool-calling loop over graph queries). v1.2, after the graph is trustworthy. |

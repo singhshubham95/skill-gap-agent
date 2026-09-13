@@ -47,7 +47,7 @@ Build order. Each milestone ends with something runnable.
    real edge data.
 5. **Gap ranking + project synthesis + output.** Ranked plan in markdown.
 6. **Validation pass.** Full run vs. manual analysis against the rubric (see
-   [validation.md](validation.md)); write the README case study.
+   [4-validation.md](4-validation.md)); write the README case study.
 
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
-([open-items.md](open-items.md)).
+([7-open-items.md](7-open-items.md)).

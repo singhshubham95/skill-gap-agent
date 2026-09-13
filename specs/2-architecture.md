@@ -1,7 +1,7 @@
 # v1 Architecture
 
 Deep design detail. For the top-down map (layers, component↔code table, data
-flow, repo layout), start at [system-overview.md](system-overview.md).
+flow, repo layout), start at [1-system-overview.md](1-system-overview.md).
 
 ## Pipeline
 
@@ -36,7 +36,7 @@ JD texts ────▶ Target-      │                                       
    taxonomy (ESCO ICT subset) supplies preferred labels + alt-labels, feeding
    the alias table and implied-skill patterns; the loader falls back gracefully
    to the built-in tables when the taxonomy file is absent
-   (see [open-items.md](open-items.md)).
+   (see [7-open-items.md](7-open-items.md)).
 4. **Transferability judge** — for each unmatched target skill, score
    confidence (0–1) that an existing skill transfers, with a short rationale.
    **Implemented (milestone 3):** keyword-overlap pruning to top-k (k=5)
@@ -46,7 +46,7 @@ JD texts ────▶ Target-      │                                       
    (Google ADK)"); one LLM call per target skill; scores <0.3 dropped; edges
    written as `TRANSFERS_TO {confidence, rationale}`; report persisted to
    `output/judge_report.json`. Default model: DeepSeek V4 Flash 0731 via
-   OpenRouter (see [open-items.md](open-items.md)). Full run on seed data:
+   OpenRouter (see [7-open-items.md](7-open-items.md)). Full run on seed data:
    21/21 targets, 122 edges, 0 errors. **Calibration note:** top confidences
    cluster high (mean 0.84) when many candidates are shown — the gate
    threshold likely needs raising; decide with milestone-4 data.

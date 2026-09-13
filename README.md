@@ -14,13 +14,15 @@ README case study.
 
 ## Specs
 
-All specifications live in [`specs/`](specs/). Reading order:
+All specifications live in [`specs/`](specs/). Start with the system overview,
+then dive as needed:
 
 | File | Contents |
 |---|---|
-| [specs/decisions.md](specs/decisions.md) | Locked technology and scope decisions, with rationale |
-| [specs/architecture.md](specs/architecture.md) | v1 pipeline diagram, component details, graph schema |
-| [specs/validation.md](specs/validation.md) | The rubric — what "done" means, measured against the manual run |
-| [specs/milestones.md](specs/milestones.md) | Build order, milestone by milestone |
-| [specs/deferred-enhancements.md](specs/deferred-enhancements.md) | Every trade-off made for v1, and the trigger to restore each |
-| [specs/open-items.md](specs/open-items.md) | Unresolved items that don't block starting |
+| [specs/1-system-overview.md](specs/1-system-overview.md) | **Start here** — layered component map, component↔code table, data flow, repo map |
+| [specs/2-architecture.md](specs/2-architecture.md) | Deep design: pipeline components, graph schema |
+| [specs/3-decisions.md](specs/3-decisions.md) | Locked technology and scope decisions, with rationale |
+| [specs/4-validation.md](specs/4-validation.md) | The rubric — what "done" means, measured against the manual run |
+| [specs/5-milestones.md](specs/5-milestones.md) | Build order, milestone by milestone, with progress |
+| [specs/6-deferred-enhancements.md](specs/6-deferred-enhancements.md) | Every trade-off made for v1, and the trigger to restore each |
+| [specs/7-open-items.md](specs/7-open-items.md) | Unresolved items that don't block starting |
