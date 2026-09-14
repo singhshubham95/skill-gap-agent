@@ -100,9 +100,30 @@ Build order. Each milestone ends with something runnable.
    is the proper fix, deferred ([7-open-items.md](7-open-items.md)).
    Plan output now includes per-verdict JD traceability.
 
-**v1 COMPLETE** — all six milestones done. Remaining architecture item:
-LangGraph wiring of the (currently sequentially-called) nodes, tracked in
-[7-open-items.md](7-open-items.md). Next-version scoping comes after commit.
+**v1 COMPLETE** — all six milestones done. The LangGraph wiring has since
+been designed and scheduled as milestone M7 (below).
 
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 ([7-open-items.md](7-open-items.md)).
+
+## Planned Milestones (v2 target — Designed, no code yet)
+
+Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7–M9
+target), not spec boundaries. Numbering stays linear and global.
+
+7. **LangGraph orchestration.** 🎯 Designed ([2-architecture.md §9](2-architecture.md)).
+   Wire the v1 nodes into a real LangGraph graph (`cli.py`): conditional
+   gate as a branch, judge-recalibration loop, `interrupt()` + checkpointer
+   replacing the stdin loops (restores deferred-enhancements #2), pydantic
+   state wrapping the `SkillGraph`. Mechanical migration — validates the
+   graph shape with zero new features.
+8. **Resume ingestion.** 🎯 Designed ([2-architecture.md §10](2-architecture.md)).
+   PDF/DOCX → text → one LLM extraction call → skills-JSON shape; regex
+   path stays as no-LLM fallback; skills JSON remains a first-class input
+   (restores deferred-enhancements #7 as a first-class path).
+9. **Conversational intake + skill validation.** 🎯 Designed
+   ([2-architecture.md §11–§12](2-architecture.md)). Chat agent collects
+   evidence (resume / JSON / JDs) and pre-fills gate questions; triaged
+   skills validated via concept checklist + applied question with hidden
+   rubric; grades persist to `output/proficiency.json` on the gate's 1–5
+   depth scale; gate shrinks to unvalidated skills.

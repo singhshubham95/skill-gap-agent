@@ -99,6 +99,90 @@ JD texts ────▶ Target-      │                                       
 8. **Output node** — ranked markdown plan written to `output/plan.md`; graph
    state persisted to `output/graph.json`.
 
+## v2 Components (Designed — M7–M9, no code yet)
+
+The sections below are the designed-but-unbuilt parts of the system. They
+describe the target state; present-tense v1 components above are unchanged
+until a milestone actually revises their behavior.
+
+9. **LangGraph orchestration (M7)** — the v1 nodes (§1–§8) are currently
+   invoked sequentially from `m5_plan.py`; M7 wires them into a real
+   LangGraph graph (`cli.py`). Three concrete wins, in order of certainty:
+   - **Human-in-the-loop as `interrupt()` + checkpointer.** The implied-skill
+     proposal (§1) and confidence gate (§5) stdin loops become true
+     interrupts — runs become resumable across process restarts and portable
+     to a future web UI (restores deferred-enhancements #2).
+   - **Conditional edges replace sequential assumptions.** No
+     sub-threshold targets after the judge → skip the gate; judge
+     calibration looks clustered-high → re-judge with a stricter rubric as a
+     loop (turns the calibration concern in [7-open-items.md](7-open-items.md)
+     into an automatic branch); no gaps above threshold → skip synthesis.
+   - **State design.** A pydantic state object wraps the `SkillGraph` plus
+     conversation/intake fields; the graph object stays the single source of
+     truth and `output/graph.json` persistence is unchanged.
+10. **Resume ingestion (M8)** — real users have a CV, not a skills JSON.
+    Pipeline: PDF/DOCX → text (pypdf / python-docx) → **one LLM extraction
+    call** → structured skills list in the same shape as the skills JSON →
+    everything downstream (normalize, dedup, implied-skill proposal, judge)
+    works unchanged. Design points:
+    - **LLM extraction, not regex growth.** The skills JSON worked with
+      regex/alias normalization because it was semi-curated; a real resume
+      is prose. One extraction call reuses the `llm.py` JSON-extraction
+      infra; the regex path stays as a no-LLM fallback.
+    - **The skills JSON remains a first-class input** (power users,
+      reproducible test runs); intake branches on what the user provides.
+    - Promotes deferred-enhancements #7 from "best-effort" to designed.
+11. **Conversational intake (M9)** — a tool-calling chat agent that fills a
+    `UserProfile` state slot: collects the resume (PDF/DOCX) or skills JSON,
+    collects JD texts, asks clarifying questions. Key synergy: the gate's
+    depth/intent questions (§5) can be asked conversationally during intake,
+    collapsing two interaction points into one conversation segment.
+12. **Skill validation (M9)** — evidence-backed proficiency instead of
+    trusting resume claims. Resumes inflate; self-ratings inflate more; the
+    agent *elicits* depth through calibration questions. **Framing:
+    calibration, not a test** — the tool exists to build the user's own
+    learning plan, so no anti-cheat is needed, only honest framing.
+    - **Triage (mandatory).** Quizzing every skill is an interrogation.
+      Only ranking-relevant skills are validated: high JD `weight`, skills
+      that are top-transfer *sources* (their depth drives the confidence
+      multiplication), gate-flagged skills. Cap ~10–15 questions total;
+      explicitly skippable ("just use my resume as-is" → resume-claim
+      fallback).
+    - **Tiered protocol per triaged skill** (adaptive stop, LangGraph
+      subgraph: `generate_question → interrupt → grade → route`):
+      1. **Concept checklist** — yes/no on ~4–6 sub-concepts. Cheapest to
+         generate reliably and fastest to answer; per-concept granularity
+         makes the *pattern* of yesses informative even if individual
+         answers inflate.
+      2. **One applied question** on a concept the user claimed — "walk me
+         through how you'd deduplicate near-identical customer records in
+         SQL" — graded by one LLM call against a hidden rubric. Applied
+         over trivia: tests capability, and the user's own answer is stored
+         as evidence.
+      3. **Optional follow-up probe** — only if tier 2 is strong.
+      Route: strong → stop or escalate once; vague → downshift and stop.
+      Max 2–3 turns per skill.
+    - **Question authoring & leakage control.** Questions + hidden rubric
+      are co-generated in one LLM call (rubric never shown). A mechanical
+      string-overlap check between question text and rubric technique names
+      catches answer leakage (same spirit as the judge's keyword pruner).
+      Authoring is offline and cached, so the full question set is
+      reviewable before any user sees it; obscure skills degrade gracefully
+      to the self-report tier.
+    - **Persistence & consumers.** Grades map to the gate's 1–5 depth scale
+      and persist to `output/proficiency.json` (same override pattern as
+      `gate_overrides.json`); question cache keyed by skill. Consumers:
+      (a) the gate's depth question is pre-filled for validated skills —
+      the gate shrinks to unvalidated skills only (an explicit, intended
+      outcome, not gate redundancy); (b) the judge prompt gains proficiency
+      context ("user has SQL at working depth, not expert") for better
+      transfer scores.
+    - **Semantics of a "no".** A failed concept lowers the *skill's* depth
+      factor (nudge, never hard-reject — a soft signal modulates
+      confidence, it does not remove a skill from the profile). Concept-level
+      micro-gaps ("learn window functions" as a plan item) are a recorded
+      future idea, not v2 scope.
+
 ## Graph Schema (store-agnostic — same shape later in Neo4j)
 
 **Nodes**

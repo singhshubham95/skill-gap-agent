@@ -4,20 +4,35 @@ The top-down view of the Skill-Gap Agent: what the system is, its layers and
 components, where each lives in code, and how data flows through. Deep detail
 lives in [2-architecture.md](2-architecture.md); this page is the map.
 
-**Status: v1 complete.** All pipeline stages are built and validated against
-a sealed hand-performed gap analysis of the same data ([4-validation.md](4-validation.md));
-results in the README case study. Known limitations and the v1.1 candidate
-list are in [7-open-items.md](7-open-items.md) and [6-deferred-enhancements.md](6-deferred-enhancements.md).
+**Status: v1 built and validated** (M1–M6) **; v2 designed** (M7–M9).
+All pipeline stages are built and validated against a sealed hand-performed
+gap analysis of the same data ([4-validation.md](4-validation.md)); results
+in the README case study. The v2 target adds conversational intake, resume
+(PDF/DOCX) ingestion, evidence-backed skill validation, and true LangGraph
+orchestration — components marked 🎯 Designed below.
+
+This is a **living target-state document**: it describes the full system we
+are building (current end goal = v2), with every component labeled Built
+(exists in code) or Designed (specified for an upcoming milestone, no code
+yet). See the spec-evolution rules in
+[.github/copilot-instructions.md](../.github/copilot-instructions.md).
 
 ## What the system does (one paragraph)
 
-Given a user's skills dump and target job descriptions, the agent builds a
-weighted skill graph (networkx), detects skills the CV *implies* but doesn't
+Given a user's skills evidence and target job descriptions, the agent builds
+a weighted skill graph (networkx), detects skills the CV *implies* but doesn't
 state (user-approved), scores how much existing skills transfer to missing
 ones (LLM judge), gates uncertain judgments through a human-in-the-loop
 prompt, ranks gaps by JD frequency, and outputs a ranked plan of grounded
 learning projects. Validated against a sealed hand-performed gap analysis of
 the same data ([4-validation.md](4-validation.md)).
+
+**v2 target additions:** users converse with the agent instead of preparing
+input files — they hand over a resume (PDF/DOCX) or skills JSON, the agent
+extracts skills via one LLM call, validates the depth of ranking-relevant
+skills through calibration questions (not a test), and the whole pipeline
+runs as a true LangGraph graph with `interrupt()`-based human-in-the-loop
+steps (designed in [2-architecture.md](2-architecture.md) §9–§12).
 
 ## Layered Component Map
 
@@ -26,7 +41,7 @@ flowchart TB
     subgraph L1["Interface layer"]
         CLI["CLI runners<br/>(m5_plan, m4_gate, m3_judge, m2_check)"]
     end
-    subgraph L2["Pipeline nodes (LangGraph, M4+)"]
+    subgraph L2["Pipeline nodes (LangGraph wiring = M7)"]
         ING["Ingestion<br/>(skills JSON → graph)"]
         TING["Target-Ingestion<br/>(JDs → REQUIRES edges)"]
         NORM["Normalize/Dedup"]
@@ -72,7 +87,10 @@ flowchart TB
 | Gap ranking | Rank gaps by JD weight, transferability-aware | `ranking.py` | [2-architecture.md §6](2-architecture.md) | ✅ Built |
 | Project synthesis | Grounded standalone project ideas per gap | `synthesis.py` | [2-architecture.md §7](2-architecture.md) | ✅ Built |
 | Output node | Ranked markdown plan + graph persistence | `output.py` | [2-architecture.md §8](2-architecture.md) | ✅ Built |
-| LangGraph wiring | Orchestrate nodes with the conditional gate as a real branch | — | [3-decisions.md](3-decisions.md) | ⏳ Milestone 4–5 |
+| LangGraph orchestration | Nodes wired as a real graph; conditional gate as a branch; `interrupt()` + checkpointer replace stdin loops | `cli.py` (scaffold exists) | [2-architecture.md §9](2-architecture.md) | 🎯 Designed (M7) |
+| Resume ingestion | PDF/DOCX → text → one LLM extraction call → skills-JSON shape; regex fallback | new `resume.py` | [2-architecture.md §10](2-architecture.md) | 🎯 Designed (M8) |
+| Conversational intake | Chat agent collects evidence (resume / JSON / JDs), pre-fills gate questions | new `intake.py` | [2-architecture.md §11](2-architecture.md) | 🎯 Designed (M9) |
+| Skill validation | Concept-check + applied-question calibration of triaged skills → proficiency evidence | new `validate.py` | [2-architecture.md §12](2-architecture.md) | 🎯 Designed (M9) |
 
 ## Data Flow at a Glance
 
@@ -95,6 +113,12 @@ IN:  data/skillsdataset.json (146 phrases)   data/jds/*.txt (13 JDs)
 PERSISTED: output/graph.json (whole graph), output/judge_report.json,
            output/implied_skills.json (approval record)
 ```
+
+**v2 target flow (M7–M9):** the IN edge becomes conversational — resume
+PDF/DOCX or skills JSON → LLM extraction → skill validation on triaged
+skills → proficiency evidence feeds the gate (which shrinks to unvalidated
+skills) — and the whole flow runs as a LangGraph graph with `interrupt()`
+at the human-in-the-loop points.
 
 ## Repo Map
 
@@ -131,8 +155,30 @@ skill-gap-agent/
 
 **Scaffolding note:** the `m*_*.py` runners are milestone scripts; `m5_plan.py`
 is the current full-pipeline entry. The LangGraph wiring (`cli.py`) that turns
-the sequential node calls into a real conditional graph is the main remaining
-architecture item — see [7-open-items.md](7-open-items.md).
+the sequential node calls into a real conditional graph is milestone M7 —
+designed in [2-architecture.md §9](2-architecture.md). The v2 modules
+(`resume.py`, `intake.py`, `validate.py`) do not exist yet; creating them is
+milestones M8–M9.
+
+## Conventions & Guardrails
+
+Code-level conventions every change must follow. This section is **spec
+content**: it evolves with the code, and behavior-changing PRs must keep it
+accurate (workflow rules live in
+[.github/copilot-instructions.md](../.github/copilot-instructions.md)).
+
+- Python 3.11+, pydantic models for structured data, type hints throughout.
+- LLM access is centralized in a single module (`llm.py`); parse via its
+  JSON-extraction helpers and never call provider SDKs from node modules.
+- Human decisions persist as override files in `output/` (e.g.
+  `gate_overrides.json`, `implied_skills.json`) and are re-applied silently
+  on re-runs — follow this pattern for any new interactive flow.
+- Console output must be ASCII-safe (dev machines may run cp1252; use
+  `.encode("ascii", "replace")`-style guards for LLM-generated text).
+- Data files under `data/` and `output/` are gitignored; never hardcode
+  absolute paths — resolve from the package or repo root.
+- Canonical skill vocabulary flows through a single normalization module
+  (`normalize.py`); never compare raw surface forms.
 
 ## Where to Go Next
 

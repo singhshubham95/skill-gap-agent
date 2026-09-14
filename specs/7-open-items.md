@@ -2,6 +2,9 @@
 
 Unresolved items that don't block starting.
 
+- **LangGraph wiring** — moved out of open items: it is now designed and
+  scheduled as milestone M7 (see [5-milestones.md](5-milestones.md) and
+  [2-architecture.md §9](2-architecture.md)).
 - **Mention-modality classification (LLM pass)** — honest limitation of
   alternative groups (`requirements.py`): v1 cannot automatically classify
   each JD mention's modality ("such as LangChain, ..." = exemplar/any-of vs.

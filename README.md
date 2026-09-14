@@ -52,6 +52,13 @@ persist in `output/`, so re-runs only ask about what changed.
 
 Full trade-off list with restore triggers: [specs/6-deferred-enhancements.md](specs/6-deferred-enhancements.md).
 
+**Roadmap (designed, not yet built):** the next milestones (M7–M9) add true
+LangGraph orchestration with resumable human-in-the-loop steps, resume
+PDF/DOCX ingestion, a conversational intake agent, and evidence-backed skill
+validation (calibration questions instead of trusting resume claims). Design
+detail in [specs/2-architecture.md](specs/2-architecture.md) §9–§12 and
+[specs/5-milestones.md](specs/5-milestones.md).
+
 ## For contributors
 
 The specs are the onboarding path — they document not just the design but the
@@ -64,10 +71,16 @@ The specs are the onboarding path — they document not just the design but the
 5. [specs/6-deferred-enhancements.md](specs/6-deferred-enhancements.md) — what was traded off and what would trigger restoring it
 6. [specs/7-open-items.md](specs/7-open-items.md) — known limitations and candidate next steps
 
-Conventions: specs are numbered by reading order; `3-decisions.md` is
-append-only (mark superseded, never rewrite); the graph schema in
+Conventions: specs are numbered by reading order and are **living
+target-state documents** — they describe the full system being built, with
+every component marked Built or Designed (never version-split into
+`specs/v2/`; milestone numbers stay linear). `3-decisions.md` is append-only
+(mark superseded, never rewrite); the graph schema in
 [2-architecture.md](specs/2-architecture.md) is deliberately Neo4j-shaped so
-the store can migrate without redesign.
+the store can migrate without redesign. The full spec-evolution rules and
+code conventions live in
+[.github/copilot-instructions.md](.github/copilot-instructions.md) — read it
+before changing code or specs.
 
 ## Specs
 
