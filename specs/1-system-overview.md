@@ -4,6 +4,11 @@ The top-down view of the Skill-Gap Agent: what the system is, its layers and
 components, where each lives in code, and how data flows through. Deep detail
 lives in [2-architecture.md](2-architecture.md); this page is the map.
 
+**Status: v1 complete.** All pipeline stages are built and validated against
+a sealed hand-performed gap analysis of the same data ([4-validation.md](4-validation.md));
+results in the README case study. Known limitations and the v1.1 candidate
+list are in [7-open-items.md](7-open-items.md) and [6-deferred-enhancements.md](6-deferred-enhancements.md).
+
 ## What the system does (one paragraph)
 
 Given a user's skills dump and target job descriptions, the agent builds a
@@ -11,25 +16,25 @@ weighted skill graph (networkx), detects skills the CV *implies* but doesn't
 state (user-approved), scores how much existing skills transfer to missing
 ones (LLM judge), gates uncertain judgments through a human-in-the-loop
 prompt, ranks gaps by JD frequency, and outputs a ranked plan of grounded
-learning projects. Validated against a manual 13-JD gap analysis
-([4-validation.md](4-validation.md)).
+learning projects. Validated against a sealed hand-performed gap analysis of
+the same data ([4-validation.md](4-validation.md)).
 
 ## Layered Component Map
 
 ```mermaid
 flowchart TB
     subgraph L1["Interface layer"]
-        CLI["CLI runners<br/>(m2_check, m3_judge, cli)"]
+        CLI["CLI runners<br/>(m5_plan, m4_gate, m3_judge, m2_check)"]
     end
     subgraph L2["Pipeline nodes (LangGraph, M4+)"]
         ING["Ingestion<br/>(skills JSON → graph)"]
         TING["Target-Ingestion<br/>(JDs → REQUIRES edges)"]
         NORM["Normalize/Dedup"]
         JUD["Transferability Judge<br/>(LLM)"]
-        GATE["Confidence Gate<br/>(stdin, M4)"]
-        RANK["Gap Ranking (M5)"]
-        SYNTH["Project Synthesis (M5)"]
-        OUT["Output (M5)"]
+        GATE["Confidence Gate<br/>(stdin)"]
+        RANK["Gap Ranking<br/>(+ alternative groups)"]
+        SYNTH["Project Synthesis"]
+        OUT["Output"]
     end
     subgraph L3["Core domain"]
         GRAPH["SkillGraph<br/>(networkx schema + queries)"]
@@ -62,10 +67,11 @@ flowchart TB
 | Skill taxonomy | ESCO loader, graceful fallback to built-in tables | `taxonomy.py` | [2-architecture.md §3](2-architecture.md) | ✅ Built (data file pending) |
 | LLM interface | Provider-agnostic `judge()`/`chat()`, JSON-out with retries | `llm.py` | [3-decisions.md](3-decisions.md) | ✅ Built |
 | Transferability judge | Score `TRANSFERS_TO {confidence, rationale}` per unmatched target skill | `judge.py` | [2-architecture.md §4](2-architecture.md) | ✅ Built |
-| Confidence gate | Human review of uncertain judgments, overrides | — | [2-architecture.md §5](2-architecture.md) | ⏳ Milestone 4 |
-| Gap ranking | Rank gaps by JD weight, transferability-aware | — | [2-architecture.md §6](2-architecture.md) | ⏳ Milestone 5 |
-| Project synthesis | Grounded standalone project ideas per gap | — | [2-architecture.md §7](2-architecture.md) | ⏳ Milestone 5 |
-| Output node | Ranked markdown plan + graph persistence | — | [2-architecture.md §8](2-architecture.md) | ⏳ Milestone 5 |
+| Confidence gate | Self-assessment review (depth + intent) of uncertain verdicts | `gate.py` | [2-architecture.md §5](2-architecture.md) | ✅ Built + validated |
+| Alternative groups | Any-of capability categories (cloud platforms, DL frameworks, ...) demote satisfied brands | `requirements.py` | [2-architecture.md §6](2-architecture.md) | ✅ Built |
+| Gap ranking | Rank gaps by JD weight, transferability-aware | `ranking.py` | [2-architecture.md §6](2-architecture.md) | ✅ Built |
+| Project synthesis | Grounded standalone project ideas per gap | `synthesis.py` | [2-architecture.md §7](2-architecture.md) | ✅ Built |
+| Output node | Ranked markdown plan + graph persistence | `output.py` | [2-architecture.md §8](2-architecture.md) | ✅ Built |
 | LangGraph wiring | Orchestrate nodes with the conditional gate as a real branch | — | [3-decisions.md](3-decisions.md) | ⏳ Milestone 4–5 |
 
 ## Data Flow at a Glance
@@ -94,9 +100,8 @@ PERSISTED: output/graph.json (whole graph), output/judge_report.json,
 
 ```
 skill-gap-agent/
-├── README.md                  ← project entry point
-├── skill-gap-agent-spec.md    ← original full spec (v1 vision)
-├── specs/                     ← you are here
+├── README.md                  ← project entry point (user quickstart + case study)
+├── specs/                     ← you are here (numbered by reading order)
 ├── data/                      ← seed data (gitignored)
 │   ├── skillsdataset.json
 │   └── jds/                   ← 13 JD texts
@@ -106,19 +111,28 @@ skill-gap-agent/
 │   ├── ingest.py              ← CORE: ingestion + target-ingestion nodes
 │   ├── implied.py             ← CORE: implied-skill detection + proposal flow
 │   ├── taxonomy.py            ← CORE: ESCO loader with fallback
-│   ├── llm.py                 ← CORE: provider-agnostic LLM interface
+│   ├── llm.py                 ← CORE: provider-agnostic LLM interface (DeepSeek via OpenRouter)
 │   ├── judge.py               ← CORE: transferability judge node
-│   ├── cli.py                 ← entry point (pipeline wiring lands M4–5)
+│   ├── gate.py                ← CORE: confidence gate (self-assessment: depth + intent)
+│   ├── ranking.py             ← CORE: transferability-aware gap ranking
+│   ├── requirements.py        ← CORE: alternative-skill groups (any-of semantics)
+│   ├── synthesis.py           ← CORE: grounded project synthesis
+│   ├── output.py              ← CORE: plan.md renderer (with JD traceability)
+│   ├── cli.py                 ← entry point (pipeline wiring into LangGraph pending)
+│   ├── m5_plan.py             ← full-pipeline runner (current primary entry)
+│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
+│   ├── m3_judge.py            ← milestone-3 runner (scaffolding)
 │   ├── m2_check.py            ← milestone-2 verification script (scaffolding)
-│   ├── m3_judge.py            ← milestone-3 runner (scaffolding → becomes CLI)
 │   └── smoke_test.py          ← milestone-1 schema test (scaffolding)
-├── output/                    ← pipeline artifacts (gitignored)
+├── output/                    ← pipeline artifacts (gitignored): plan.md, graph.json,
+│                                 judge_report.json, gate_overrides.json, implied_skills.json
 └── .env                       ← API keys (gitignored; see .env.example)
 ```
 
-**Scaffolding note:** `m2_check.py` / `m3_judge.py` / `smoke_test.py` are
-milestone verification scripts. They will be superseded by the real CLI
-(`cli.py`) once LangGraph wiring lands in milestones 4–5.
+**Scaffolding note:** the `m*_*.py` runners are milestone scripts; `m5_plan.py`
+is the current full-pipeline entry. The LangGraph wiring (`cli.py`) that turns
+the sequential node calls into a real conditional graph is the main remaining
+architecture item — see [7-open-items.md](7-open-items.md).
 
 ## Where to Go Next
 

@@ -2,13 +2,25 @@
 
 Unresolved items that don't block starting.
 
-- **Confidence-gate threshold + scope** (for milestone 4) — full-run judge
-  confidences cluster high (top-edge min 0.65, mean 0.84) because the pruner
-  now surfaces many candidates per skill. A 0.5 threshold would flag nothing.
-  Decide: threshold (~0.7–0.75?) and scope (review top edge per target skill
-  vs. all edges above threshold). Validate against the Databricks-style case.
-- **Alias table contents** for normalization — seeded (~130 entries) from the
-  manual session's merge decisions; extend as new surface forms appear.
+- **Mention-modality classification (LLM pass)** — honest limitation of
+  alternative groups (`requirements.py`): v1 cannot automatically classify
+  each JD mention's modality ("such as LangChain, ..." = exemplar/any-of vs.
+  "must have production experience with LangChain" = strict/all-of). The
+  per-group mention policy (any-of vs. specific) is a hand-set approximation
+  of what JDs typically do. A future LLM pass could classify modality per
+  mention per JD and feed per-JD satisfaction into ranking — the proper fix,
+  deferred until the hand-set policies visibly misfire.
+- **Proficiency data upstream** — the skills JSON's own `self_assessment_flags`
+  note suggests a future `skills_dataset_v2_rated.json` layering
+  proficiency/recency per skill. If that file exists, the gate's depth
+  question can pre-fill from it (and the judge prompt could use it too).
+- **Judge score calibration** — full-run top confidences cluster high (min
+  0.65, mean 0.84); the depth-factor multiplication from the gate partially
+  compensates. If gap ranking still can't separate full gaps from bridges,
+  consider re-prompting the judge with a stricter calibration rubric.
+- **Alias table contents** for normalization — seeded (~130 entries) from
+  merge decisions made while validating against the seed data; extend as new
+  surface forms appear.
 - **Canonical-term extraction strategy** — implemented in `normalize.py`
   (regex parenthetical/bracket stripping + generic-label colon handling +
   alias table). LLM fallback not needed so far; revisit only if extraction
