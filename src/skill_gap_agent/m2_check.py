@@ -7,7 +7,6 @@ Run: python -m skill_gap_agent.m2_check
 from __future__ import annotations
 
 import sys
-from collections import Counter
 from pathlib import Path
 
 from .ingest import build_seed_graph

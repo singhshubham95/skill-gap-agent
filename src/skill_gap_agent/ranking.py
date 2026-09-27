@@ -1,4 +1,4 @@
-"""Gap ranking (milestone 5, specs/2-architecture.md #6).
+"""Gap ranking (milestone 5, specs/13-gap-measurer.md S5).
 
 Transferability-aware ranking: for each target skill (gap candidate), combine
 JD demand (REQUIRES weight) with the gate-adjusted transfer confidence from

@@ -10,10 +10,11 @@ so re-runs don't re-ask.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .normalize import ALIASES, canonical_term
+from .normalize import canonical_term
 
 # Canonical skill -> evidence patterns (case-insensitive) that indicate the
 # skill is being *used* inside a phrase about something else.
@@ -75,6 +76,7 @@ IMPLY_PATTERNS: dict[str, list[str]] = {
     "Word2Vec": [r"word2vec"],
     "ONNX": [r"\bonnx\b"],
     "GCP Composer": [r"cloud\s+composer", r"\bgcp\s+composer\b"],
+    "GKE": [r"\bgke\b", r"kubernetes\s+engine"],
     "Cloud SQL": [r"cloud\s+sql"],
     "IAM": [r"\biam\b"],
     "Secret Manager": [r"secret\s+manager"],
@@ -86,7 +88,6 @@ IMPLY_PATTERNS: dict[str, list[str]] = {
     "Weights & Biases": [r"weights\s*&\s*biases", r"\bwandb\b"],
     "Git": [r"\bgit\b(?!hub|lab)"],
     "Azure DevOps": [r"azure\s+devops"],
-    "Cloud SQL": [r"cloud\s+sql"],
     "GCP Dataproc": [r"\bdataproc\b"],
     "Vertex AI": [r"vertex\s+ai"],
     "SAP IBP": [r"\bsap\s+ibp\b"],
@@ -102,7 +103,6 @@ IMPLY_PATTERNS: dict[str, list[str]] = {
     "Trusted Execution Environments": [r"trusted\s+execution", r"\btee\b"],
     "Secure Multi-Party Computation": [r"multi[- ]party\s+computation", r"\bmpc\b"],
     "SARIMAX": [r"\bsarimax\b"],
-    "XGBoost": [r"\bxgboost\b"],
 }
 
 # Phrases that are pure credentials — never evidence of skill use.
@@ -150,17 +150,23 @@ def detect_implied(
     return sorted(found.values(), key=lambda i: i.skill)
 
 
+AskFn = Callable[[str], str]
+
+
 def propose_implied(
     implied: list[ImpliedSkill],
     approvals_path: str | Path = Path("output/implied_skills.json"),
     auto_accept: bool = False,
+    ask_fn: AskFn | None = None,
 ) -> set[str]:
     """Interactive proposal flow: show evidence, ask y/n/a per skill.
 
     Previously approved skills are auto-included; previously rejected are
     auto-skipped. 'a' accepts all remaining. Returns the accepted skill set.
+    ask_fn lets a caller (e.g. the LangGraph runner) route the prompt through
+    interrupt()/resume instead of blocking stdin; defaults to input().
     """
-    import re
+    ask = ask_fn or input
 
     path = Path(approvals_path)
     saved: dict[str, bool] = {}
@@ -180,7 +186,7 @@ def propose_implied(
             accepted.add(item.skill)
             continue
         while True:
-            ans = input(
+            ans = ask(
                 f"  '{item.evidence[:70]}'\n    implies [{item.skill}] — add? [y/n/a]: "
             ).strip().lower()
             if ans in ("y", "n", "a"):

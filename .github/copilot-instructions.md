@@ -18,6 +18,19 @@ read in order) is the source of truth for everything the system is and does —
 start at `specs/1-system-overview.md` for the component map and current
 state, and follow its links rather than relying on details memorized here.
 
+## Communication with the user
+
+- The user is a **beginner in LangGraph, graph databases, and ML
+  engineering**. Never assume framework internals are known — when a point
+  depends on how LangGraph (or any library) behaves, briefly explain that
+  behavior in plain language first, then apply it to the project.
+- **Keep the details, add the context.** Do not simplify away technical
+  specifics; instead, precede each non-obvious point with enough background
+  (what the thing is, why it matters here) that a newcomer can follow.
+- Prefer concrete examples from this repo's own code/data over abstract
+  phrasing. Avoid dense jargon-only paragraphs; if a paragraph needs
+  unpacking, break it into a short explanation followed by the implication.
+
 ## Spec-first workflow
 
 - `specs/` is the source of truth. Design or change design **in the spec
@@ -35,7 +48,7 @@ The specs are **living target-state documents**, not per-version snapshots:
    item is labeled one of: **Built** (code exists, validated — cite the
    milestone), **Designed** (specified for an upcoming milestone, no code
    yet), or **Deferred** (known trade-off, restore trigger recorded in
-   `6-deferred-enhancements.md`). Never describe a not-yet-built thing in
+   `5-milestones.md` §Deferred). Never describe a not-yet-built thing in
    language that implies it exists; a contributor must be able to trust that
    present-tense descriptions match the code.
 2. **Evolve in place; never version-split.** Do not create `specs/v2/` or
@@ -52,6 +65,16 @@ The specs are **living target-state documents**, not per-version snapshots:
 5. **No stale references.** Specs and README must only reference files,
    modules, and artifacts that exist in the repo. If you delete or rename an
    artifact, grep the docs for it in the same change.
+6. **Component specs are per-stage (S1–S7), eager.** Each pipeline stage owns
+   one spec file (`specs/9-reader.md` through `specs/15-flow-runner.md`;
+   functional names are indexed in `specs/1-system-overview.md`). Component
+   files own mechanics + status only. History stays single-source: decisions
+   in `3-decisions.md`, build order + learnings + trade-offs + open
+   questions in `5-milestones.md` (§§Deferred/Open hold the rest) —
+   component files link by ID (milestone number, decision row, item bullet)
+   and never copy that text. Status markers in component files are derived
+   from the milestone entry, never set independently. Cross-stage design
+   (M9 intake + validation, graph schema) lives in `1-system-overview.md`.
 
 ## Code conventions
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .graph import JD, Project, Skill, SkillGraph, SkillSource
+from .graph import Project, Skill, SkillGraph, SkillSource
 from .seed import load_jds, load_skills_json
 
 

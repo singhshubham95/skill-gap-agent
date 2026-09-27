@@ -1,15 +1,22 @@
 # System Overview
 
 The top-down view of the Skill-Gap Agent: what the system is, its layers and
-components, where each lives in code, and how data flows through. Deep detail
-lives in [2-architecture.md](2-architecture.md); this page is the map.
+components, where each lives in code, and how data flows through. This page
+is the map **and** the deep-design home for cross-stage concerns (M9 intake
++ validation design, graph schema reference below). Per-stage mechanics live
+in S1–S7 (`9-reader.md` through `15-flow-runner.md`); this page's Stage Table
+routes to them. (Folded from `2-architecture.md`, 2026-09-27 — that file's
+stage stubs duplicated the S-files, so only the M9 design + schema survived
+the merge.)
 
-**Status: v1 built and validated** (M1–M6) **; v2 designed** (M7–M9).
+**Status: v1 built and validated** (M1–M6) **; M7–M8 built; M9–M11 designed**
+(GFI-first order: M10 → M11 → M9, then the extension shell).
 All pipeline stages are built and validated against a sealed hand-performed
-gap analysis of the same data ([4-validation.md](4-validation.md)); results
-in the README case study. The v2 target adds conversational intake, resume
-(PDF/DOCX) ingestion, evidence-backed skill validation, and true LangGraph
-orchestration — components marked 🎯 Designed below.
+gap analysis of the same data (rubric in S5 `13-gap-measurer.md`
+§Validation rubric); results in the README case study. The target adds
+conversational intake, resume (PDF/DOCX) ingestion, evidence-backed skill
+validation, and true LangGraph orchestration — components marked 🎯 Designed
+below.
 
 This is a **living target-state document**: it describes the full system we
 are building (current end goal = v2), with every component labeled Built
@@ -25,14 +32,14 @@ state (user-approved), scores how much existing skills transfer to missing
 ones (LLM judge), gates uncertain judgments through a human-in-the-loop
 prompt, ranks gaps by JD frequency, and outputs a ranked plan of grounded
 learning projects. Validated against a sealed hand-performed gap analysis of
-the same data ([4-validation.md](4-validation.md)).
+the same data (rubric in S5 `13-gap-measurer.md` §Validation rubric).
 
-**v2 target additions:** users converse with the agent instead of preparing
+**Target additions:** users converse with the agent instead of preparing
 input files — they hand over a resume (PDF/DOCX) or skills JSON, the agent
 extracts skills via one LLM call, validates the depth of ranking-relevant
 skills through calibration questions (not a test), and the whole pipeline
 runs as a true LangGraph graph with `interrupt()`-based human-in-the-loop
-steps (designed in [2-architecture.md](2-architecture.md) §9–§12).
+steps (M9 design in §M9 design below).
 
 ## Layered Component Map
 
@@ -70,27 +77,25 @@ flowchart TB
     ING & TING & JUD & GATE & RANK & SYNTH & OUT --- GRAPH
 ```
 
-## Component Table
+## Stage Table (router — mechanics live in the S-files)
 
-| Component | Purpose | Code | Spec | Status |
+| Stage | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
-| Graph schema | `SkillGraph`: nodes/edges, queries, JSON round-trip | `src/skill_gap_agent/graph.py` | [2-architecture.md §Graph Schema](2-architecture.md) | ✅ Built |
-| Normalization | Canonical terms + alias resolution | `src/skill_gap_agent/normalize.py` | [2-architecture.md §3](2-architecture.md) | ✅ Built |
-| Ingestion node | Skills JSON → `Skill` nodes + `HAS_SKILL` | `ingest.py::ingest_skills_json` | [2-architecture.md §1](2-architecture.md) | ✅ Built |
-| Implied-skill flow | Detect CV-implied skills, propose with evidence, persist approvals | `implied.py` | [2-architecture.md §1](2-architecture.md) | ✅ Built |
-| Target-ingestion node | JD texts → target skills + weighted `REQUIRES` | `ingest.py::ingest_jds` | [2-architecture.md §2](2-architecture.md) | ✅ Built |
-| Skill taxonomy | ESCO loader, graceful fallback to built-in tables | `taxonomy.py` | [2-architecture.md §3](2-architecture.md) | ✅ Built (data file pending) |
-| LLM interface | Provider-agnostic `judge()`/`chat()`, JSON-out with retries | `llm.py` | [3-decisions.md](3-decisions.md) | ✅ Built |
-| Transferability judge | Score `TRANSFERS_TO {confidence, rationale}` per unmatched target skill | `judge.py` | [2-architecture.md §4](2-architecture.md) | ✅ Built |
-| Confidence gate | Self-assessment review (depth + intent) of uncertain verdicts | `gate.py` | [2-architecture.md §5](2-architecture.md) | ✅ Built + validated |
-| Alternative groups | Any-of capability categories (cloud platforms, DL frameworks, ...) demote satisfied brands | `requirements.py` | [2-architecture.md §6](2-architecture.md) | ✅ Built |
-| Gap ranking | Rank gaps by JD weight, transferability-aware | `ranking.py` | [2-architecture.md §6](2-architecture.md) | ✅ Built |
-| Project synthesis | Grounded standalone project ideas per gap | `synthesis.py` | [2-architecture.md §7](2-architecture.md) | ✅ Built |
-| Output node | Ranked markdown plan + graph persistence | `output.py` | [2-architecture.md §8](2-architecture.md) | ✅ Built |
-| LangGraph orchestration | Nodes wired as a real graph; conditional gate as a branch; `interrupt()` + checkpointer replace stdin loops | `cli.py` (scaffold exists) | [2-architecture.md §9](2-architecture.md) | 🎯 Designed (M7) |
-| Resume ingestion | PDF/DOCX → text → one LLM extraction call → skills-JSON shape; regex fallback | new `resume.py` | [2-architecture.md §10](2-architecture.md) | 🎯 Designed (M8) |
-| Conversational intake | Chat agent collects evidence (resume / JSON / JDs), pre-fills gate questions | new `intake.py` | [2-architecture.md §11](2-architecture.md) | 🎯 Designed (M9) |
-| Skill validation | Concept-check + applied-question calibration of triaged skills → proficiency evidence | new `validate.py` | [2-architecture.md §12](2-architecture.md) | 🎯 Designed (M9) |
+| S1 reader | Raw text capture (resume + JDs), no AI | `resume.py`, `ingest.py` file loop | [9-reader.md](9-reader.md) | ✅ Built (M2 JSON/TXT; M8 PDF/DOCX) |
+| S2 AI caller | Single LLM door (`judge`/`chat`), keyring secrets | `llm.py`, `secrets.py` | [10-ai-caller.md](10-ai-caller.md) | ✅ Built (M3) |
+| S3 skill map | Graph store: schema + queries, JSON round-trip | `graph.py` | [11-skill-map.md](11-skill-map.md) | ✅ Built (M1) |
+| S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [12-skill-cleaner.md](12-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
+| S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [13-gap-measurer.md](13-gap-measurer.md) | ✅ Built (M3–M6) |
+| S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [14-practice-planner.md](14-practice-planner.md) | ✅ Built (M5); 🎯 OSS (M10) |
+| S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML/extension screens | `cli.py`, `m5_plan.py` | [15-flow-runner.md](15-flow-runner.md) | ✅ Built (M7–M8); 🎯 UI (M11) |
+
+## Pipeline (stage order = data flow)
+
+```
+resume / skills JSON ──▶ S1 reader ──┐
+                                     ├──▶ S4 cleaner ──▶ S5 measurer ──▶ S6 planner ──▶ S7 screen
+JD texts ────────────▶ S1 reader ────┘         (S2 AI caller + S3 map serve all)
+```
 
 ## Data Flow at a Glance
 
@@ -114,11 +119,87 @@ PERSISTED: output/graph.json (whole graph), output/judge_report.json,
            output/implied_skills.json (approval record)
 ```
 
-**v2 target flow (M7–M9):** the IN edge becomes conversational — resume
+**Target flow (M7–M9):** the IN edge becomes conversational — resume
 PDF/DOCX or skills JSON → LLM extraction → skill validation on triaged
 skills → proficiency evidence feeds the gate (which shrinks to unvalidated
 skills) — and the whole flow runs as a LangGraph graph with `interrupt()`
 at the human-in-the-loop points.
+
+## §M9 design — conversational intake + skill validation (folded from `2-architecture.md` §§11–12, still Designed)
+
+**Conversational intake.** A tool-calling chat agent fills a `UserProfile`
+state slot: collects the resume (PDF/DOCX) or skills JSON, collects JD
+texts, asks clarifying questions. Key synergy: the gate's depth/intent
+questions can be asked conversationally during intake, collapsing two
+interaction points into one conversation segment.
+
+**Skill validation** — evidence-backed proficiency instead of trusting
+resume claims. Resumes inflate; self-ratings inflate more; the agent
+*elicits* depth through calibration questions. **Framing: calibration, not
+a test** — the tool exists to build the user's own learning plan, so no
+anti-cheat is needed, only honest framing.
+- **Triage (mandatory).** Quizzing every skill is an interrogation. Only
+  ranking-relevant skills are validated: high JD `weight`, skills that are
+  top-transfer *sources* (their depth drives the confidence
+  multiplication), gate-flagged skills. Cap ~10–15 questions total;
+  explicitly skippable ("just use my resume as-is" → resume-claim
+  fallback).
+- **Tiered protocol per triaged skill** (adaptive stop, LangGraph
+  subgraph: `generate_question → interrupt → grade → route`):
+  1. **Concept checklist** — yes/no on ~4–6 sub-concepts. Cheapest to
+     generate reliably and fastest to answer; per-concept granularity
+     makes the *pattern* of yesses informative even if individual
+     answers inflate.
+  2. **One applied question** on a concept the user claimed — "walk me
+     through how you'd deduplicate near-identical customer records in
+     SQL" — graded by one LLM call against a hidden rubric. Applied
+     over trivia: tests capability, and the user's own answer is stored
+     as evidence.
+  3. **Optional follow-up probe** — only if tier 2 is strong.
+  Route: strong → stop or escalate once; vague → downshift and stop.
+  Max 2–3 turns per skill.
+- **Question authoring & leakage control.** Questions + hidden rubric
+  are co-generated in one LLM call (rubric never shown). A mechanical
+  string-overlap check between question text and rubric technique names
+  catches answer leakage (same spirit as the judge's keyword pruner).
+  Authoring is offline and cached, so the full question set is
+  reviewable before any user sees it; obscure skills degrade gracefully
+  to the self-report tier.
+- **Persistence & consumers.** Grades map to the gate's 1–5 depth scale
+  and persist to `output/proficiency.json` (same override pattern as
+  `gate_overrides.json`); question cache keyed by skill. Consumers:
+  (a) the gate's depth question is pre-filled for validated skills —
+  the gate shrinks to unvalidated skills only (an explicit, intended
+  outcome, not gate redundancy); (b) the judge prompt gains proficiency
+  context ("user has SQL at working depth, not expert") for better
+  transfer scores.
+- **Semantics of a "no".** A failed concept lowers the *skill's* depth
+  factor (nudge, never hard-reject — a soft signal modulates
+  confidence, it does not remove a skill from the profile). Concept-level
+  micro-gaps ("learn window functions" as a plan item) are a recorded
+  future idea, not v2 scope.
+
+## Graph Schema (store-agnostic — same shape later in Neo4j; folded from `2-architecture.md`)
+
+**Nodes**
+
+| Label | Key properties |
+|---|---|
+| `Skill` | `name`, `category`, `source` (`current`\|`target`) |
+| `JD` | `title`, `company` |
+| `Project` | `title`, `description`, `type` (`standalone` in v1; `oss_issue` in M10) |
+
+**Edges**
+
+| Type | From → To | Properties | Written by |
+|---|---|---|---|
+| `HAS_SKILL` | User (implicit) → `Skill` | — | Ingestion node |
+| `REQUIRES` | `JD` → `Skill` | `weight` (frequency across JDs) | Target-ingestion node |
+| `TRANSFERS_TO` | `Skill` → `Skill` | `confidence` (0–1), `rationale` (short LLM text) | Transferability-judge node |
+| `CLOSES_GAP` | `Project` → `Skill` | — | Output node |
+
+`TRANSFERS_TO` is directional in v1 (see roadmap `5-milestones.md`
+§Deferred #9).
 
 ## Repo Map
 
@@ -133,8 +214,8 @@ skill-gap-agent/
 │   ├── graph.py               ← CORE: schema + queries (the system's backbone)
 │   ├── normalize.py           ← CORE: canonical terms + aliases
 │   ├── ingest.py              ← CORE: ingestion + target-ingestion nodes
-│   ├── implied.py             ← CORE: implied-skill detection + proposal flow
-│   ├── taxonomy.py            ← CORE: ESCO loader with fallback
+│   ├── implied.py             ← CORE: implied-skill detection + proposal flow   ├── resume.py              ← M8: resume (PDF/DOCX/TXT) → skills JSON
+   ├── vocab_bridge.py        ← M8: LLM-assisted vocabulary bridge (merge-or-new)│   ├── taxonomy.py            ← CORE: ESCO loader with fallback
 │   ├── llm.py                 ← CORE: provider-agnostic LLM interface (DeepSeek via OpenRouter)
 │   ├── judge.py               ← CORE: transferability judge node
 │   ├── gate.py                ← CORE: confidence gate (self-assessment: depth + intent)
@@ -142,9 +223,9 @@ skill-gap-agent/
 │   ├── requirements.py        ← CORE: alternative-skill groups (any-of semantics)
 │   ├── synthesis.py           ← CORE: grounded project synthesis
 │   ├── output.py              ← CORE: plan.md renderer (with JD traceability)
-│   ├── cli.py                 ← entry point (pipeline wiring into LangGraph pending)
-│   ├── m5_plan.py             ← full-pipeline runner (current primary entry)
-│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
+   ├── cli.py                 ← LangGraph runner (M7): graph wiring + interrupt/resume loop
+   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)
+   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
 │   ├── m3_judge.py            ← milestone-3 runner (scaffolding)
 │   ├── m2_check.py            ← milestone-2 verification script (scaffolding)
 │   └── smoke_test.py          ← milestone-1 schema test (scaffolding)
@@ -153,12 +234,10 @@ skill-gap-agent/
 └── .env                       ← API keys (gitignored; see .env.example)
 ```
 
-**Scaffolding note:** the `m*_*.py` runners are milestone scripts; `m5_plan.py`
-is the current full-pipeline entry. The LangGraph wiring (`cli.py`) that turns
-the sequential node calls into a real conditional graph is milestone M7 —
-designed in [2-architecture.md §9](2-architecture.md). The v2 modules
-(`resume.py`, `intake.py`, `validate.py`) do not exist yet; creating them is
-milestones M8–M9.
+**Scaffolding note:** the `m*_*.py` runners are milestone scripts. Entries:
+`m5_plan.py` (v1 sequential runner), `cli.py` (the M7 LangGraph runner — the
+primary entry, accepts resume files as of M8). The v2 modules (`intake.py`,
+`validate.py`) do not exist yet; creating them is milestone M9.
 
 ## Conventions & Guardrails
 
@@ -182,9 +261,8 @@ accurate (workflow rules live in
 
 ## Where to Go Next
 
-- **Deep design detail:** [2-architecture.md](2-architecture.md)
 - **Why these choices:** [3-decisions.md](3-decisions.md)
-- **Build order + progress:** [5-milestones.md](5-milestones.md)
-- **What "done" means:** [4-validation.md](4-validation.md)
-- **Trade-offs made:** [6-deferred-enhancements.md](6-deferred-enhancements.md)
-- **Open questions:** [7-open-items.md](7-open-items.md)
+- **Build order + progress + trade-offs + open questions:** [5-milestones.md](5-milestones.md) (roadmap — §§Deferred/Open hold the rest)
+- **Stage mechanics:** S1–S7 files (`9-reader.md` … `15-flow-runner.md`), routed via the Stage Table above
+- **Validation rubric:** S5 [13-gap-measurer.md](13-gap-measurer.md) §Validation rubric
+- **Extension end goal:** S6 [14-practice-planner.md](14-practice-planner.md) §End goal

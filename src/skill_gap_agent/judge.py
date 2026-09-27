@@ -114,7 +114,6 @@ def prune_candidates(
     picked = [c for _, c in scored[:k]]
 
     # Hint-matched candidates: always include (dedup)
-    low = target.lower()
     for pattern in PRUNER_HINTS.get(target, []):
         for c in current_skills:
             if c not in picked and _re.search(pattern, c.lower()):

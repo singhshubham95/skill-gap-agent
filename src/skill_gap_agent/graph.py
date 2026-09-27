@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 from enum import Enum
 
-from pydantic import BaseModel, Field
 import networkx as nx
+from pydantic import BaseModel
 
 
 class SkillSource(str, Enum):
@@ -165,7 +165,7 @@ class SkillGraph:
             json.dump(data, f, indent=2)
 
     @classmethod
-    def load(cls, path: str) -> "SkillGraph":
+    def load(cls, path: str) -> SkillGraph:
         from networkx.readwrite import json_graph
 
         with open(path, encoding="utf-8") as f:

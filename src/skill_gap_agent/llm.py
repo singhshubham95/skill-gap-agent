@@ -11,17 +11,11 @@ v1 primary: GLM 5.3 Flash (Z.ai open-platform API, OpenAI-compatible endpoint).
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
-# .env lives at repo root; load_dotenv searches CWD upward, but be explicit so
-# the module works from any working directory.
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+from .secrets import get_secret
 
 # OpenAI-compatible endpoints. Primary: DeepSeek V4 Flash via OpenRouter
 # (284B MoE / 13B active — strong reasoning at ~$0.035/M input, $0.106/M output).
@@ -69,11 +63,11 @@ def _client(cfg: LLMConfig):
     p = PROVIDERS.get(cfg.provider)
     if p is None:
         raise LLMError(f"Unknown provider: {cfg.provider}")
-    key = os.getenv(p["key_env"])
+    key = get_secret(p["key_env"])
     if not key or key == "your-key-here":
         raise LLMError(
-            f"Missing API key: set {p['key_env']} in .env "
-            f"(see .env.example)"
+            f"Missing API key: set {p['key_env']} via the OS keyring "
+            f"(keyring.set_password('skill-gap-agent', '{p['key_env']}', ...))"
         )
     return OpenAI(base_url=p["base_url"], api_key=key), p
 
@@ -106,8 +100,7 @@ def _extract_json(text: str) -> Any:
     text = text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
+        text = text.removeprefix("json")
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
         raise LLMError(f"No JSON object in response: {text[:200]!r}")

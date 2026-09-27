@@ -1,4 +1,4 @@
-"""LLM project synthesis (milestone 5, specs/2-architecture.md #7).
+"""LLM project synthesis (milestone 5, specs/14-practice-planner.md S6).
 
 Per gap, generate standalone project ideas grounded in the user's EXISTING
 skills — the synthesis prompt receives the gap plus its top TRANSFERS_TO edges
@@ -11,7 +11,7 @@ Writes Project nodes + CLOSES_GAP edges back to the graph.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .graph import Project, SkillGraph

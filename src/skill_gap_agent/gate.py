@@ -1,4 +1,4 @@
-"""Confidence gate (milestone 4, specs/2-architecture.md #5).
+"""Confidence gate (milestone 4, specs/13-gap-measurer.md S5).
 
 Human-in-the-loop review of the judge's uncertain verdicts — redesigned after
 user feedback. Design principle: the user lacks the target skill by definition,
@@ -19,10 +19,13 @@ Decisions persist to output/gate_overrides.json; applied silently on re-runs.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .graph import SkillGraph
+
+AskFn = Callable[[str], str]
 
 DEFAULT_THRESHOLD = 0.75
 DEFAULT_OVERRIDES_PATH = Path("output/gate_overrides.json")
@@ -106,12 +109,16 @@ def review_targets(
     threshold: float = DEFAULT_THRESHOLD,
     overrides_path: str | Path = DEFAULT_OVERRIDES_PATH,
     auto: bool = False,
+    ask_fn: AskFn | None = None,
 ) -> list[GateDecision]:
     """Review the top TRANSFERS_TO edge of each sub-threshold target skill.
 
     Asks self-assessment (depth + intent), not score correction. Persisted
     decisions are applied silently. Returns all decisions.
+    ask_fn lets a caller (e.g. the LangGraph runner) route prompts through
+    interrupt()/resume instead of blocking stdin; defaults to input().
     """
+    ask = ask_fn or input
     weights = sg.requires_weights()
     saved = load_overrides(overrides_path)
     decisions: list[GateDecision] = []
@@ -157,7 +164,9 @@ def review_targets(
 
         # Q1: depth of experience with the SOURCE skill
         while True:
-            ans = input(f"    Your real depth with '{src_bare}' [1-5, s=skip]: ").strip().lower()
+            ans = ask(
+                f"    Your real depth with '{src_bare}' [1-5, s=skip]: "
+            ).strip().lower()
             if ans in DEPTH_FACTORS or ans == "s":
                 break
         if ans == "s":
@@ -168,8 +177,10 @@ def review_targets(
 
         # Q2: intent — count this skill area toward the profile?
         while True:
-            intent = input(f"    Count '{target}' as a skill area you want? "
-                           "[y=count toward profile / n=explicit gap]: ").strip().lower()
+            intent = ask(
+                f"    Count '{target}' as a skill area you want? "
+                "[y=count toward profile / n=explicit gap]: "
+            ).strip().lower()
             if intent in ("y", "n"):
                 break
 

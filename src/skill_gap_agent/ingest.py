@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 
 from .graph import JD, Skill, SkillGraph, SkillSource
-from .normalize import canonical_term, normalize_name
+from .normalize import canonical_term
 
 # ---------------------------------------------------------------------------
 # Ingestion (current skills)
@@ -29,6 +29,7 @@ def ingest_skills_json(
     taxonomy=None,
     approvals_path: str | Path = Path("output/implied_skills.json"),
     auto_accept_implied: bool = False,
+    ask_fn=None,
 ) -> dict[str, int]:
     """Parse skills JSON -> canonical Skill nodes + HAS_SKILL edges.
 
@@ -68,7 +69,10 @@ def ingest_skills_json(
 
     implied = detect_implied([r for r, _ in raw_phrases], set(seen.values()), taxonomy)
     accepted = propose_implied(
-        implied, approvals_path=approvals_path, auto_accept=auto_accept_implied
+        implied,
+        approvals_path=approvals_path,
+        auto_accept=auto_accept_implied,
+        ask_fn=ask_fn,
     )
     for skill in sorted(accepted):
         if not sg.g.has_node(f"skill:{skill}"):
@@ -182,13 +186,18 @@ def build_seed_graph(
     jd_dir: str | Path,
     taxonomy=None,
     auto_accept_implied: bool = False,
+    ask_fn=None,
 ) -> tuple[SkillGraph, dict]:
     """Full milestone-2 build: ingest skills + JDs into one graph."""
     sg = SkillGraph()
     stats = {}
     stats.update(
         ingest_skills_json(
-            sg, skills_path, taxonomy=taxonomy, auto_accept_implied=auto_accept_implied
+            sg,
+            skills_path,
+            taxonomy=taxonomy,
+            auto_accept_implied=auto_accept_implied,
+            ask_fn=ask_fn,
         )
     )
     jd_stats = ingest_jds(sg, jd_dir)

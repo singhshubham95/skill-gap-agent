@@ -20,8 +20,9 @@ key (default model: DeepSeek V4 Flash — a full run costs well under a cent).
 python -m venv .venv
 .\.venv\Scripts\pip install -e ".[dev]"
 
-# 2. Add your key
-copy .env.example .env   # then edit .env: OPENROUTER_API_KEY=...
+# 2. Add your key (stored in the OS keyring — Windows Credential Manager /
+#    macOS Keychain — never in a file inside the repo)
+.\.venv\Scripts\python -c "from skill_gap_agent.secrets import set_secret; set_secret('OPENROUTER_API_KEY', 'sk-or-YOUR-KEY')"
 
 # 3. Add your data (see data/README.md for expected formats)
 #    - data/skills.json       (your skills dump)
@@ -50,13 +51,13 @@ persist in `output/`, so re-runs only ask about what changed.
 | Human gate on ambiguous verdicts (depth + intent, persisted) | Neo4j persistence (v1 is networkx + JSON) |
 | Ranked plan with JD traceability + grounded projects | GitHub good-first-issue sourcing |
 
-Full trade-off list with restore triggers: [specs/6-deferred-enhancements.md](specs/6-deferred-enhancements.md).
+Full trade-off list with restore triggers: [specs/5-milestones.md](specs/5-milestones.md) §Deferred.
 
-**Roadmap (designed, not yet built):** the next milestones (M7–M9) add true
-LangGraph orchestration with resumable human-in-the-loop steps, resume
-PDF/DOCX ingestion, a conversational intake agent, and evidence-backed skill
-validation (calibration questions instead of trusting resume claims). Design
-detail in [specs/2-architecture.md](specs/2-architecture.md) §9–§12 and
+**Roadmap (M7–M8 built; M9–M11 designed):** LangGraph orchestration with
+resumable human-in-the-loop steps and resume PDF/DOCX ingestion are built;
+next are GFI issue sourcing (M10), minimal local UI (M11), then
+conversational intake + evidence-backed skill validation (M9) and the
+extension shell. Design detail in [specs/1-system-overview.md](specs/1-system-overview.md) §M9 design and
 [specs/5-milestones.md](specs/5-milestones.md).
 
 ## For contributors
@@ -64,19 +65,17 @@ detail in [specs/2-architecture.md](specs/2-architecture.md) §9–§12 and
 The specs are the onboarding path — they document not just the design but the
 *reasoning* behind every decision, including revisions made during building:
 
-1. [specs/1-system-overview.md](specs/1-system-overview.md) — layered component map, component↔code table, data flow, repo map (which files are core vs. milestone scaffolding)
-2. [specs/2-architecture.md](specs/2-architecture.md) — each pipeline component's mechanics, graph schema, and the non-obvious design rules (alternative groups, gate semantics)
-3. [specs/3-decisions.md](specs/3-decisions.md) — locked decisions, append-only, with rationale (including decisions that were *revised* and why)
-4. [specs/5-milestones.md](specs/5-milestones.md) — build order with what was learned at each step
-5. [specs/6-deferred-enhancements.md](specs/6-deferred-enhancements.md) — what was traded off and what would trigger restoring it
-6. [specs/7-open-items.md](specs/7-open-items.md) — known limitations and candidate next steps
+1. [specs/1-system-overview.md](specs/1-system-overview.md) — stage map, stage↔code table, data flow, repo map, M9 design, graph schema (start here)
+2. [specs/3-decisions.md](specs/3-decisions.md) — locked decisions, append-only, with rationale (including decisions that were *revised* and why)
+3. [specs/5-milestones.md](specs/5-milestones.md) — roadmap: build order + learnings + deferred trade-offs + open questions
+4. S1–S7 stage files ([specs/9-reader.md](specs/9-reader.md) … [specs/15-flow-runner.md](specs/15-flow-runner.md)) — per-stage mechanics + status
 
 Conventions: specs are numbered by reading order and are **living
 target-state documents** — they describe the full system being built, with
 every component marked Built or Designed (never version-split into
 `specs/v2/`; milestone numbers stay linear). `3-decisions.md` is append-only
 (mark superseded, never rewrite); the graph schema in
-[2-architecture.md](specs/2-architecture.md) is deliberately Neo4j-shaped so
+[1-system-overview.md](specs/1-system-overview.md) is deliberately Neo4j-shaped so
 the store can migrate without redesign. The full spec-evolution rules and
 code conventions live in
 [.github/copilot-instructions.md](.github/copilot-instructions.md) — read it
@@ -89,13 +88,10 @@ then dive as needed:
 
 | File | Contents |
 |---|---|
-| [specs/1-system-overview.md](specs/1-system-overview.md) | **Start here** — layered component map, component↔code table, data flow, repo map |
-| [specs/2-architecture.md](specs/2-architecture.md) | Deep design: pipeline components, graph schema |
+| [specs/1-system-overview.md](specs/1-system-overview.md) | **Start here** — stage map, stage↔code table, data flow, repo map, M9 design, graph schema |
 | [specs/3-decisions.md](specs/3-decisions.md) | Locked technology and scope decisions, with rationale |
-| [specs/4-validation.md](specs/4-validation.md) | The rubric — what "done" means, measured against a sealed hand analysis of the same data |
-| [specs/5-milestones.md](specs/5-milestones.md) | Build order, milestone by milestone, with progress |
-| [specs/6-deferred-enhancements.md](specs/6-deferred-enhancements.md) | Every trade-off made for v1, and the trigger to restore each |
-| [specs/7-open-items.md](specs/7-open-items.md) | Unresolved items that don't block starting |
+| [specs/5-milestones.md](specs/5-milestones.md) | Roadmap: build order + learnings + deferred trade-offs + open questions |
+| [specs/9-reader.md](specs/9-reader.md) … [specs/15-flow-runner.md](specs/15-flow-runner.md) | Per-stage mechanics (S1–S7) |
 
 ## Case Study: Validating the Pipeline
 
@@ -103,7 +99,7 @@ To prove the pipeline's judgments are sound (not just plausible-sounding LLM
 output), its first full run was scored against a ground truth: the author
 performed the same gap analysis **by hand** — reading the same 13 JDs against
 the same skills dump — before writing any pipeline code. The hand analysis
-was sealed as the acceptance rubric ([specs/4-validation.md](specs/4-validation.md)),
+was sealed as the acceptance rubric (now in [specs/13-gap-measurer.md](specs/13-gap-measurer.md) §Validation rubric),
 and the pipeline then ran fresh with no hints. The hand analysis itself is not
 in the repo; the rubric below records its conclusions and how the pipeline
 measured against them.
