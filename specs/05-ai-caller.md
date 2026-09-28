@@ -23,10 +23,10 @@ through here; node modules never touch provider SDKs.
 
 - Extraction call latency ~19 min on DeepSeek V4 Flash (one-time per
   resume via artifact reuse). Fix path: faster extraction model or
-  timeout + retry — see `5-milestones.md` §Open (extraction latency).
+  timeout + retry — see `03-milestones.md` §Open (extraction latency).
 
 ## History (links, not copies)
 
-- Decisions: `3-decisions.md` (provider rows, keyring-only secret rule).
-- Milestones: `5-milestones.md` M3, M8.
-- Deferred: `5-milestones.md` §Deferred #6 (local-model benchmark).
+- Decisions: `02-decisions.md` (provider rows, keyring-only secret rule).
+- Milestones: `03-milestones.md` M3, M8.
+- Deferred: `03-milestones.md` §Deferred #6 (local-model benchmark).

@@ -12,7 +12,7 @@ Per unmatched target: keyword-overlap top-5 + `PRUNER_HINTS`
 (scores <0.3 dropped). Report: `output/judge_report.json`.
 Calibration: full-run confidences cluster high (min 0.65, mean 0.84) —
 gate compensates; auto re-judge loop explicitly deferred (see
-`3-decisions.md` M7 row; trigger in `5-milestones.md` §Open: calibration).
+`02-decisions.md` M7 row; trigger in `03-milestones.md` §Open: calibration).
 
 ## Gate (`gate.py`)
 
@@ -61,5 +61,5 @@ ranked gaps are right.
 
 ## History (links, not copies)
 
-- Decisions: `3-decisions.md` (M4 redesign, M7 recalibration-defer).
-- Milestones: `5-milestones.md` M3, M4, M5, M6 (rubric scored here).
+- Decisions: `02-decisions.md` (M4 redesign, M7 recalibration-defer).
+- Milestones: `03-milestones.md` M3, M4, M5, M6 (rubric scored here).

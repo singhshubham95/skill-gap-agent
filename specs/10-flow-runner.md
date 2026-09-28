@@ -29,9 +29,9 @@ Step order and display. Owns no domain logic — calls S1→S6.
 
 ## History (links, not copies)
 
-- Decisions: `3-decisions.md` (M7 state-design + recalibration rows).
-- Milestones: `5-milestones.md` M7, M8, M11 (local UI); extension shell
-  unscheduled (end goal in S6 `14-practice-planner.md`).
-- Deferred: `5-milestones.md` §Deferred #2 (done M7), #8 (web UI),
+- Decisions: `02-decisions.md` (M7 state-design + recalibration rows).
+- Milestones: `03-milestones.md` M7, M8, M11 (local UI); extension shell
+  unscheduled (end goal in S6 `09-practice-planner.md`).
+- Deferred: `03-milestones.md` §Deferred #2 (done M7), #8 (web UI),
   #11 (JD scraping — extension prerequisite).
-- Open items: `5-milestones.md` §Open (msgpack registration).
+- Open items: `03-milestones.md` §Open (msgpack registration).

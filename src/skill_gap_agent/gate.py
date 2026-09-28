@@ -1,4 +1,4 @@
-"""Confidence gate (milestone 4, specs/13-gap-measurer.md S5).
+"""Confidence gate (milestone 4, specs/08-gap-measurer.md S5).
 
 Human-in-the-loop review of the judge's uncertain verdicts — redesigned after
 user feedback. Design principle: the user lacks the target skill by definition,

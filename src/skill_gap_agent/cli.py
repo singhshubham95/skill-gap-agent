@@ -1,4 +1,4 @@
-"""LangGraph orchestration (milestone 7, specs/15-flow-runner.md S7).
+"""LangGraph orchestration (milestone 7, specs/10-flow-runner.md S7).
 
 Wires the v1 pipeline nodes into a real LangGraph graph:
 
@@ -9,7 +9,7 @@ Wires the v1 pipeline nodes into a real LangGraph graph:
   interrupt()/resume with a checkpointer, so a run can be resumed and moved to
   a web UI later (restores deferred-enhancements #2).
 - State is a TypedDict wrapping the SkillGraph; the graph object stays the
-  single source of truth (Conventions & Guardrails in specs/1-system-overview.md).
+  single source of truth (Conventions & Guardrails in specs/01-system-overview.md).
 
 Interactive prompts are routed through an ask_fn that raises an interrupt with
 the prompt text and returns the user's answer on resume. Re-runs are cheap:
@@ -86,7 +86,7 @@ def pending_interrupt(app, config: dict) -> Any | None:
     that immediately hits another interrupt() in the same node, `next` is
     empty even though a question is pending (the run never left the node,
     so the "waiting at" pointer doesn't move). Verified in M7 — see
-    specs/15-flow-runner.md S7 ("Detecting pending interrupts").
+    specs/10-flow-runner.md S7 ("Detecting pending interrupts").
     """
     snap = app.get_state(config)
     if not snap:

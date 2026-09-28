@@ -12,7 +12,7 @@ Nodes: `Skill{name, category, source: current|target}`,
 Edges: `HAS_SKILL` (user → skill), `REQUIRES{weight}` (JD → skill),
 `TRANSFERS_TO{confidence, rationale, gate_*}` (skill → skill),
 `CLOSES_GAP` (project → skill). `TRANSFERS_TO` directional (see
-`5-milestones.md` §Deferred #9).
+`03-milestones.md` §Deferred #9).
 
 ## Queries
 
@@ -29,5 +29,5 @@ networkx). Persistence stays `output/graph.json`.
 
 ## History (links, not copies)
 
-- Milestones: `5-milestones.md` M1.
-- Deferred: `5-milestones.md` §Deferred #1 (Neo4j), #9 (symmetry).
+- Milestones: `03-milestones.md` M1.
+- Deferred: `03-milestones.md` §Deferred #1 (Neo4j), #9 (symmetry).

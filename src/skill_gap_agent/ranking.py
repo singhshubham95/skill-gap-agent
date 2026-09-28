@@ -1,10 +1,10 @@
-"""Gap ranking (milestone 5, specs/13-gap-measurer.md S5).
+"""Gap ranking (milestone 5, specs/08-gap-measurer.md S5).
 
 Transferability-aware ranking: for each target skill (gap candidate), combine
 JD demand (REQUIRES weight) with the gate-adjusted transfer confidence from
 its top TRANSFERS_TO edge.
 
-Verdict model (specs/1-system-overview.md "How Judge Output Becomes
+Verdict model (specs/01-system-overview.md "How Judge Output Becomes
 Recommendations"):
 - held            -> matched to a current skill by the matching ladder (not a gap)
 - high transfer   -> platform switch / bridge (low urgency)

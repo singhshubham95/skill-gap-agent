@@ -14,7 +14,7 @@ code-exists-unwired (see below).
 - `ALIASES`: seeded from M2 merges + ~50 M8 extraction variants.
   Extend manually only for recurring variants.
 - `taxonomy.py`: ESCO ICT loader, graceful fallback (data file pending —
-  see `5-milestones.md` §Open: ESCO).
+  see `03-milestones.md` §Open: ESCO).
 
 ## Resume side (user skills)
 
@@ -29,7 +29,7 @@ from parentheticals, propose y/n/a with evidence, persist
 JD skills are born canonical (lexicon keys pre-aligned); if extraction
 ever goes LLM, normalization must run here too. Mention-modality
 (`any-of` vs `must-have`) is hand-set policy in S5, not parsed —
-see `5-milestones.md` §Open (modality).
+see `03-milestones.md` §Open (modality).
 
 ## LLM vocabulary bridge (`vocab_bridge.py`) — UNWIRED
 
@@ -42,6 +42,6 @@ Built only when a run exercises it end-to-end.
 
 ## History (links, not copies)
 
-- Decisions: `3-decisions.md` (M8 bridge row; M2 implied-flow row).
-- Milestones: `5-milestones.md` M2, M8; §Open (alias, canonical strategy,
+- Decisions: `02-decisions.md` (M8 bridge row; M2 implied-flow row).
+- Milestones: `03-milestones.md` M2, M8; §Open (alias, canonical strategy,
   ESCO, implied precision, modality).

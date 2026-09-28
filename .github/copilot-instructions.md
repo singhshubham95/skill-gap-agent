@@ -8,14 +8,14 @@ before changing code or specs.
 This file records **workflow rules only** — how to work in this repo. It
 deliberately contains no code-level conventions or implementation facts:
 those are spec content (see **Conventions & Guardrails** in
-`specs/1-system-overview.md`) and change with the code, while this file must
+`specs/01-system-overview.md`) and change with the code, while this file must
 stay implementation-agnostic so it cannot silently drift.
 
 ## Project snapshot
 
 Python 3.11+ CLI agent. A spec-driven project: `specs/` (flat, numbered,
 read in order) is the source of truth for everything the system is and does —
-start at `specs/1-system-overview.md` for the component map and current
+start at `specs/01-system-overview.md` for the component map and current
 state, and follow its links rather than relying on details memorized here.
 
 ## Communication with the user
@@ -37,8 +37,8 @@ state, and follow its links rather than relying on details memorized here.
   first**, then implement. Code PRs that alter behavior must touch the spec
   in the same change.
 - After implementing a milestone: flip its status markers to Built, record
-  learnings in `specs/5-milestones.md`, append any new locked decision to
-  `specs/3-decisions.md`.
+  learnings in `specs/03-milestones.md`, append any new locked decision to
+  `specs/02-decisions.md`.
 
 ## Spec evolution rules
 
@@ -48,7 +48,7 @@ The specs are **living target-state documents**, not per-version snapshots:
    item is labeled one of: **Built** (code exists, validated — cite the
    milestone), **Designed** (specified for an upcoming milestone, no code
    yet), or **Deferred** (known trade-off, restore trigger recorded in
-   `5-milestones.md` §Deferred). Never describe a not-yet-built thing in
+   `03-milestones.md` §Deferred). Never describe a not-yet-built thing in
    language that implies it exists; a contributor must be able to trust that
    present-tense descriptions match the code.
 2. **Evolve in place; never version-split.** Do not create `specs/v2/` or
@@ -57,7 +57,7 @@ The specs are **living target-state documents**, not per-version snapshots:
    boundaries. When new design changes an existing component, revise that
    component's section and note the change; when it adds a component, add a
    new section.
-3. **`3-decisions.md` is append-only.** Add rows, mark superseded ones,
+3. **`02-decisions.md` is append-only.** Add rows, mark superseded ones,
    never delete or silently rewrite. Same for milestone entries: keep
    history, append learnings.
 4. **Milestone numbers are linear and global** (M1, M2, … M7, M8, …). Never
@@ -66,15 +66,15 @@ The specs are **living target-state documents**, not per-version snapshots:
    modules, and artifacts that exist in the repo. If you delete or rename an
    artifact, grep the docs for it in the same change.
 6. **Component specs are per-stage (S1–S7), eager.** Each pipeline stage owns
-   one spec file (`specs/9-reader.md` through `specs/15-flow-runner.md`;
-   functional names are indexed in `specs/1-system-overview.md`). Component
+   one spec file (`specs/04-reader.md` through `specs/10-flow-runner.md`;
+   functional names are indexed in `specs/01-system-overview.md`). Component
    files own mechanics + status only. History stays single-source: decisions
-   in `3-decisions.md`, build order + learnings + trade-offs + open
-   questions in `5-milestones.md` (§§Deferred/Open hold the rest) —
+   in `02-decisions.md`, build order + learnings + trade-offs + open
+   questions in `03-milestones.md` (§§Deferred/Open hold the rest) —
    component files link by ID (milestone number, decision row, item bullet)
    and never copy that text. Status markers in component files are derived
    from the milestone entry, never set independently. Cross-stage design
-   (M9 intake + validation, graph schema) lives in `1-system-overview.md`.
+   (M9 intake + validation, graph schema) lives in `01-system-overview.md`.
 
 ## Code conventions
 
@@ -82,7 +82,7 @@ Code-level conventions and architectural guardrails (LLM access, override
 files, normalization, output safety) are **spec content, not instruction
 content** — they change with the code, and this file must not name modules
 that may not exist tomorrow. Before writing or changing code, read the
-**Conventions & Guardrails** section of `specs/1-system-overview.md` and
+**Conventions & Guardrails** section of `specs/01-system-overview.md` and
 follow it. If your change alters how any of those concerns are handled,
 update that section in the same change (spec-first rule above).
 
@@ -93,4 +93,4 @@ update that section in the same change (spec-first rule above).
 - Lint and tests clean (`ruff check .` and `pytest` while those are the
   configured tools).
 - If a milestone adds a user-visible flow, validate it interactively once
-  and record the result in `specs/5-milestones.md` before marking it Built.
+  and record the result in `specs/03-milestones.md` before marking it Built.

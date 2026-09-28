@@ -51,31 +51,31 @@ persist in `output/`, so re-runs only ask about what changed.
 | Human gate on ambiguous verdicts (depth + intent, persisted) | Neo4j persistence (v1 is networkx + JSON) |
 | Ranked plan with JD traceability + grounded projects | GitHub good-first-issue sourcing |
 
-Full trade-off list with restore triggers: [specs/5-milestones.md](specs/5-milestones.md) §Deferred.
+Full trade-off list with restore triggers: [specs/03-milestones.md](specs/03-milestones.md) §Deferred.
 
 **Roadmap (M7–M8 built; M9–M11 designed):** LangGraph orchestration with
 resumable human-in-the-loop steps and resume PDF/DOCX ingestion are built;
 next are GFI issue sourcing (M10), minimal local UI (M11), then
 conversational intake + evidence-backed skill validation (M9) and the
-extension shell. Design detail in [specs/1-system-overview.md](specs/1-system-overview.md) §M9 design and
-[specs/5-milestones.md](specs/5-milestones.md).
+extension shell. Design detail in [specs/01-system-overview.md](specs/01-system-overview.md) §M9 design and
+[specs/03-milestones.md](specs/03-milestones.md).
 
 ## For contributors
 
 The specs are the onboarding path — they document not just the design but the
 *reasoning* behind every decision, including revisions made during building:
 
-1. [specs/1-system-overview.md](specs/1-system-overview.md) — stage map, stage↔code table, data flow, repo map, M9 design, graph schema (start here)
-2. [specs/3-decisions.md](specs/3-decisions.md) — locked decisions, append-only, with rationale (including decisions that were *revised* and why)
-3. [specs/5-milestones.md](specs/5-milestones.md) — roadmap: build order + learnings + deferred trade-offs + open questions
-4. S1–S7 stage files ([specs/9-reader.md](specs/9-reader.md) … [specs/15-flow-runner.md](specs/15-flow-runner.md)) — per-stage mechanics + status
+1. [specs/01-system-overview.md](specs/01-system-overview.md) — stage map, stage↔code table, data flow, repo map, M9 design, graph schema (start here)
+2. [specs/02-decisions.md](specs/02-decisions.md) — locked decisions, append-only, with rationale (including decisions that were *revised* and why)
+3. [specs/03-milestones.md](specs/03-milestones.md) — roadmap: build order + learnings + deferred trade-offs + open questions
+4. S1–S7 stage files ([specs/04-reader.md](specs/04-reader.md) … [specs/10-flow-runner.md](specs/10-flow-runner.md)) — per-stage mechanics + status
 
 Conventions: specs are numbered by reading order and are **living
 target-state documents** — they describe the full system being built, with
 every component marked Built or Designed (never version-split into
-`specs/v2/`; milestone numbers stay linear). `3-decisions.md` is append-only
+`specs/v2/`; milestone numbers stay linear). `02-decisions.md` is append-only
 (mark superseded, never rewrite); the graph schema in
-[1-system-overview.md](specs/1-system-overview.md) is deliberately Neo4j-shaped so
+[01-system-overview.md](specs/01-system-overview.md) is deliberately Neo4j-shaped so
 the store can migrate without redesign. The full spec-evolution rules and
 code conventions live in
 [.github/copilot-instructions.md](.github/copilot-instructions.md) — read it
@@ -88,10 +88,10 @@ then dive as needed:
 
 | File | Contents |
 |---|---|
-| [specs/1-system-overview.md](specs/1-system-overview.md) | **Start here** — stage map, stage↔code table, data flow, repo map, M9 design, graph schema |
-| [specs/3-decisions.md](specs/3-decisions.md) | Locked technology and scope decisions, with rationale |
-| [specs/5-milestones.md](specs/5-milestones.md) | Roadmap: build order + learnings + deferred trade-offs + open questions |
-| [specs/9-reader.md](specs/9-reader.md) … [specs/15-flow-runner.md](specs/15-flow-runner.md) | Per-stage mechanics (S1–S7) |
+| [specs/01-system-overview.md](specs/01-system-overview.md) | **Start here** — stage map, stage↔code table, data flow, repo map, M9 design, graph schema |
+| [specs/02-decisions.md](specs/02-decisions.md) | Locked technology and scope decisions, with rationale |
+| [specs/03-milestones.md](specs/03-milestones.md) | Roadmap: build order + learnings + deferred trade-offs + open questions |
+| [specs/04-reader.md](specs/04-reader.md) … [specs/10-flow-runner.md](specs/10-flow-runner.md) | Per-stage mechanics (S1–S7) |
 
 ## Case Study: Validating the Pipeline
 
@@ -99,7 +99,7 @@ To prove the pipeline's judgments are sound (not just plausible-sounding LLM
 output), its first full run was scored against a ground truth: the author
 performed the same gap analysis **by hand** — reading the same 13 JDs against
 the same skills dump — before writing any pipeline code. The hand analysis
-was sealed as the acceptance rubric (now in [specs/13-gap-measurer.md](specs/13-gap-measurer.md) §Validation rubric),
+was sealed as the acceptance rubric (now in [specs/08-gap-measurer.md](specs/08-gap-measurer.md) §Validation rubric),
 and the pipeline then ran fresh with no hints. The hand analysis itself is not
 in the repo; the rubric below records its conclusions and how the pipeline
 measured against them.

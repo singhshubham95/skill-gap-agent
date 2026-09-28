@@ -4,7 +4,7 @@ The top-down view of the Skill-Gap Agent: what the system is, its layers and
 components, where each lives in code, and how data flows through. This page
 is the map **and** the deep-design home for cross-stage concerns (M9 intake
 + validation design, graph schema reference below). Per-stage mechanics live
-in S1–S7 (`9-reader.md` through `15-flow-runner.md`); this page's Stage Table
+in S1–S7 (`04-reader.md` through `10-flow-runner.md`); this page's Stage Table
 routes to them. (Folded from `2-architecture.md`, 2026-09-27 — that file's
 stage stubs duplicated the S-files, so only the M9 design + schema survived
 the merge.)
@@ -12,7 +12,7 @@ the merge.)
 **Status: v1 built and validated** (M1–M6) **; M7–M8 built; M9–M11 designed**
 (GFI-first order: M10 → M11 → M9, then the extension shell).
 All pipeline stages are built and validated against a sealed hand-performed
-gap analysis of the same data (rubric in S5 `13-gap-measurer.md`
+gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
 §Validation rubric); results in the README case study. The target adds
 conversational intake, resume (PDF/DOCX) ingestion, evidence-backed skill
 validation, and true LangGraph orchestration — components marked 🎯 Designed
@@ -32,7 +32,7 @@ state (user-approved), scores how much existing skills transfer to missing
 ones (LLM judge), gates uncertain judgments through a human-in-the-loop
 prompt, ranks gaps by JD frequency, and outputs a ranked plan of grounded
 learning projects. Validated against a sealed hand-performed gap analysis of
-the same data (rubric in S5 `13-gap-measurer.md` §Validation rubric).
+the same data (rubric in S5 `08-gap-measurer.md` §Validation rubric).
 
 **Target additions:** users converse with the agent instead of preparing
 input files — they hand over a resume (PDF/DOCX) or skills JSON, the agent
@@ -81,13 +81,13 @@ flowchart TB
 
 | Stage | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
-| S1 reader | Raw text capture (resume + JDs), no AI | `resume.py`, `ingest.py` file loop | [9-reader.md](9-reader.md) | ✅ Built (M2 JSON/TXT; M8 PDF/DOCX) |
-| S2 AI caller | Single LLM door (`judge`/`chat`), keyring secrets | `llm.py`, `secrets.py` | [10-ai-caller.md](10-ai-caller.md) | ✅ Built (M3) |
-| S3 skill map | Graph store: schema + queries, JSON round-trip | `graph.py` | [11-skill-map.md](11-skill-map.md) | ✅ Built (M1) |
-| S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [12-skill-cleaner.md](12-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
-| S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [13-gap-measurer.md](13-gap-measurer.md) | ✅ Built (M3–M6) |
-| S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [14-practice-planner.md](14-practice-planner.md) | ✅ Built (M5); 🎯 OSS (M10) |
-| S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML/extension screens | `cli.py`, `m5_plan.py` | [15-flow-runner.md](15-flow-runner.md) | ✅ Built (M7–M8); 🎯 UI (M11) |
+| S1 reader | Raw text capture (resume + JDs), no AI | `resume.py`, `ingest.py` file loop | [04-reader.md](04-reader.md) | ✅ Built (M2 JSON/TXT; M8 PDF/DOCX) |
+| S2 AI caller | Single LLM door (`judge`/`chat`), keyring secrets | `llm.py`, `secrets.py` | [05-ai-caller.md](05-ai-caller.md) | ✅ Built (M3) |
+| S3 skill map | Graph store: schema + queries, JSON round-trip | `graph.py` | [06-skill-map.md](06-skill-map.md) | ✅ Built (M1) |
+| S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [07-skill-cleaner.md](07-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
+| S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [08-gap-measurer.md](08-gap-measurer.md) | ✅ Built (M3–M6) |
+| S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [09-practice-planner.md](09-practice-planner.md) | ✅ Built (M5); 🎯 OSS (M10) |
+| S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML/extension screens | `cli.py`, `m5_plan.py` | [10-flow-runner.md](10-flow-runner.md) | ✅ Built (M7–M8); 🎯 UI (M11) |
 
 ## Pipeline (stage order = data flow)
 
@@ -198,7 +198,7 @@ anti-cheat is needed, only honest framing.
 | `TRANSFERS_TO` | `Skill` → `Skill` | `confidence` (0–1), `rationale` (short LLM text) | Transferability-judge node |
 | `CLOSES_GAP` | `Project` → `Skill` | — | Output node |
 
-`TRANSFERS_TO` is directional in v1 (see roadmap `5-milestones.md`
+`TRANSFERS_TO` is directional in v1 (see roadmap `03-milestones.md`
 §Deferred #9).
 
 ## Repo Map
@@ -261,8 +261,8 @@ accurate (workflow rules live in
 
 ## Where to Go Next
 
-- **Why these choices:** [3-decisions.md](3-decisions.md)
-- **Build order + progress + trade-offs + open questions:** [5-milestones.md](5-milestones.md) (roadmap — §§Deferred/Open hold the rest)
-- **Stage mechanics:** S1–S7 files (`9-reader.md` … `15-flow-runner.md`), routed via the Stage Table above
-- **Validation rubric:** S5 [13-gap-measurer.md](13-gap-measurer.md) §Validation rubric
-- **Extension end goal:** S6 [14-practice-planner.md](14-practice-planner.md) §End goal
+- **Why these choices:** [02-decisions.md](02-decisions.md)
+- **Build order + progress + trade-offs + open questions:** [03-milestones.md](03-milestones.md) (roadmap — §§Deferred/Open hold the rest)
+- **Stage mechanics:** S1–S7 files (`04-reader.md` … `10-flow-runner.md`), routed via the Stage Table above
+- **Validation rubric:** S5 [08-gap-measurer.md](08-gap-measurer.md) §Validation rubric
+- **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal

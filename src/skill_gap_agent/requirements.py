@@ -25,7 +25,7 @@ Per-group mention policies (hand-set, auditable — NOT auto-parsed):
   a distinct skill employers differentiate on) → alternative satisfaction
   does NOT apply; the skill gap keeps full urgency.
 
-Honest limitation (recorded in specs/5-milestones.md §Open: modality): v1 cannot classify each
+Honest limitation (recorded in specs/03-milestones.md §Open: modality): v1 cannot classify each
 JD mention's modality ("such as" vs "must have X") automatically — the
 per-group policy is a hand-set approximation. A future LLM pass could
 classify modality per mention per JD; that is the proper fix.

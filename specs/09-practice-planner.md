@@ -64,6 +64,6 @@ extension side-panel body).
 
 ## History (links, not copies)
 
-- Milestones: `5-milestones.md` M5, M10, M11 (GFI thin slice + local UI).
-- Deferred: `5-milestones.md` §Deferred #3 (→ Designed M10; quality
+- Milestones: `03-milestones.md` M5, M10, M11 (GFI thin slice + local UI).
+- Deferred: `03-milestones.md` §Deferred #3 (→ Designed M10; quality
   filtering remains the deferred part).

@@ -1,4 +1,4 @@
-"""LLM project synthesis (milestone 5, specs/14-practice-planner.md S6).
+"""LLM project synthesis (milestone 5, specs/09-practice-planner.md S6).
 
 Per gap, generate standalone project ideas grounded in the user's EXISTING
 skills — the synthesis prompt receives the gap plus its top TRANSFERS_TO edges

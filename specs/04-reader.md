@@ -4,7 +4,7 @@ Raw text capture only. No LLM, no cleaning, no judgment. This stage turns
 files (and later browser pages) into plain text for downstream stages.
 
 **Status: Built** (M2 for JSON/TXT paths; M8 for PDF/DOCX — see
-`5-milestones.md` M8).
+`03-milestones.md` M8).
 
 ## What it does
 
@@ -34,6 +34,6 @@ files (and later browser pages) into plain text for downstream stages.
 
 ## History (links, not copies)
 
-- Decisions: `3-decisions.md` (M8 validation-metric row — recall rejected).
-- Milestones: `5-milestones.md` M2, M8; §Open (extraction latency ~19 min,
+- Decisions: `02-decisions.md` (M8 validation-metric row — recall rejected).
+- Milestones: `03-milestones.md` M2, M8; §Open (extraction latency ~19 min,
   one-time cost).

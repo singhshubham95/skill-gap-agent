@@ -1,4 +1,4 @@
-"""Output node (milestone 5, specs/14-practice-planner.md + specs/15-flow-runner.md).
+"""Output node (milestone 5, specs/09-practice-planner.md + specs/10-flow-runner.md).
 
 Renders the ranked, human-readable plan to output/plan.md.
 """

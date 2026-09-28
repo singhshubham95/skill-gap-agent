@@ -1,7 +1,7 @@
 # Roadmap — Build Order, Trade-offs, Open Questions
 
 Build order, deferred trade-offs, and open questions in one place
-(merged 2026-09-27 from `5-milestones.md` + `6-deferred-enhancements.md`
+(merged 2026-09-27 from `03-milestones.md` + `6-deferred-enhancements.md`
 + `7-open-items.md`: all three talked about timeline — what is built,
 what is next, what is deliberately postponed — so they are one file now).
 Each milestone ends with something runnable.
@@ -86,7 +86,7 @@ Each milestone ends with something runnable.
    classification + Airflow background); plan.md + graph.json written.
 6. **Validation pass.** ✅ Done. Full fresh pipeline run (judge re-called, no
    reuse) on the seed data; output compared against the sealed hand analysis
-   per the rubric (now in S5 `13-gap-measurer.md` §Validation rubric). All three pass
+   per the rubric (now in S5 `08-gap-measurer.md` §Validation rubric). All three pass
    criteria met — see the README case study for the full comparison. The
    hand analysis's headline buckets (GenAI/LLM depth, framework breadth, cloud
    platforms) all appear in the ranked output; ADK→LangGraph partial-gap
@@ -122,7 +122,7 @@ target), not spec boundaries. Numbering stays linear and global.
    seam in `gate.py`/`implied.py`, optional SQLite checkpointer (`--resume`,
    `output/checkpoints.sqlite`). State is a TypedDict of serializable
    fields; the `SkillGraph` lives in a runtime registry keyed by `thread_id`
-   (decision in [3-decisions.md](3-decisions.md) — the checkpointer
+   (decision in [02-decisions.md](02-decisions.md) — the checkpointer
    serializes state channels, so a live networkx graph cannot live in
    state). **Learnings (verified against LangGraph 1.2.11):**
    - **Pending-interrupt detection quirk:** after a resume that immediately
@@ -147,7 +147,7 @@ target), not spec boundaries. Numbering stays linear and global.
    `output/gate_overrides.json`, run completed to plan output. PASS. Lint
    clean. The judge-recalibration loop from the original §9 design was
    explicitly deferred during this milestone (decision in
-   [3-decisions.md](3-decisions.md); trigger in
+   [02-decisions.md](02-decisions.md); trigger in
    §Open: judge calibration below).
 8. **Resume ingestion.** ✅ Done. New `resume.py` + `vocab_bridge.py`;
    `pypdf`/`python-docx` added as required deps. Flow: resume file
@@ -198,30 +198,30 @@ target), not spec boundaries. Numbering stays linear and global.
      artifact reuse makes it a one-time cost per resume.
    **Status: built and validated on the user's real resume.**
 9. **Conversational intake + skill validation.** 🎯 Designed
-   (full design in `1-system-overview.md` §M9 design). Chat agent collects
+   (full design in `01-system-overview.md` §M9 design). Chat agent collects
    evidence (resume / JSON / JDs) and pre-fills gate questions; triaged
    skills validated via concept checklist + applied question with hidden
    rubric; grades persist to `output/proficiency.json` on the gate's 1–5
    depth scale; gate shrinks to unvalidated skills.
 10. **OSS issue sourcing (GFI thin slice).** 🎯 Designed
-    (end goal + mechanics in S6 `14-practice-planner.md`). New `oss.py`
+    (end goal + mechanics in S6 `09-practice-planner.md`). New `oss.py`
     consumed from `rank_gaps()` `Gap` objects: curated repos → GitHub
     Search Issues (`good-first-issue`) → S2 relevance filter → persist
     `output/oss_issues.json`. `Project` gains `type="oss_issue"`.
 11. **Minimal local UI.** 🎯 Designed
-    (mechanics in S7 `15-flow-runner.md`). `output.py::render_plan()` also
+    (mechanics in S7 `10-flow-runner.md`). `output.py::render_plan()` also
     emits `output/plan.html` (same data, clickable issue links) — later the
     extension side-panel body. Not a Chrome extension. Order: M10 → M11 →
     then M9 and the extension shell (GFI-first pivot 2026-09-27).
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
-This file churns; `3-decisions.md` is append-only. Entries marked
+This file churns; `02-decisions.md` is append-only. Entries marked
 **→ Designed (Mn)** keep their v1 trade-off text for history.
 
 | # | Deferred | v1 Simplification | Why deferred / trigger to restore |
 |---|---|---|---|
-| 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in `1-system-overview.md` §Graph Schema is already Neo4j-shaped. |
+| 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in `01-system-overview.md` §Graph Schema is already Neo4j-shaped. |
 | 2 | **True LangGraph `interrupt()` + checkpointer** → Done (M7) | stdin prompt loop in the confidence gate | Resumable runtime adds complexity for a CLI. Restored for long-running/resumable runs. |
 | 3 | **GitHub Issues sourcing node** (`good-first-issue`/`help-wanted` search) → Designed (M10) | LLM project synthesis only | Fragile external dependency (rate limits, label quality varies by repo). Thin slice in M10 alongside synthesis; quality filtering remains deferred. |
 | 4 | **Chat refinement over the built graph** ("why is X a gap", "re-rank assuming I know Y") | None — static plan output | A second app (tool-calling loop over graph queries). v1.2, after the graph is trustworthy. |
@@ -265,7 +265,7 @@ This file churns; `3-decisions.md` is append-only. Entries marked
   (min 0.65, mean 0.84); the gate's depth factor compensates. If ranking
   can't separate bridges from gaps, re-prompt the judge with a stricter
   rubric. The automatic re-judge loop was deferred at M7 (decision in
-  `3-decisions.md`); revisit trigger: bridge/gap verdicts visibly misfire
+  `02-decisions.md`); revisit trigger: bridge/gap verdicts visibly misfire
   on clustered-high scores.
 - **Alias table contents (S4).** Seeded (~130 entries) from M2 merges +
   ~50 M8 variants. The bridge (`vocab_bridge.py`) handles unanticipated

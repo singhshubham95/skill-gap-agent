@@ -1,4 +1,4 @@
-"""LLM-assisted vocabulary bridge (M8, specs/12-skill-cleaner.md S4).
+"""LLM-assisted vocabulary bridge (M8, specs/07-skill-cleaner.md S4).
 
 The alias table was seeded from ONE curated document's phrasing (the seed
 skills JSON). New inputs — like LLM-extracted resumes — phrase the same
@@ -105,7 +105,7 @@ def bridge_vocabulary(
         return decisions
 
     # Batch: one LLM call per chunk of terms (bounded latency vs ~20 min
-    # for a single huge call — see specs/5-milestones.md §Open: extraction latency).
+    # for a single huge call — see specs/03-milestones.md §Open: extraction latency).
     CHUNK = 20
     for i in range(0, len(pending), CHUNK):
         chunk = pending[i : i + CHUNK]
