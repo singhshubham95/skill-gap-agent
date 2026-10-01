@@ -3,8 +3,8 @@
 How to close the gap. Consumes S5 `Gap` objects, writes `Project` nodes
 + `CLOSES_GAP` edges, renders the plan.
 
-**Status: Built** for standalone projects (M5); **Designed** for OSS
-issues (M10 — end goal below).
+**Status: Built** for standalone projects (M5) and OSS issues
+(M10 thin slice — end goal below).
 
 ## End goal — Chrome extension (locked 2026-09-27, folded from `8-gfi-pivot.md`)
 
@@ -24,23 +24,31 @@ One S2 call per top non-bridge gap: gap + top `TRANSFERS_TO` rationales
 + background block → grounded project (must reuse existing skills).
 Report: `output/synthesis_report.json`.
 
-## OSS issue sourcing (`oss.py`, Designed M10 — thin slice)
+## OSS issue sourcing (`oss.py`, Built M10 thin slice)
 
 Per top gap (default top-5 non-bridge gaps, same filter as
-`synthesize_for_gaps`): curated repo list → GitHub Search Issues
-(`label:good-first-issue` + repo/topic/language) → S2 relevance filter
-using the gap's `TRANSFERS_TO` rationale + `_background_block()`
-grounding → persist. `Project` gains `type="oss_issue"`
-(`graph.py:33` today says `standalone only (oss_issue deferred)`) with
+`synthesize_for_gaps`): 2-attempt search loop — attempt 0 strict
+(`label:"good first issue"` + full gap keywords + `language:python`),
+attempt 1 broadened (first token only, no language filter) when <3 raw
+results — results re-ranked to prefer `CURATED_REPOS` (~15 GenAI/Python
+repos) rather than hard-filtered, then one S2 relevance filter call per
+gap using the gap's `TRANSFERS_TO` rationale + `_background_block()`
+grounding → persist. `Project` gains `type="oss_issue"` with
 `url, repo, labels, updated_at`. `CLOSES_GAP` edge reused unchanged.
-Cache: `output/oss_issues.json` (query + timestamp + results), same
-override-file pattern as `judge_report.json` / `gate_overrides.json` —
+Cache: `output/oss_issues.json` (query + attempts + timestamp + results),
+same override-file pattern as `judge_report.json` / `gate_overrides.json` —
 re-runs reuse silently. Auth: `GITHUB_TOKEN` via the existing
 `secrets.py` keyring pattern (`Authorization: Bearer`); unauthenticated
-still works for smoke tests. No pagination / ETag handling in the thin
-slice. New dep: `requests` (or stdlib `urllib`; prefer `requests`).
+still works (verified live 2026-09-28). Network via stdlib `urllib`
+(no new dependency). No pagination / ETag handling in the thin slice.
 Builds on the M8 resume path (resume → skills JSON works); no dependency
-on M9.
+on M9. Flags: `--no-oss` skips; `--no-llm-oss` keeps raw top-5 (offline).
+Verified: `m10_check.py` offline (stub search, cache-reuse, md+html) PASS;
+live seed run `--auto --no-judge --top 2 --no-llm-oss` sourced 5+5 issues
+(Fine-tuning, Streaming data), links HTTP 200, second run zero API calls,
+`ruff` clean. Known thin-slice limitation: global search returns
+off-curated, variably-relevant issues (quality ranking is the deferred
+follow-up); the end-goal search-and-reason refinement loop lives here next.
 
 **Explicit non-goals for the thin slice:** no issue-quality ranking beyond
 the LLM filter, no stale/assigned detection, no pagination, no per-JD
@@ -58,9 +66,10 @@ end-to-end holds.
 
 ## Rendering (`output.py`)
 
-`plan.md` (ranked table + verdicts + JD traceability + projects) and
-`plan.html` (M11, same data, clickable issue links — later the
-extension side-panel body).
+`plan.md` (ranked table + verdicts + JD traceability + projects +
+Good-First-Issues per gap, M10) and `plan.html` (M10 thin slice: same
+data, clickable issue links — later the extension side-panel body;
+full M11 local UI still Designed).
 
 ## History (links, not copies)
 

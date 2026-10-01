@@ -34,7 +34,8 @@ from .graph import SkillGraph
 from .ingest import build_seed_graph
 from .judge import judge_all_unmatched, save_judge_report
 from .llm import LLMConfig
-from .output import write_plan
+from .oss import source_oss_for_gaps
+from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
 from .resume import resume_to_skills_json
 from .synthesis import save_synthesis_report, synthesize_for_gaps
@@ -61,12 +62,15 @@ class AgentState(TypedDict, total=False):
     jds_path: str
     auto: bool
     skip_judge: bool
+    skip_oss: bool
+    no_llm_oss: bool
     top_n: int
     stats: dict
     judged: bool
     gate_decisions: list
     gaps: list
     projects: list
+    oss: dict
 
 
 def ask_via_interrupt(prompt: str) -> str:
@@ -223,11 +227,38 @@ def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     return {"projects": projects}
 
 
+def node_oss(state: AgentState, config: RunnableConfig) -> dict:
+    """M10: source good-first-issues for the same top-n actionable gaps.
+
+    Runs after synthesis (same gap filter). Cache-first: cached gaps cost
+    zero API calls. `--no-oss` skips; `--no-llm-oss` skips the S2 relevance
+    filter (raw top-5 kept) for offline runs.
+    """
+    if state.get("skip_oss"):
+        return {"oss": {}}
+    sg: SkillGraph = _runtime(config)["sg"]
+    oss_by_gap = source_oss_for_gaps(
+        sg,
+        state["gaps"],
+        top_n=state["top_n"],
+        cfg=LLMConfig(),
+        use_llm=not state.get("no_llm_oss", False),
+    )
+    print(f"OSS issues sourced for {len(oss_by_gap)} gap(s).")
+    return {"oss": {k: [i.__dict__ for i in v] for k, v in oss_by_gap.items()}}
+
+
 def node_output(state: AgentState, config: RunnableConfig) -> dict:
     sg: SkillGraph = _runtime(config)["sg"]
     out = Path("output")
     projects = state.get("projects", [])
-    plan_path = write_plan(state["gaps"], projects, state["stats"], out / "plan.md")
+    from .oss import OssIssue
+
+    oss_by_gap = {
+        k: [OssIssue(**it) for it in v] for k, v in (state.get("oss") or {}).items()
+    }
+    plan_path = write_plan(state["gaps"], projects, state["stats"], out / "plan.md", oss_by_gap)
+    write_plan_html(state["gaps"], projects, state["stats"], oss_by_gap, out / "plan.html")
     save_synthesis_report(projects, out / "synthesis_report.json")
     sg.save(str(out / "graph.json"))
     print(f"\nPlan written: {plan_path}")
@@ -250,6 +281,7 @@ def build_app(checkpointer=None):
     g.add_node("gate", node_gate)
     g.add_node("rank", node_rank)
     g.add_node("synthesize", node_synthesize)
+    g.add_node("oss", node_oss)
     g.add_node("output", node_output)
 
     g.add_edge(START, "ingest")
@@ -259,7 +291,8 @@ def build_app(checkpointer=None):
     g.add_conditional_edges(
         "rank", synthesis_needed, {"synthesize": "synthesize", "output": "output"}
     )
-    g.add_edge("synthesize", "output")
+    g.add_edge("synthesize", "oss")
+    g.add_edge("oss", "output")
     g.add_edge("output", END)
     return g.compile(checkpointer=checkpointer)
 
@@ -275,6 +308,12 @@ def main() -> None:
     parser.add_argument("jds", nargs="?", default="data/jds")
     parser.add_argument("--auto", action="store_true", help="no interactive prompts")
     parser.add_argument("--no-judge", action="store_true", help="reuse TRANSFERS_TO edges")
+    parser.add_argument("--no-oss", action="store_true", help="skip OSS issue sourcing (M10)")
+    parser.add_argument(
+        "--no-llm-oss",
+        action="store_true",
+        help="skip the S2 relevance filter for OSS issues (keep raw top-5; offline runs)",
+    )
     parser.add_argument(
         "--no-llm",
         action="store_true",
@@ -319,6 +358,8 @@ def main() -> None:
         "jds_path": args.jds,
         "auto": args.auto,
         "skip_judge": args.no_judge,
+        "skip_oss": args.no_oss,
+        "no_llm_oss": args.no_llm_oss,
         "top_n": args.top_n,
     }
     config = {"configurable": {"thread_id": "cli"}}

@@ -37,8 +37,10 @@ at, and to self-assess **depth + intent** for ambiguous gap verdicts. Decisions
 persist in `output/`, so re-runs only ask about what changed.
 
 **Outputs** (in `output/`): `plan.md` (the ranked plan — start here),
+`plan.html` (thin-slice clickable issue links, M10),
 `graph.json` (the full skill graph), `judge_report.json` +
-`gate_overrides.json` (audit trail of every judgment and your decisions).
+`gate_overrides.json` (audit trail of every judgment and your decisions),
+`oss_issues.json` (per-gap issue cache — re-runs make zero API calls).
 
 ## What v1 does — and deliberately doesn't
 
@@ -50,12 +52,14 @@ persist in `output/`, so re-runs only ask about what changed.
 | Alternative-group semantics ("cloud: AWS/Azure/GCP" = any one) | Per-JD mention-modality classification ("such as" vs "must have") — hand-set policies for now |
 | Human gate on ambiguous verdicts (depth + intent, persisted) | Neo4j persistence (v1 is networkx + JSON) |
 | Ranked plan with JD traceability + grounded projects | GitHub good-first-issue sourcing |
+| OSS good-first-issue sourcing per top gap (M10 thin slice, unauthenticated) + `plan.html` | Issue-quality ranking / curated-only results (search-and-reason loop is next) |
 
 Full trade-off list with restore triggers: [specs/03-milestones.md](specs/03-milestones.md) §Deferred.
 
-**Roadmap (M7–M8 built; M9–M11 designed):** LangGraph orchestration with
-resumable human-in-the-loop steps and resume PDF/DOCX ingestion are built;
-next are GFI issue sourcing (M10), minimal local UI (M11), then
+**Roadmap (M7–M8 + M10 built; M9 + M11 designed):** LangGraph orchestration with
+resumable human-in-the-loop steps, resume PDF/DOCX ingestion, and GFI issue
+sourcing are built;
+next are minimal local UI (M11), then
 conversational intake + evidence-backed skill validation (M9) and the
 extension shell. Design detail in [specs/01-system-overview.md](specs/01-system-overview.md) §M9 design and
 [specs/03-milestones.md](specs/03-milestones.md).

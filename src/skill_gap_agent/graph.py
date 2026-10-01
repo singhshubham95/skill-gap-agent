@@ -1,7 +1,7 @@
 """Graph schema: node/edge models and the networkx graph builder.
 
-Store-agnostic per specs/architecture.md — the same shape maps 1:1 onto Neo4j
-later (deferred-enhancements #1).
+Store-agnostic per specs/01-system-overview.md §Graph Schema — the same
+shape maps 1:1 onto Neo4j later (03-milestones.md §Deferred #1).
 """
 
 from __future__ import annotations
@@ -33,13 +33,18 @@ class JD(BaseModel):
 class Project(BaseModel):
     title: str
     description: str = ""
-    type: str = "standalone"  # v1: standalone only (oss_issue deferred)
+    type: str = "standalone"  # "standalone" | "oss_issue" (M10)
+    url: str = ""  # oss_issue: issue html_url
+    repo: str = ""  # oss_issue: owner/repo
+    labels: list[str] = []  # oss_issue: label names
+    updated_at: str = ""  # oss_issue: ISO timestamp from the API
 
 
 class SkillGraph:
-    """networkx-backed graph with the schema from specs/architecture.md.
+    """networkx-backed graph with the schema from specs/01-system-overview.md.
 
-    Nodes: Skill, JD, Project. Edges: HAS_SKILL, REQUIRES{weight},
+    Nodes: Skill, JD, Project (type standalone | oss_issue as of M10).
+    Edges: HAS_SKILL, REQUIRES{weight},
     TRANSFERS_TO{confidence, rationale}, CLOSES_GAP.
     """
 

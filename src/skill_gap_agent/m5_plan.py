@@ -12,16 +12,29 @@ from .gate import DEFAULT_THRESHOLD, review_targets
 from .ingest import build_seed_graph
 from .judge import judge_all_unmatched, save_judge_report
 from .llm import LLMConfig
-from .output import write_plan
+from .oss import source_oss_for_gaps
+from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
 from .synthesis import save_synthesis_report, synthesize_for_gaps
 from .taxonomy import load_taxonomy
 
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    skills_path = Path(args[0]) if args else Path("data/skillsdataset.json")
-    jds_path = Path(args[1]) if len(args) > 1 else Path("data/jds")
+    argv = sys.argv[1:]
+    pos: list[str] = []
+    skip_next = False
+    for a in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--top":
+            skip_next = True
+            continue
+        if a.startswith("--"):
+            continue
+        pos.append(a)
+    skills_path = Path(pos[0]) if pos else Path("data/skillsdataset.json")
+    jds_path = Path(pos[1]) if len(pos) > 1 else Path("data/jds")
     auto = "--auto" in sys.argv
     skip_judge = "--no-judge" in sys.argv
     top_n = 5
@@ -61,8 +74,19 @@ def main() -> None:
     print(f"\n=== Project synthesis (top {top_n} non-bridge gaps) ===")
     projects = synthesize_for_gaps(sg, gaps, top_n=top_n, cfg=LLMConfig())
 
+    skip_oss = "--no-oss" in sys.argv
+    no_llm_oss = "--no-llm-oss" in sys.argv
+    if skip_oss:
+        oss_by_gap = {}
+    else:
+        print(f"\n=== OSS issue sourcing (top {top_n} non-bridge gaps) ===")
+        oss_by_gap = source_oss_for_gaps(
+            sg, gaps, top_n=top_n, cfg=LLMConfig(), use_llm=not no_llm_oss
+        )
+
     out = Path("output")
-    plan_path = write_plan(gaps, projects, stats, out / "plan.md")
+    plan_path = write_plan(gaps, projects, stats, out / "plan.md", oss_by_gap)
+    write_plan_html(gaps, projects, stats, oss_by_gap, out / "plan.html")
     save_synthesis_report(projects, out / "synthesis_report.json")
     sg.save(str(out / "graph.json"))
 

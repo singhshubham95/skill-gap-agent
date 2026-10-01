@@ -9,8 +9,8 @@ routes to them. (Folded from `2-architecture.md`, 2026-09-27 — that file's
 stage stubs duplicated the S-files, so only the M9 design + schema survived
 the merge.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M8 built; M9–M11 designed**
-(GFI-first order: M10 → M11 → M9, then the extension shell).
+**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10 built; M9 + M11 designed**
+(GFI-first order: M10 done → M11 → M9, then the extension shell).
 All pipeline stages are built and validated against a sealed hand-performed
 gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
 §Validation rubric); results in the README case study. The target adds
@@ -86,7 +86,7 @@ flowchart TB
 | S3 skill map | Graph store: schema + queries, JSON round-trip | `graph.py` | [06-skill-map.md](06-skill-map.md) | ✅ Built (M1) |
 | S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [07-skill-cleaner.md](07-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
 | S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [08-gap-measurer.md](08-gap-measurer.md) | ✅ Built (M3–M6) |
-| S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [09-practice-planner.md](09-practice-planner.md) | ✅ Built (M5); 🎯 OSS (M10) |
+| S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [09-practice-planner.md](09-practice-planner.md) | ✅ Built (M5 + M10 thin slice) |
 | S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML/extension screens | `cli.py`, `m5_plan.py` | [10-flow-runner.md](10-flow-runner.md) | ✅ Built (M7–M8); 🎯 UI (M11) |
 
 ## Pipeline (stage order = data flow)
@@ -187,7 +187,7 @@ anti-cheat is needed, only honest framing.
 |---|---|
 | `Skill` | `name`, `category`, `source` (`current`\|`target`) |
 | `JD` | `title`, `company` |
-| `Project` | `title`, `description`, `type` (`standalone` in v1; `oss_issue` in M10) |
+| `Project` | `title`, `description`, `type` (`standalone` + `oss_issue` since M10) + `url, repo, labels, updated_at` for oss issues |
 
 **Edges**
 
@@ -222,10 +222,10 @@ skill-gap-agent/
 │   ├── ranking.py             ← CORE: transferability-aware gap ranking
 │   ├── requirements.py        ← CORE: alternative-skill groups (any-of semantics)
 │   ├── synthesis.py           ← CORE: grounded project synthesis
-│   ├── output.py              ← CORE: plan.md renderer (with JD traceability)
+│   ├── oss.py                 ← M10: GFI sourcing (Search Issues + S2 filter + cache)
+│   ├── output.py              ← CORE: plan.md renderer (with JD traceability) + plan.html (M10 thin slice)
    ├── cli.py                 ← LangGraph runner (M7): graph wiring + interrupt/resume loop
-   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)
-   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
+   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)│   ├── m10_check.py           ← milestone-10 verification: oss thin slice (offline stub + cache reuse)   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
 │   ├── m3_judge.py            ← milestone-3 runner (scaffolding)
 │   ├── m2_check.py            ← milestone-2 verification script (scaffolding)
 │   └── smoke_test.py          ← milestone-1 schema test (scaffolding)

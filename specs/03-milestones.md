@@ -203,11 +203,22 @@ target), not spec boundaries. Numbering stays linear and global.
    skills validated via concept checklist + applied question with hidden
    rubric; grades persist to `output/proficiency.json` on the gate's 1–5
    depth scale; gate shrinks to unvalidated skills.
-10. **OSS issue sourcing (GFI thin slice).** 🎯 Designed
-    (end goal + mechanics in S6 `09-practice-planner.md`). New `oss.py`
-    consumed from `rank_gaps()` `Gap` objects: curated repos → GitHub
-    Search Issues (`good-first-issue`) → S2 relevance filter → persist
-    `output/oss_issues.json`. `Project` gains `type="oss_issue"`.
+10. **OSS issue sourcing (GFI thin slice).** ✅ Built 2026-09-28
+    (mechanics in S6 `09-practice-planner.md`). New `oss.py`
+    consumed from `rank_gaps()` `Gap` objects: 2-attempt search loop
+    (strict → broadened fallback) over GitHub Search Issues
+    (`good first issue`) with curated-repo preference re-rank → S2
+    relevance filter → persist `output/oss_issues.json` (query +
+    attempts + timestamp). `Project` gains `type="oss_issue"`
+    (`url, repo, labels, updated_at`); `CLOSES_GAP` reused. Wired as a
+    `cli.py` node after synthesis (`--no-oss` / `--no-llm-oss` flags);
+    `plan.md` + thin-slice `plan.html` render per-gap issue links.
+    Verified: `m10_check.py` offline PASS (stub search, cache reuse,
+    md+html); live seed run (`--auto --no-judge --top 2 --no-llm-oss`)
+    sourced 5+5 issues with HTTP-200 links; second run zero API calls;
+    `ruff` clean. Known limit: global search returns variably-relevant
+    off-curated issues — quality ranking stays deferred (§Deferred #3);
+    the search-and-reason refinement loop is the follow-up.
 11. **Minimal local UI.** 🎯 Designed
     (mechanics in S7 `10-flow-runner.md`). `output.py::render_plan()` also
     emits `output/plan.html` (same data, clickable issue links) — later the
@@ -223,7 +234,7 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 |---|---|---|---|
 | 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in `01-system-overview.md` §Graph Schema is already Neo4j-shaped. |
 | 2 | **True LangGraph `interrupt()` + checkpointer** → Done (M7) | stdin prompt loop in the confidence gate | Resumable runtime adds complexity for a CLI. Restored for long-running/resumable runs. |
-| 3 | **GitHub Issues sourcing node** (`good-first-issue`/`help-wanted` search) → Designed (M10) | LLM project synthesis only | Fragile external dependency (rate limits, label quality varies by repo). Thin slice in M10 alongside synthesis; quality filtering remains deferred. |
+| 3 | **GitHub Issues sourcing node** (`good-first-issue`/`help-wanted` search) → Built thin slice (M10) | LLM project synthesis only | Fragile external dependency (rate limits, label quality varies by repo). Thin slice in M10 alongside synthesis; quality filtering + search-and-reason refinement loop remain deferred. |
 | 4 | **Chat refinement over the built graph** ("why is X a gap", "re-rank assuming I know Y") | None — static plan output | A second app (tool-calling loop over graph queries). v1.2, after the graph is trustworthy. |
 | 5 | **Embedding-based skill clustering** for dedup | Exact + alias match, LLM merge for ambiguous cases | Load-bearing but simple matching suffices for seed data. Restore if dedup errors visibly corrupt judge input. |
 | 6 | **Local model benchmark** (small open models vs. cloud) on the judge node | Cloud cheap models only | Great portfolio experiment, but only meaningful once the cloud baseline passes the rubric. The thin `judge()` interface makes this a config swap. |
