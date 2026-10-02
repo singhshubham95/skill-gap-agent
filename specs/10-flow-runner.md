@@ -2,8 +2,8 @@
 
 Step order and display. Owns no domain logic — calls S1→S6.
 
-**Status: Built** (M7 graph + M8 resume front-end); local UI Designed
-(M11); extension shell unscheduled.
+**Status: Built** (M7 graph + M8 resume front-end + M11 local UI);
+extension shell unscheduled.
 
 ## Runners
 
@@ -25,12 +25,31 @@ Step order and display. Owns no domain logic — calls S1→S6.
 ## Screens
 
 - CLI console today. M11 (minimal local UI, **not** a Chrome extension):
-  reuse `output.py::render_plan()` to also emit `output/plan.html` (same
-  data, clickable issue links) or one single-file FastAPI page.
+  `server.py` (stdlib `http.server`, no new dep — same rationale as M10
+  `urllib`): `GET /` lists `data/jds/*.txt|*.md` + Generate button;
+  `POST /api/run` starts the `cli.py` graph `--auto` in a background
+  thread (poll `GET /api/status`; loading screen until `node_output`
+  finishes); `GET /plan.html` serves `output/plan.html` (same
+  `render_plan_html` data, clickable GFI links). Options via JSON body:
+  `top_n`, `skip_judge`, `skip_oss`, `no_llm_oss` (defaults mirror
+  `cli.py`). Single-run guard (409 while running); status is
+  `idle|running|done|error` with timestamps. Paths resolve from repo root,
+  never hardcoded. `cli.py` / `m5_plan.py` stay the runners. The HTML
+  renderer later becomes the extension side-panel body.
   M10 already ships the thin-slice `plan.html` (static, no JS);
-  M11 hardens it into the local UI.
-  `cli.py` / `m5_plan.py` stay the runners. The HTML renderer later becomes
-  the extension side-panel body.
+  M11 hardens it into the local UI. Revised scope (user 2026-10-01):
+  bookmarklet saves JD → `data/jds/` (S1 helper, Built) + local page lists
+  folder contents + Regenerate button runs the `cli.py` graph `--auto`
+  with a loading screen (judge/synthesis/OSS take minutes; poll status,
+  show `plan.html` when `node_output` finishes). Built 2026-10-01:
+  `m11_check.py` offline PASS (16 JDs listed, 202 + 409 guard,
+  running → done, plan served); `ruff` clean.
+  Enhancement 2026-10-02: nodes report via `cli.set_stage_listener()`
+  (`ingest|judge|gate|rank|synthesize|oss|output`); `/api/status` carries
+  `stage`, the index poll shows it. `GET /jds/<name>` (exact-name match)
+  renders JD text; `render_plan_html(..., jd_files={title: filename})`
+  links each gap's source JDs; `node_output` builds the map when state
+  `link_jds` is set (server sets it; CLI default plain text).
 - ASCII-safe console output (cp1252 guard).
 
 ## History (links, not copies)

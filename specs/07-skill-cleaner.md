@@ -44,4 +44,4 @@ Built only when a run exercises it end-to-end.
 
 - Decisions: `02-decisions.md` (M8 bridge row; M2 implied-flow row).
 - Milestones: `03-milestones.md` M2, M8; §Open (alias, canonical strategy,
-  ESCO, implied precision, modality).
+  ESCO, implied precision, modality, bridge wiring).

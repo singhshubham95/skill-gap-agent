@@ -219,11 +219,18 @@ target), not spec boundaries. Numbering stays linear and global.
     `ruff` clean. Known limit: global search returns variably-relevant
     off-curated issues — quality ranking stays deferred (§Deferred #3);
     the search-and-reason refinement loop is the follow-up.
-11. **Minimal local UI.** 🎯 Designed
-    (mechanics in S7 `10-flow-runner.md`). `output.py::render_plan()` also
-    emits `output/plan.html` (same data, clickable issue links) — later the
-    extension side-panel body. Not a Chrome extension. Order: M10 → M11 →
-    then M9 and the extension shell (GFI-first pivot 2026-09-27).
+11. **Minimal local UI.** ✅ Built 2026-10-01
+    (mechanics in S7 `10-flow-runner.md`). `server.py` (stdlib
+    `http.server`, no new dep): `GET /` lists `data/jds/` + Generate
+    button; `POST /api/run` runs the `cli.py` graph `--auto` in a
+    background thread (poll `GET /api/status`; loading screen until
+    `node_output` finishes); `GET /plan.html` serves `output/plan.html`
+    (same `render_plan_html` data, clickable GFI links). Single-run guard
+    (409 while running). Verified: `m11_check.py` offline PASS (16 JDs
+    listed, 202 + 409 guard, running → done, plan served); `ruff` clean.
+    Order held: M10 → M11 → then M9 and the extension shell
+    (GFI-first pivot 2026-09-27). Bookmarklet saver
+    (`tools/linkedin_jd_bookmarklet.js`, Built) drops JDs into `data/jds/`.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -292,6 +299,12 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   (14 on seed data, y/n/a flow). An LLM pass could catch subtler
   implications (e.g. "NL-to-SQL agents" → SQL depth); consider if the gap
   list looks wrong.
+- **Vocabulary-bridge wiring (S4).** `vocab_bridge.py`
+  (`bridge_vocabulary()` + `apply_bridge()`, decisions in
+  `output/vocab_bridge.json`) is code-complete but unwired — no caller in
+  `ingest.py` / `cli.py` imports it (status in S4 `07-skill-cleaner.md`).
+  Open work: call it on unmatched canonical terms during ingestion and
+  verify end-to-end on resume + seed data. Does not block M11.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
 - **Model pick (S2).** Resolved at M3: DeepSeek V4 Flash 0731 via

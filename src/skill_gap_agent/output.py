@@ -115,11 +115,15 @@ def render_plan_html(
     projects: list[SynthesizedProject],
     stats: dict,
     oss_by_gap: dict[str, list] | None = None,
+    jd_files: dict[str, str] | None = None,
 ) -> str:
     """Minimal plan.html (M10 thin slice): same data as plan.md, clickable links.
 
     Single self-contained file, no JS. Later becomes the M11 extension
-    side-panel body (specs/10-flow-runner.md).
+    side-panel body (specs/10-flow-runner.md). When jd_files maps a gap's
+    source-JD title -> JD filename, each verdict's JD list renders as links
+    to the M11 /jds/<filename> viewer (served by server.py); without the
+    map (plain CLI runs) titles render as plain text as before.
     """
     esc = html.escape
     parts: list[str] = []
@@ -134,6 +138,30 @@ def render_plan_html(
     parts.append("<h2>Ranked Gaps</h2><pre>")
     parts.append(esc(format_ranking(gaps)))
     parts.append("</pre>")
+    parts.append("<h2>Gap Verdicts</h2>")
+    for g in gaps:
+        parts.append(f"<h3>{esc(g.target)} — {esc(g.verdict)} "
+                       f"(score {g.gap_score}, {g.weight} JDs)</h3>")
+        if g.top_transfer_skill:
+            parts.append(
+                f"<p>Top transfer: <strong>{esc(g.top_transfer_skill)}</strong> "
+                f"({g.top_transfer_confidence:.2f}). {esc(g.rationale)}</p>"
+            )
+        else:
+            parts.append("<p>No transfer path identified.</p>")
+        if g.note:
+            parts.append(f"<p><em>Gate note: {esc(g.note)}</em></p>")
+        if g.source_jds:
+            parts.append(f"<p><strong>Required by {g.weight} JD(s):</strong></p><ul>")
+            for jd in g.source_jds:
+                fname = (jd_files or {}).get(jd)
+                if fname:
+                    parts.append(
+                        f"<li><a href='/jds/{esc(fname, quote=True)}'>{esc(jd)}</a></li>"
+                    )
+                else:
+                    parts.append(f"<li>{esc(jd)}</li>")
+            parts.append("</ul>")
     parts.append("<h2>Recommended Projects</h2>")
     if not projects:
         parts.append("<p><em>No projects synthesized.</em></p>")
@@ -186,8 +214,9 @@ def write_plan_html(
     stats: dict,
     oss_by_gap: dict[str, list] | None = None,
     path: str | Path = Path("output/plan.html"),
+    jd_files: dict[str, str] | None = None,
 ) -> Path:
     p = Path(path)
     p.parent.mkdir(exist_ok=True)
-    p.write_text(render_plan_html(gaps, projects, stats, oss_by_gap), encoding="utf-8")
+    p.write_text(render_plan_html(gaps, projects, stats, oss_by_gap, jd_files), encoding="utf-8")
     return p

@@ -1,4 +1,4 @@
-"""Resume ingestion (milestone 8, specs/04-reader.md S1).
+"""Resume ingestion (milestone 8, specs/9-reader.md S1).
 
 Converts a resume file (PDF/DOCX/TXT) into the skills-JSON shape the
 ingest node already consumes, so everything downstream (normalize, dedup,

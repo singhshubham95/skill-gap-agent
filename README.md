@@ -56,10 +56,10 @@ persist in `output/`, so re-runs only ask about what changed.
 
 Full trade-off list with restore triggers: [specs/03-milestones.md](specs/03-milestones.md) §Deferred.
 
-**Roadmap (M7–M8 + M10 built; M9 + M11 designed):** LangGraph orchestration with
-resumable human-in-the-loop steps, resume PDF/DOCX ingestion, and GFI issue
-sourcing are built;
-next are minimal local UI (M11), then
+**Roadmap (M7–M8 + M10–M11 built; M9 designed):** LangGraph orchestration with
+resumable human-in-the-loop steps, resume PDF/DOCX ingestion, GFI issue
+sourcing, and minimal local UI (`python -m skill_gap_agent.server`) are built;
+next is
 conversational intake + evidence-backed skill validation (M9) and the
 extension shell. Design detail in [specs/01-system-overview.md](specs/01-system-overview.md) §M9 design and
 [specs/03-milestones.md](specs/03-milestones.md).

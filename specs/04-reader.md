@@ -14,6 +14,13 @@ files (and later browser pages) into plain text for downstream stages.
 - JD side: `data/jds/*.txt|*.md` → raw text per file.
   Code: `ingest.py::ingest_jds` (file loop only; lexicon matching belongs
   to S4).
+- JD bookmarklet saver (Built helper, M11-adjacent):
+  `tools/linkedin_jd_bookmarklet.js` extracts the LinkedIn JD block
+  (`[id^="JobDetails_AboutTheJob_"]`, expands truncated text), saves as
+  `"<Title>.txt"` with `"<Title>\n<URL>\n\n<Description>"` via
+  `showSaveFilePicker()` (Chromium) with Blob-download fallback.
+  User picks `data/jds/` in the picker; filename stem becomes the JD title.
+  No network calls, so no CSP/mixed-content issue.
 - Guards: PDF with <100 chars of text raises `ScannedPdfError` with a
   clear message instead of feeding empty text downstream (which would
   hallucinate). Empty DOCX raises `ValueError`. Unsupported extensions
