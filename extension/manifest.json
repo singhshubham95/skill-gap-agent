@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Skill-Gap Agent",
+  "version": "0.13.0",
+  "description": "Capture LinkedIn job descriptions and generate a ranked skill-gap plan with the local Skill-Gap Agent.",
+  "permissions": ["sidePanel", "storage"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Skill-Gap Agent"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/jobs/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

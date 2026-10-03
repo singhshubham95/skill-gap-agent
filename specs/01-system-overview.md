@@ -3,17 +3,21 @@
 The top-down view of the Skill-Gap Agent: what the system is, its layers and
 components, where each lives in code, and how data flows through. This page
 is the map **and** the deep-design home for cross-stage concerns (M9 intake
-+ validation design, graph schema reference below). Per-stage mechanics live
-in S1–S7 (`04-reader.md` through `10-flow-runner.md`); this page's Stage Table
-routes to them. (Folded from `2-architecture.md`, 2026-09-27 — that file's
-stage stubs duplicated the S-files, so only the M9 design + schema survived
-the merge.)
++ validation design, M12 sweep evaluation design, graph schema reference
+below). Per-stage mechanics live in S1–S7 (`04-reader.md` through
+`10-flow-runner.md`); this page's Stage Table routes to them. (Folded from
+`2-architecture.md`, 2026-09-27 — that file's stage stubs duplicated the
+S-files, so only the M9 design + schema survived the merge.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M11 built; M9 designed**
-(GFI-first order: M10 done → M11 → M9, then the extension shell).
+**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M13 built; M9 designed**
+(order note: M13's extension shell jumped ahead of M9 on user priority
+2026-10-03 — the capture → analyze → plan flow works on the M8 resume path;
+M9's skill validation improves plan quality but is not a mechanical
+prerequisite for it).
 All pipeline stages are built and validated against a sealed hand-performed
 gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
-§Validation rubric); results in the README case study. The target adds
+§Validation rubric — the acceptance criteria and results live there). The
+target adds
 conversational intake, resume (PDF/DOCX) ingestion, evidence-backed skill
 validation, and true LangGraph orchestration — components marked 🎯 Designed
 below.
@@ -87,7 +91,7 @@ flowchart TB
 | S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [07-skill-cleaner.md](07-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
 | S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [08-gap-measurer.md](08-gap-measurer.md) | ✅ Built (M3–M6) |
 | S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [09-practice-planner.md](09-practice-planner.md) | ✅ Built (M5 + M10 thin slice) |
-| S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML/extension screens | `cli.py`, `m5_plan.py` | [10-flow-runner.md](10-flow-runner.md) | ✅ Built (M7–M8 + M11) |
+| S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML/extension screens | `cli.py`, `m5_plan.py`, `sweep.py` (M12 eval harness) | [10-flow-runner.md](10-flow-runner.md) | ✅ Built (M7–M8 + M11–M12) |
 
 ## Pipeline (stage order = data flow)
 
@@ -100,17 +104,17 @@ JD texts ────────────▶ S1 reader ────┘      
 ## Data Flow at a Glance
 
 ```
-IN:  data/skillsdataset.json (146 phrases)   data/jds/*.txt (13 JDs)
+IN:  data/skillsdataset.json (146 phrases)   data/jds/*.txt (16 JDs)
       │                                        │
       ▼                                        ▼
-   canonical skills (119)                target skills (23)
-   + implied skills (23, user-approved)  + REQUIRES weights
+   canonical skills (118)                target skills (19)
+   + implied skills (41)                 + REQUIRES weights
       │                                        │
       └──────────────┬─────────────────────────┘
                      ▼
             SkillGraph (networkx)
                      │
-        unmatched targets (21) → LLM judge → TRANSFERS_TO edges (122)
+        unmatched targets (17) → LLM judge → TRANSFERS_TO edges
                      │
                      ▼
         confidence gate (M4) → gap ranking (M5) → plan.md (M5)
@@ -118,6 +122,13 @@ IN:  data/skillsdataset.json (146 phrases)   data/jds/*.txt (13 JDs)
 PERSISTED: output/graph.json (whole graph), output/judge_report.json,
            output/implied_skills.json (approval record)
 ```
+
+_Counts are a fresh ingestion snapshot on the current seed data (2026-10-03):
+118 canonical + 41 implied (the persisted approval record; 23 of those are
+still re-proposed by today's patterns) vs. 16 JDs → 19 target skills (of 48
+required-skill terms; the rest resolve to held skills) → 17 unmatched. The
+judge-edge count is LLM output and varies per run — the M12 sweep
+(§M12 design) is the mechanism for refreshing numbers like these._
 
 **Target flow (M7–M9):** the IN edge becomes conversational — resume
 PDF/DOCX or skills JSON → LLM extraction → skill validation on triaged
@@ -179,6 +190,205 @@ anti-cheat is needed, only honest framing.
   micro-gaps ("learn window functions" as a plan item) are a recorded
   future idea, not v2 scope.
 
+## §M12 design — JD-subset sweep evaluation (Built — M12, validated 2026-10-03)
+
+**Purpose.** A framework to judge how well the system identifies skill gaps
+and recommends a learning plan (projects + good-first-issues) for a given
+resume against a *set* of job descriptions. It is an **evaluation harness**,
+not a pipeline stage: it runs the existing pipeline many times over
+different JD subsets and produces a reviewable record.
+
+**Why subsets rather than one run.** A single run over all JDs produces one
+plan with no way to tell whether the plan is *right* or merely *plausible*.
+Varying the JD set shows whether the plan tracks the input signal: a gap
+that appears for one JD and vanishes for another is evidence the ranking
+responds to demand; a gap that appears regardless is either a genuine
+constant or a bug.
+
+**Sampling.** Two families, both seeded (`random.Random(seed)`) for
+replicability:
+
+| Family | Construction | Question it answers |
+|---|---|---|
+| Random | `k=3` JDs drawn without replacement, `n` draws | Typical-case behaviour; the baseline distribution |
+| Contrastive | 3 near-identical JDs; 3 maximally different JDs; all JDs; singletons (`k=1`) | Stability under redundancy, fragmentation under diversity, full-signal baseline, per-JD coherence |
+
+Random-only sampling is deliberately **not** the whole design: with 16 JDs
+there are 560 triples and random draws overlap heavily, so most runs would
+be near-duplicates of each other. Contrastive subsets buy more information
+per run.
+
+**Key insight — most LLM work is subset-independent.** In
+[judge.py](../src/skill_gap_agent/judge.py), `judge_target()` scores a target
+against `prune_candidates(target, sg.current_skills())`. Current skills come
+from the resume (constant across subsets); only the *target list* comes from
+the JDs. The judge's score for target `T` is therefore a pure function of
+`T` — it does not depend on which subset surfaced `T`. The same holds for
+gate overrides (the question is about the user's depth in the *source*
+skill — constant) and OSS issues (the query is built from `gap.target`
+alone).
+
+Consequence: judge / gate / OSS caches are **shared across all subsets**
+(`_shared/`), so a sweep costs ~23 judge calls total instead of
+`n_subsets × ~20`. What *is* genuinely subset-dependent: JD ingestion
+(which targets exist), `gap_score = weight × (1 − confidence)` (weight =
+JDs in the subset), and synthesis (top-N selection + the weight in the
+prompt). So: **shared caches, per-subset graphs and plans.**
+
+**Runner shape (design revision 2026-10-03).** `sweep.py` calls the
+pipeline's stage functions directly — `ingest_skills_json` + `ingest_jds`,
+cached judging, `review_targets`, `rank_gaps`, `synthesize_for_gaps`,
+`source_oss_for_gaps`, `write_plan` — the same functions `m5_plan.py` and the
+`cli.py` graph nodes call, with every path passed explicitly. The first
+design drove the `cli.py` LangGraph graph once per subset; in `--auto` mode
+(the only mode a sweep runs) the graph adds no conditional behaviour and no
+interrupts, while its hardcoded `output/` paths would have to be threaded
+through nodes that M11's server also uses. Direct calls keep the harness
+isolated from the shipped runners. The invariant the first design protected —
+**never re-implement a pipeline stage inside the harness** — still holds (see
+decision rows in [02-decisions.md](02-decisions.md)).
+
+**Output layout** (per-subset directories; no output collision):
+
+```
+output/sweeps/<sweep-id>/
+├── manifest.json          # seed, k, n, model, temperature, resume + JD hashes
+├── index.md               # subset -> JD titles -> top-5 gaps -> plan link
+├── metrics.json           # stability / appearance / churn / consistency / grounding
+├── _shared/               # judge_report.json, gate_overrides.json, oss_issues.json
+└── s01/, s02/, ...        # graph.json, plan.md, plan.html, synthesis_report.json
+│                          # + jds/ (the subset's JD copies = membership on disk)
+```
+
+**Manifest must record subset membership explicitly.** `Gap.source_jds`
+([ranking.py](../src/skill_gap_agent/ranking.py)) records which JDs *mention*
+a gap — it does **not** record which JDs were *in the subset*. Without
+membership you cannot distinguish "this JD doesn't need Spark" from "this JD
+wasn't in the run", which is exactly the confusion that makes manual
+inspection useless. Each JD also gets a content hash so a renamed or edited
+file cannot silently invalidate an old sweep.
+
+**Pre-computed metrics** (automatic; they tell the reviewer *where* to look
+rather than replacing review):
+
+- **Stability** — Jaccard overlap of top-5 gap sets across subset pairs;
+  per-gap appearance rate. High variance is itself a finding.
+- **Superset consistency** — a gap present in subset A should still appear
+  when JDs mentioning it are added. Violations are bugs, not opinions.
+- **Rank churn** — rank distribution per gap across subsets (is
+  "Fine-tuning" always #1, or does it swing?).
+- **Grounding check** — the synthesis prompt requires reusing a named
+  existing skill; a string check catches drift.
+- **GFI link validity** — HTTP status per issue URL (M10 did this by hand).
+
+**Two-pass manual review** (avoids confirmation bias): (1) score plan
+quality with the JD list hidden; (2) reveal the subset and check whether the
+plan actually matches what those JDs demand. The gap between the two scores
+is the interesting number.
+
+**Replicability caveat.** The seed gives **subset** replicability, not
+**output** replicability: `LLMConfig.temperature` is 0.2, so re-running the
+same subset will not give byte-identical plans. Sweep runs therefore set
+`temperature=0` and record it in the manifest (decision row in
+[02-decisions.md](02-decisions.md)).
+
+**Done criteria (met at M12 — verification record in roadmap M12):** (1)
+`sweep.py` runs N subsets end-to-end
+with shared caches and writes the layout above, and exposes a `--list` dry
+run that prints the subsets without any LLM calls; (2) `manifest.json` +
+`index.md` let a reviewer jump from any plan to its exact JD subset;
+(3) `m12_check.py` verifies the sweep offline (stubbed LLM/search) —
+deterministic sampling, no output collision, cache sharing, manifest
+completeness; (4) `ruff check .` and `pytest` clean.
+
+## §M13 design — Chrome extension shell (Built — M13, 2026-10-03)
+
+**End-user flow (the S6 end goal, made concrete).** The user browses
+LinkedIn job descriptions in Chrome. Clicking the extension action opens a
+**side panel** — window-level, it stays open while the user switches tabs or
+navigates between JDs. Per JD: click **Capture JD** (appends to an
+only-growing list shown in the panel). Then **Analyze gaps** → the ranked
+gap table renders in the panel. Then **Generate plan** → projects +
+good-first-issues render below the gaps. Nothing navigates away; the local
+pipeline does the thinking.
+
+**UI surface = Chrome side panel** (decision rows in
+[02-decisions.md](02-decisions.md)). The popup was rejected: it closes on
+any click-away, which kills the capture loop (browse JD → return to panel).
+The in-page overlay was rejected: navigating to the next JD destroys the
+DOM node, so state must survive in extension storage anyway. The side panel
+is the platform's answer to exactly this workflow.
+
+**Capture.** A content script on `https://www.linkedin.com/jobs/*` ports the
+extraction logic of
+[../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js)
+(find the `[id^="JobDetails_AboutTheJob_"]` block, click its expand button,
+take `innerText` + `document.title` + `location.href`). The panel asks the
+active tab via `chrome.tabs.sendMessage`; the content script answers with
+`{title, url, text}`. The list lives in `chrome.storage.local`
+(`capturedJds`, deduped by URL, re-capture updates text). No `tabs` /
+`activeTab` permissions: the content script returns everything the panel
+needs. JD text is **untrusted web content** — the panel renders it with
+`textContent` only, never `innerHTML`.
+
+**Run contract (extension → local server).** `POST /api/run` body:
+`{phase, jds, top_n, skills_path?, skip_judge?, skip_oss?, no_llm_oss?}`.
+
+| `phase` | Behaviour |
+|---|---|
+| `"gaps"` | Write each captured JD to `output/captured_jds/*.txt` (same `title\nurl\n\ntext` shape as the bookmarklet; `ingest.py::ingest_jds` reads the folder unchanged — it replaces `data/jds/` as `jds_path`), then run the `cli.py` graph with `two_phase=True`: the graph pauses at a `pause` node right after `rank` via `interrupt()`; status becomes `paused`. `GET /api/gaps` then serves `output/gaps.json` (written by the rank node). |
+| `"plan"` | Resume the paused run (`Command(resume=...)`) through `synthesize` → `oss` → `output`; `GET /plan.html` serves the result. 409 if no run is paused. |
+| (absent — legacy M11) | Full one-shot run, as before. |
+
+Single-run guard unchanged (409 while `running`). `skills_path` defaults to
+`data/skillsdataset.json` (server `--skills` flag); a resume file works too
+(M8 extraction runs before the graph).
+
+**Why one graph with a pause, not two runs.** The pause is the same
+`interrupt()` machinery the confidence gate uses (M7): state continuity is
+free — the same `SkillGraph` instance and the same `gaps` list flow from
+phase 1 into phase 2. A second full run would re-ingest and re-judge (or
+require cache plumbing to avoid it). The checkpointer records the pause;
+the SkillGraph itself stays in the in-memory runtime registry (decision in
+[02-decisions.md](02-decisions.md)), so both phases must run in one server
+process — true for the side-panel workflow.
+
+**Judge cache reuse for re-analysis (`reuse_judged`).** The M12 insight —
+the judge's score for target `T` is a pure function of `T` — means that
+re-analyzing after adding one JD must not re-pay ~20 LLM calls. With
+`reuse_judged`, the judge node first copies `TRANSFERS_TO` edges from
+`output/graph.json`, then judges only targets still unmatched; the judge
+report merges by target. The CLI default stays fresh-judging (the M6
+validation semantics); the extension sets the flag.
+
+**Rendering.** The gap table is rendered natively in the panel from
+`/api/gaps` JSON. The full plan renders in an `<iframe sandbox>` pointed at
+`/plan.html` — the M10 renderer (self-contained, escaped, no JS) becomes the
+side-panel body as S6 predicted; JD links resolve against the local server
+inside the iframe.
+
+**Security posture.** Server binds `127.0.0.1` only. **No CORS headers on
+purpose**: the extension calls with `host_permissions` for
+`http://localhost:8000/*` + `http://127.0.0.1:8000/*` (which bypass CORS
+entirely), while absent `Access-Control-Allow-*` + no `OPTIONS` handler
+means hostile web pages can neither read resume-derived gaps nor trigger
+runs (JSON `Content-Type` forces a preflight, which fails). Trust model:
+any local process can reach the server — same as M11, acceptable for a
+personal tool.
+
+**Explicit non-goals (M13):** in-page gap marking on the JD text
+(§Deferred #12), generic non-LinkedIn JD pages (content-script matches are
+LinkedIn-only, like the bookmarklet), run history, hosting, multi-user
+auth, Chrome Web Store packaging.
+
+**Done criteria (met at M13 — verification record in roadmap M13):** (1)
+capture → analyze → plan completes from the extension against the local
+server; (2) `phase: "gaps"` produces `/api/gaps` and pauses, `phase:
+"plan"` resumes to `plan.html` with GFI links; (3) `m13_check.py` verifies
+the flow offline (stubbed judge/synthesis/search) — two-phase pause/resume,
+captured-JD ingestion, gaps artifact, manifest validity; (4) `ruff check
+.` and `pytest` clean.
+
 ## Graph Schema (store-agnostic — same shape later in Neo4j; folded from `2-architecture.md`)
 
 **Nodes**
@@ -205,17 +415,27 @@ anti-cheat is needed, only honest framing.
 
 ```
 skill-gap-agent/
-├── README.md                  ← project entry point (user quickstart + case study)
+├── README.md                  ← project entry point (user quickstart)
 ├── specs/                     ← you are here (numbered by reading order)
 ├── data/                      ← seed data (gitignored)
 │   ├── skillsdataset.json
-│   └── jds/                   ← 13 JD texts
+│   └── jds/                   ← 16 JD texts
+├── extension/                 ← M13: Chrome extension shell (MV3, side panel)
+│   ├── manifest.json          ← MV3 manifest (sidePanel + storage; host_permissions = localhost)
+│   ├── background.js          ← service worker: opens the side panel on action click
+│   ├── content.js             ← LinkedIn JD extraction (port of the bookmarklet logic)
+│   ├── sidepanel.html/.js/.css← capture list + Analyze gaps / Generate plan + gap table + plan iframe
+│   └── README.md              ← load-unpacked instructions
+├── tools/
+│   └── linkedin_jd_bookmarklet.js ← S1 helper (pre-extension JD saver)
 ├── src/skill_gap_agent/
 │   ├── graph.py               ← CORE: schema + queries (the system's backbone)
 │   ├── normalize.py           ← CORE: canonical terms + aliases
 │   ├── ingest.py              ← CORE: ingestion + target-ingestion nodes
-│   ├── implied.py             ← CORE: implied-skill detection + proposal flow   ├── resume.py              ← M8: resume (PDF/DOCX/TXT) → skills JSON
-   ├── vocab_bridge.py        ← M8: LLM-assisted vocabulary bridge (merge-or-new)│   ├── taxonomy.py            ← CORE: ESCO loader with fallback
+│   ├── implied.py             ← CORE: implied-skill detection + proposal flow
+│   ├── resume.py              ← M8: resume (PDF/DOCX/TXT) → skills JSON
+│   ├── vocab_bridge.py        ← M8: LLM-assisted vocabulary bridge (merge-or-new)
+│   ├── taxonomy.py            ← CORE: ESCO loader with fallback
 │   ├── llm.py                 ← CORE: provider-agnostic LLM interface (DeepSeek via OpenRouter)
 │   ├── judge.py               ← CORE: transferability judge node
 │   ├── gate.py                ← CORE: confidence gate (self-assessment: depth + intent)
@@ -223,22 +443,36 @@ skill-gap-agent/
 │   ├── requirements.py        ← CORE: alternative-skill groups (any-of semantics)
 │   ├── synthesis.py           ← CORE: grounded project synthesis
 │   ├── oss.py                 ← M10: GFI sourcing (Search Issues + S2 filter + cache)
-│   ├── output.py              ← CORE: plan.md renderer (with JD traceability) + plan.html (M10 thin slice)
-   ├── cli.py                 ← LangGraph runner (M7): graph wiring + interrupt/resume loop
-   ├── server.py              ← M11: stdlib local UI (JD list + Generate + stage poll + JD viewer)
-   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)│   ├── m10_check.py           ← milestone-10 verification: oss thin slice (offline stub + cache reuse)   ├── m11_check.py           ← milestone-11 verification: local UI server (offline stub)   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
+│   ├── output.py              ← CORE: plan.md renderer (with JD traceability) + plan.html (M10)
+│   ├── cli.py                 ← LangGraph runner (M7): graph wiring + interrupt/resume loop,
+│   │                            two-phase pause (M13), oss node + stage listener (M13 completion)
+│   ├── server.py              ← M11 local UI + M13 run contract (captured JDs, phase gaps|plan,
+│   │                            GET /api/gaps)
+│   ├── sweep.py               ← M12: JD-subset sweep harness (seeded sampling + shared caches)
+│   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)
+│   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow
+│   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison
+│   ├── m10_check.py           ← milestone-10 verification: oss thin slice (offline stub + cache reuse)
+│   ├── m11_check.py           ← milestone-11 verification: local UI server (offline stub)
+│   ├── m12_check.py           ← milestone-12 verification: sweep harness (offline stub)
+│   ├── m13_check.py           ← milestone-13 verification: extension server contract (offline stub)
+│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
 │   ├── m3_judge.py            ← milestone-3 runner (scaffolding)
 │   ├── m2_check.py            ← milestone-2 verification script (scaffolding)
 │   └── smoke_test.py          ← milestone-1 schema test (scaffolding)
-├── output/                    ← pipeline artifacts (gitignored): plan.md, graph.json,
-│                                 judge_report.json, gate_overrides.json, implied_skills.json
+├── output/                    ← pipeline artifacts (gitignored): plan.md, plan.html, graph.json,
+│                                 gaps.json (M13), judge_report.json, gate_overrides.json,
+│                                 implied_skills.json, oss_issues.json,
+│                                 captured_jds/ (M13 extension run input)
 └── .env                       ← API keys (gitignored; see .env.example)
 ```
 
 **Scaffolding note:** the `m*_*.py` runners are milestone scripts. Entries:
 `m5_plan.py` (v1 sequential runner), `cli.py` (the M7 LangGraph runner — the
 primary entry, accepts resume files as of M8). The v2 modules (`intake.py`,
-`validate.py`) do not exist yet; creating them is milestone M9.
+`validate.py`) do not exist yet; creating them is milestone M9. `sweep.py`
+(M12) is an evaluation harness, not a runner — it drives `cli.py`'s graph
+once per JD subset.
 
 ## Conventions & Guardrails
 
@@ -266,4 +500,6 @@ accurate (workflow rules live in
 - **Build order + progress + trade-offs + open questions:** [03-milestones.md](03-milestones.md) (roadmap — §§Deferred/Open hold the rest)
 - **Stage mechanics:** S1–S7 files (`04-reader.md` … `10-flow-runner.md`), routed via the Stage Table above
 - **Validation rubric:** S5 [08-gap-measurer.md](08-gap-measurer.md) §Validation rubric
-- **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal
+- **Evaluation harness design:** §M12 design above (JD-subset sweeps)
+- **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal;
+  shell design in §M13 design above (side panel + two-phase server contract)

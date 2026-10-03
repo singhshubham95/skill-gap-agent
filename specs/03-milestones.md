@@ -87,7 +87,9 @@ Each milestone ends with something runnable.
 6. **Validation pass.** ✅ Done. Full fresh pipeline run (judge re-called, no
    reuse) on the seed data; output compared against the sealed hand analysis
    per the rubric (now in S5 `08-gap-measurer.md` §Validation rubric). All three pass
-   criteria met — see the README case study for the full comparison. The
+   criteria met — the full comparison is recorded in that rubric (the README
+   case study write-up was removed 2026-10-03 as redundant with it; evidence
+   kept in the specs). The
    hand analysis's headline buckets (GenAI/LLM depth, framework breadth, cloud
    platforms) all appear in the ranked output; ADK→LangGraph partial-gap
    reproduced independently; the AWS ambiguous case was surfaced by the gate
@@ -113,7 +115,8 @@ Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 ## Planned Milestones (v2 target — Designed, no code yet)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7–M9
-target), not spec boundaries. Numbering stays linear and global.
+target), not spec boundaries. Numbering stays linear and global. M12 is an
+evaluation harness over the built pipeline, not a new pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -231,6 +234,174 @@ target), not spec boundaries. Numbering stays linear and global.
     Order held: M10 → M11 → then M9 and the extension shell
     (GFI-first pivot 2026-09-27). Bookmarklet saver
     (`tools/linkedin_jd_bookmarklet.js`, Built) drops JDs into `data/jds/`.
+    **2026-10-03 M13 discovery (applies to M10 + this entry):** the
+    `cli.py` wiring these entries describe (oss node after synthesis with
+    `--no-oss`/`--no-llm-oss`-equivalent state flags, `plan.html` output,
+    `cli.set_stage_listener()`, `jd_files` linking) was **not actually in
+    `cli.py`** — it lived only in `m5_plan.py`, `sweep.py` and the
+    `output.py` renderers, and `m11_check.py` failed on that tree. The
+    wiring landed with M13 (the extension's backend is exactly this path);
+    `m11_check.py` passes since. History kept as written above — the claims
+    were accurate for `m5_plan.py`-driven runs, ahead of the code for
+    `cli.py`.
+12. **JD-subset sweep evaluation.** ✅ Built 2026-10-03
+    (full design in `01-system-overview.md` §M12 design). An **evaluation
+    harness** (`sweep.py`), not a pipeline stage: it runs the existing
+    pipeline once per JD subset and writes a reviewable record so the user
+    can inspect which subset produced which plan.
+    - **Sampling:** seeded `random.Random(seed)` for replicability. Two
+      families — random `k=3` subsets (typical case) plus **contrastive**
+      subsets (3 near-identical JDs, 3 maximally different, all JDs,
+      singletons). Random-only is deliberately not the whole design: 16 JDs
+      → 560 triples, random draws overlap heavily, so most runs would be
+      near-duplicates.
+    - **Shared caches (the cost insight):** the judge scores target `T`
+      against `prune_candidates(T, sg.current_skills())`; current skills come
+      from the resume (constant across subsets), so the score for `T` is a
+      pure function of `T` — subset-independent. Same for gate overrides
+      (question is about the *source* skill) and OSS issues (query built from
+      `gap.target`). These caches live in `_shared/` and are reused across
+      every subset: ~23 judge calls per sweep instead of `n_subsets × ~20`.
+      Genuinely subset-dependent: JD ingestion (which targets exist),
+      `gap_score = weight × (1 − confidence)`, synthesis (top-N + weight in
+      prompt).
+    - **Manifest records subset membership explicitly.** `Gap.source_jds`
+      records which JDs *mention* a gap, not which were *in the subset*;
+      without membership you cannot tell "this JD doesn't need Spark" from
+      "this JD wasn't in the run". Each JD also gets a content hash so a
+      renamed/edited file can't silently invalidate an old sweep.
+    - **Pre-computed metrics** (target the review, don't replace it):
+      top-5 Jaccard stability across subset pairs, per-gap appearance rate,
+      superset consistency (violations = bugs, not opinions), rank churn per
+      gap, synthesis grounding string-check, GFI link HTTP status.
+    - **Two-pass manual review** to avoid confirmation bias: score plan
+      quality with the JD list hidden, then reveal the subset and check the
+      plan matches what those JDs demand.
+    - **Replicability caveat:** the seed gives subset replicability, not
+      output replicability (`LLMConfig.temperature` is 0.2). Sweep runs set
+      `temperature=0` and record it in the manifest.
+    - **Done criteria:** `sweep.py` runs N subsets end-to-end with shared
+      caches; `manifest.json` + `index.md` map any plan to its exact subset;
+      `m12_check.py` verifies offline (stubbed LLM/search) — deterministic
+      sampling, no output collision, cache sharing, manifest completeness;
+      `ruff check .` and `pytest` clean.
+    - **Verified 2026-10-03:** `m12_check.py` offline PASS (sampling
+      determinism + contrastive ordering, per-subset output isolation, judge
+      cache sharing 4 new + 16 replays on the fixture, manifest/index
+      completeness, metrics fixtures); `ruff check .` clean; live smoke sweep
+      `python -m skill_gap_agent.sweep --seed 42 --n 2 --singletons 1 --top 2
+      --id m12-smoke` completed end-to-end — 6 subsets, 0 new + 54 cached
+      judge calls, 7 synthesized projects, mean top-5 Jaccard 0.833, 0
+      superset violations, `output/sweeps/m12-smoke/index.md` reviewable.
+    - **Learnings:**
+      - **Judge-cache warm start confirmed on real data.** Seeding
+        `_shared/judge_report.json` from `output/` made the smoke sweep spend
+        **0** new judge calls (54 replays across 6 subsets) — the
+        subset-independence property that justifies the shared cache holds
+        against the real 16-JD data, not just fixtures. New targets cost one
+        call each and persist per-call, so an interrupted sweep resumes
+        without re-spending.
+      - **Contrastive sampling found real structure.** The near-identical
+        triple came out as three Optum postings (same-company near-duplicates)
+        — token-Jaccard over JD text is enough to construct the contrastive
+        subsets on real data.
+      - **Scores are not comparable across subsets of different sizes.**
+        `gap_score = weight × (1 − conf)` scales with how many subset JDs
+        demand the skill: Fine-tuning scored 0.41 on triples vs 2.46 on the
+        full set. Reviewers must compare ranks/verdicts across subsets, never
+        raw scores (worth remembering when reading `index.md`).
+      - **Ingestion counts drift from code, not just data.** The fresh
+        snapshot (118 canonical / 41 implied / 19 targets) differs from the
+        M2-era counts (119 / 23 / 23) on the same skills file — M8's
+        normalize/implied work plus the persisted approval record (41
+        accepted names, of which today's patterns re-propose 23). The
+        manifest's per-JD + per-input hashes exist so drift is attributable.
+      - **Offline check needed no monkeypatching.** `run_sweep` takes
+        `judge_fn` / `synthesize_fn` / `search_fn` seams (defaults = real
+        functions), so `m12_check.py` drives the true end-to-end path with
+        fakes — including manifest/index writing.
+13. **Chrome extension shell.** ✅ Built 2026-10-03
+    (design in `01-system-overview.md` §M13 design; end goal in S6
+    `09-practice-planner.md` §End goal). MV3 side panel in `extension/`:
+    **Capture JD** appends the active tab's LinkedIn JD (the bookmarklet's
+    extraction as a content script) to a `chrome.storage.local` list;
+    **Analyze gaps** posts the list to `server.py` (`phase: "gaps"` →
+    captured JDs written to `output/captured_jds/`, graph pauses after
+    `rank`, `GET /api/gaps` serves the ranked table); **Generate plan**
+    (`phase: "plan"`) resumes through synthesize → oss → output and renders
+    `plan.html` in a sandboxed iframe. The extension is a thin client — the
+    pipeline runs in the local `server.py` process. Per user priority
+    2026-10-03 the locked sequence was reordered: the extension shell jumped
+    ahead of M9 (decision rows in `02-decisions.md`); M9 remains the next
+    milestone. Design choices locked same day: side panel over popup or
+    in-page overlay; gap highlighting = the panel's gap table (marking skills
+    in the JD page text deferred — §Deferred #12).
+    - **M10/M11 wiring completed here (discovery).** The M10/M11 entries
+      described the `cli.py` wiring as built, but the code had never landed
+      there: `set_stage_listener`/`_stage`, the `oss` node, `plan.html`
+      output and `jd_files` linking existed only in `m5_plan.py` /
+      `sweep.py` / `output.py`'s renderers, and `m11_check.py` **failed**
+      on the pre-M13 tree (`cli` had no `set_stage_listener`). Completed as
+      part of M13 — the extension's backend is exactly this path — and
+      `m11_check.py` now passes.
+    - **Two-phase flow reuses the gate's `interrupt()` machinery.** A `pause`
+      node after `rank` (reached only when `two_phase` state is set) raises
+      `interrupt()`; `Command(resume=...)` re-executes the node (LangGraph
+      replay semantics — the `interrupt()` call returns the resume value on
+      the second execution) and the same router continues to synthesize/oss/
+      output. One graph run ⇒ the phase-2 plan is guaranteed to describe the
+      phase-1 gaps; no cache plumbing between two runs.
+    - **Judge cache reuse (`reuse_judged`) for interactive re-analysis.**
+      Copies `TRANSFERS_TO` edges from `output/graph.json`, judges only
+      still-unmatched targets, merges `judge_report.json` by target — the
+      M12 subset-independence insight applied to the extension's re-analyze
+      button (adding one JD doesn't re-pay ~20 LLM calls). CLI default stays
+      fresh-judging (M6 validation semantics).
+    - **Security posture.** No CORS headers on the server on purpose: the
+      extension calls with `host_permissions` (which bypass CORS), while
+      absent ACAO + no OPTIONS handler blocks hostile web pages from reading
+      resume-derived gaps or triggering runs. JD text renders via
+      `textContent` only; the plan renders in a sandboxed iframe.
+    - **Verified 2026-10-03:** `m13_check.py` offline PASS (cli wiring,
+      manifest validity, two-phase flow through the real server + real graph
+      with stubbed judge/synthesis/oss — captured-JD ingestion, `paused` →
+      `/api/gaps`, `plan.html` with projects + GFI links, 409 on a stray
+      phase `"plan"`); `m11_check.py` PASS (was failing pre-M13); `ruff
+      check .` clean; `pytest` 3 passed (`test_m13.py` wrappers — the
+      repo's first pytest tests); `node --check` clean on all three
+      extension scripts. The extension shell is statically validated
+      (manifest + JS + panel logic against the same endpoints); the first
+      human click-through in Chrome is the user's one-time step
+      (`extension/README.md`).
+    - **Live smoke (2026-10-03, real data through the `server.py` contract):**
+      three runs. (1–2) Seed profile + two captured JDs: capture → `paused`
+      after rank → `/api/gaps` → `plan.html`; every gap came out
+      bridge/alt-bridged (the seed profile genuinely covers those JDs), so
+      synthesis/OSS correctly skipped — also a live check of the
+      "no actionable gaps" path. (3) **Resume profile** (`skills_path:
+      data/Shubham_Singh.pdf`, extraction artifact reused — 0 extraction
+      LLM calls) + the Adobe/Optum JDs: 39 TRANSFERS_TO edges reused, 6
+      targets freshly judged, gaps `Spark 0.8 partial` (actionable),
+      `Data governance 0.6 bridge`, `Fine-tuning 0.3 bridge` …; phase
+      `"plan"` resumed through synthesize → oss → `plan.html` (5.4 KB) with
+      a Spark project + **2 live good-first-issue links**
+      (apache/airflow#39184, kubeflow/spark-operator#2958) with LLM
+      relevance rationales. The Spark/Fine-tuning ordering matches the M8
+      resume-run record.
+    - **Live-validation learning: the run contract needed a resume
+      pre-step.** The first resume-profile run failed at ingest with a
+      UTF-8 decode error — the pre-fix server passed the **PDF path**
+      straight into the JSON reader (PDF binary byte `0xb5` at position
+      11). Fix: `_run_pipeline` now runs the M8 `resume_to_skills_json()`
+      before the graph for non-`.json` input (artifact reuse makes it
+      free), exactly as `cli.main()` does — the design line "a resume file
+      works too" was true of `cli.py` but not yet of the server path.
+      Tracebacks are now printed in the server's error handlers for
+      debuggability.
+    - **Explicit non-goals (recorded, not oversights):** in-page gap marking
+      on the JD text (§Deferred #12), generic non-LinkedIn JD pages
+      (LinkedIn-only content-script matches, like the bookmarklet), run
+      history, hosting, multi-user auth, Web Store packaging.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -246,10 +417,11 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 5 | **Embedding-based skill clustering** for dedup | Exact + alias match, LLM merge for ambiguous cases | Load-bearing but simple matching suffices for seed data. Restore if dedup errors visibly corrupt judge input. |
 | 6 | **Local model benchmark** (small open models vs. cloud) on the judge node | Cloud cheap models only | Great portfolio experiment, but only meaningful once the cloud baseline passes the rubric. The thin `judge()` interface makes this a config swap. |
 | 7 | **Resume (messy text) ingestion parity** → Done (M8) | Skills JSON is the primary path; resume parsing best-effort | Structured seed data exists; messy-text parsing is its own problem. |
-| 8 | **Web UI** | CLI | CLI-first decision. M11 local `plan.html` is the first step; extension shell after M9. |
+| 8 | **Web UI** → Done (M11 local UI + M13 extension shell) | CLI | CLI-first decision. M11 local `plan.html` is the first step; extension shell after M9. (The shell in fact landed at M13, ahead of M9 — user priority 2026-10-03.) |
 | 9 | **`TRANSFERS_TO` symmetry question** (does LangGraph experience transfer back to ADK familiarity equally?) | Directional edges only | Decide empirically once real scores exist. |
 | 10 | **Confidence-threshold auto-tuning** | Manual threshold, start 0.5 → tuned to 0.75 at M4 | Tune empirically against the rubric after the first full run (done — see M4). |
-| 11 | **JD auto-discovery/scraping** | User-supplied JDs | Explicit non-goal of v1; extension prerequisite (browser JD is the input). |
+| 11 | **JD auto-discovery/scraping** | User-supplied JDs | Explicit non-goal of v1; extension prerequisite (browser JD is the input). M13's Capture button covers manual browser-JD input; *automatic* discovery/scraping remains deferred. |
+| 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
@@ -305,6 +477,13 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   `ingest.py` / `cli.py` imports it (status in S4 `07-skill-cleaner.md`).
   Open work: call it on unmatched canonical terms during ingestion and
   verify end-to-end on resume + seed data. Does not block M11.
+- **Sweep ground truth (M12).** The sweep measures *stability and
+  responsiveness* of the plan to the JD set, not correctness against a
+  sealed ground truth — the M6 hand analysis covered 13 JDs and is not
+  subset-partitioned. A per-subset hand analysis is the honest way to score
+  plan *quality*; until then the sweep's automatic metrics flag where to
+  look, and the two-pass manual review supplies the judgment. Revisit if
+  sweep results need to be reported as accuracy numbers.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
 - **Model pick (S2).** Resolved at M3: DeepSeek V4 Flash 0731 via

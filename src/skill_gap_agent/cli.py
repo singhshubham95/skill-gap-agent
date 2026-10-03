@@ -1,4 +1,4 @@
-"""LangGraph orchestration (milestone 7, specs/15-flow-runner.md S7).
+"""LangGraph orchestration (milestone 7, specs/10-flow-runner.md S7).
 
 Wires the v1 pipeline nodes into a real LangGraph graph:
 
@@ -8,13 +8,17 @@ Wires the v1 pipeline nodes into a real LangGraph graph:
 - Human-in-the-loop (implied-skill proposals, confidence gate) uses true
   interrupt()/resume with a checkpointer, so a run can be resumed and moved to
   a web UI later (restores deferred-enhancements #2).
-- State is a TypedDict wrapping the SkillGraph; the graph object stays the
-  single source of truth (Conventions & Guardrails in specs/1-system-overview.md).
+- State is a TypedDict of serializable fields only; the SkillGraph lives in
+  the runtime registry keyed by thread_id (decision in specs/02-decisions.md).
 
 Interactive prompts are routed through an ask_fn that raises an interrupt with
 the prompt text and returns the user's answer on resume. Re-runs are cheap:
 persisted decisions (implied_skills.json, gate_overrides.json) are applied
 silently, so interrupts only fire for genuinely new questions.
+
+M13 additions: a `pause` node after rank powers the extension's two-phase
+flow (analyze gaps -> generate plan); the `oss` node sources good-first-issues
+after synthesis; nodes report progress through set_stage_listener().
 
 Run: python -m skill_gap_agent.cli [--auto] [--no-judge] [--top N] [--resume]
 """
@@ -22,6 +26,9 @@ Run: python -m skill_gap_agent.cli [--auto] [--no-judge] [--top N] [--resume]
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -34,7 +41,8 @@ from .graph import SkillGraph
 from .ingest import build_seed_graph
 from .judge import judge_all_unmatched, save_judge_report
 from .llm import LLMConfig
-from .output import write_plan
+from .oss import source_oss_for_gaps
+from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
 from .resume import resume_to_skills_json
 from .synthesis import save_synthesis_report, synthesize_for_gaps
@@ -53,6 +61,23 @@ def _runtime(config: dict) -> dict[str, Any]:
     return _RUNTIME.setdefault(config["configurable"]["thread_id"], {})
 
 
+# Progress-reporting seam: server.py (M11) registers a listener to surface
+# node progress on the local UI and the extension side panel (M13). Nodes
+# call _stage() with their name; the listener is set for the run's duration.
+_STAGE_LISTENER: Callable[[str], None] | None = None
+
+
+def set_stage_listener(fn: Callable[[str], None] | None) -> None:
+    """Register a progress callback fn(node_name), or None to clear."""
+    global _STAGE_LISTENER
+    _STAGE_LISTENER = fn
+
+
+def _stage(name: str) -> None:
+    if _STAGE_LISTENER is not None:
+        _STAGE_LISTENER(name)
+
+
 class AgentState(TypedDict, total=False):
     """Pipeline state — serializable data only (flags, paths, results).
     The SkillGraph lives in the runtime registry, not here."""
@@ -67,6 +92,14 @@ class AgentState(TypedDict, total=False):
     gate_decisions: list
     gaps: list
     projects: list
+    skip_oss: bool
+    no_llm_oss: bool
+    reuse_judged: bool  # M13: reuse TRANSFERS_TO edges, judge only new targets
+    two_phase: bool  # M13: pause after rank for the extension's two-button flow
+    phase_resumed: bool
+    oss_by_gap: dict
+    link_jds: bool
+    jd_files: dict
 
 
 def ask_via_interrupt(prompt: str) -> str:
@@ -86,7 +119,7 @@ def pending_interrupt(app, config: dict) -> Any | None:
     that immediately hits another interrupt() in the same node, `next` is
     empty even though a question is pending (the run never left the node,
     so the "waiting at" pointer doesn't move). Verified in M7 — see
-    specs/15-flow-runner.md S7 ("Detecting pending interrupts").
+    specs/10-flow-runner.md S7 ("Detecting pending interrupts").
     """
     snap = app.get_state(config)
     if not snap:
@@ -121,6 +154,7 @@ def _ask_or_interrupt(prompt: str, checkpointer, config: dict) -> str:
 
 
 def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
+    _stage("ingest")
     taxonomy = load_taxonomy()
     sg, stats = build_seed_graph(
         state["skills_path"],
@@ -137,22 +171,59 @@ def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
     return {"stats": stats}
 
 
+def _copy_previous_transfers(sg: SkillGraph) -> int:
+    """Copy TRANSFERS_TO edges from the last saved graph into this run."""
+    prev_path = Path("output/graph.json")
+    if not prev_path.exists():
+        return 0
+    prev = SkillGraph.load(str(prev_path))
+    reused = 0
+    for u, v, d in prev.g.edges(data=True):
+        if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(v):
+            sg.g.add_edge(u, v, **d)
+            reused += 1
+    return reused
+
+
+def _save_merged_judge_report(results: list) -> None:
+    """Append new judge results to output/judge_report.json, keyed by target.
+
+    Used with reuse_judged: cached targets keep their old report rows, newly
+    judged targets replace/add theirs (judge score is a pure function of the
+    target — the M12 insight — so rows are interchangeable across runs).
+    """
+    path = Path("output/judge_report.json")
+    merged: dict[str, dict] = {}
+    if path.exists():
+        try:
+            for row in json.loads(path.read_text(encoding="utf-8")):
+                merged[row["target"]] = row
+        except (ValueError, KeyError, TypeError):
+            pass
+    for r in results:
+        merged[r.target] = {"target": r.target, "error": r.error, "scores": r.scores}
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(list(merged.values()), indent=2), encoding="utf-8")
+
+
 def node_judge(state: AgentState, config: RunnableConfig) -> dict:
+    _stage("judge")
     sg: SkillGraph = _runtime(config)["sg"]
-    if state["skip_judge"]:
-        prev = SkillGraph.load("output/graph.json")
-        reused = 0
-        for u, v, d in prev.g.edges(data=True):
-            if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(v):
-                sg.g.add_edge(u, v, **d)
-                reused += 1
-        print(f"Reused {reused} TRANSFERS_TO edges from output/graph.json (--no-judge)")
-        return {"judged": False}
+    if state.get("skip_judge") or state.get("reuse_judged"):
+        reused = _copy_previous_transfers(sg)
+        print(f"Reused {reused} TRANSFERS_TO edges from output/graph.json")
+        if state.get("skip_judge"):
+            return {"judged": False}
 
     unmatched = sg.unmatched_target_skills()
+    if not unmatched:
+        return {"judged": False}
     print(f"Judging {len(unmatched)} unmatched target skills...\n")
     results = judge_all_unmatched(sg, cfg=LLMConfig())
-    save_judge_report(results, Path("output/judge_report.json"))
+    if state.get("reuse_judged"):
+        _save_merged_judge_report(results)
+    else:
+        save_judge_report(results, Path("output/judge_report.json"))
     return {"judged": True}
 
 
@@ -173,8 +244,6 @@ def gate_needed(state: AgentState, config: RunnableConfig) -> str:
 
 
 def _gate_override_names() -> set[str]:
-    import json
-
     p = Path("output/gate_overrides.json")
     if not p.exists():
         return set()
@@ -191,6 +260,7 @@ def _top_confidence(sg: SkillGraph, target: str) -> float | None:
 
 
 def node_gate(state: AgentState, config: RunnableConfig) -> dict:
+    _stage("gate")
     sg: SkillGraph = _runtime(config)["sg"]
     decisions = review_targets(
         sg, threshold=DEFAULT_THRESHOLD, ask_fn=ask_via_interrupt
@@ -199,35 +269,103 @@ def node_gate(state: AgentState, config: RunnableConfig) -> dict:
     return {"gate_decisions": decisions}
 
 
+def _write_gaps_json(gaps: list) -> Path:
+    """Persist the ranked gaps (M13: served to the extension via GET /api/gaps)."""
+    out = Path("output")
+    out.mkdir(exist_ok=True)
+    p = out / "gaps.json"
+    payload = {"gaps": [dataclasses.asdict(g) for g in gaps]}
+    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return p
+
+
 def node_rank(state: AgentState, config: RunnableConfig) -> dict:
+    _stage("rank")
     gaps = rank_gaps(_runtime(config)["sg"])
     print("\n=== Gap ranking ===")
     print(format_ranking(gaps))
+    gaps_path = _write_gaps_json(gaps)
+    print(f"Gaps written: {gaps_path}")
     return {"gaps": gaps}
 
 
-def synthesis_needed(state: AgentState) -> str:
-    """Conditional edge: synthesize only for actionable (non-bridge) gaps."""
-    if state["top_n"] <= 0:
-        return "output"
-    actionable = [
-        g for g in state["gaps"] if g.verdict not in ("bridge", "alt-bridged", "held")
+def node_pause(state: AgentState, config: RunnableConfig) -> dict:
+    """M13 two-phase pause: hold the run after ranking until phase 2.
+
+    Same interrupt() machinery as the gate questions: with a checkpointer the
+    server resumes via Command(resume=...), and the node re-executes (replay
+    semantics — the interrupt() call returns the resume value the second
+    time). Only reached when state['two_phase'] is set.
+    """
+    _stage("pause")
+    interrupt(
+        {"phase": "gaps", "prompt": "Gaps ready. Resume to generate the plan."}
+    )
+    return {"phase_resumed": True}
+
+
+def _actionable_gaps(state: AgentState) -> list:
+    return [
+        g for g in state.get("gaps", [])
+        if g.verdict not in ("bridge", "alt-bridged", "held")
     ]
-    return "synthesize" if actionable else "output"
+
+
+def after_rank(state: AgentState) -> str:
+    """Conditional edge after rank and after the two-phase pause.
+
+    Order: pause (two-phase, first visit) -> synthesize (actionable gaps and
+    top_n > 0) -> output. The oss node hangs off synthesis (M10: same top-n
+    actionable gaps).
+    """
+    if state.get("two_phase") and not state.get("phase_resumed"):
+        return "pause"
+    if not _actionable_gaps(state) or state.get("top_n", 0) <= 0:
+        return "output"
+    return "synthesize"
+
+
+def after_synthesize(state: AgentState) -> str:
+    """Conditional edge: source GFI issues unless --no-oss."""
+    return "output" if state.get("skip_oss") else "oss"
 
 
 def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
+    _stage("synthesize")
     projects = synthesize_for_gaps(
         _runtime(config)["sg"], state["gaps"], top_n=state["top_n"], cfg=LLMConfig()
     )
     return {"projects": projects}
 
 
+def node_oss(state: AgentState, config: RunnableConfig) -> dict:
+    """M10 node: good-first-issue sourcing for the top actionable gaps."""
+    _stage("oss")
+    if state.get("skip_oss"):
+        return {"oss_by_gap": {}}
+    oss_by_gap = source_oss_for_gaps(
+        _runtime(config)["sg"],
+        state["gaps"],
+        top_n=state["top_n"],
+        cfg=LLMConfig(),
+        use_llm=not state.get("no_llm_oss", False),
+    )
+    return {"oss_by_gap": oss_by_gap}
+
+
 def node_output(state: AgentState, config: RunnableConfig) -> dict:
+    _stage("output")
     sg: SkillGraph = _runtime(config)["sg"]
     out = Path("output")
     projects = state.get("projects", [])
-    plan_path = write_plan(state["gaps"], projects, state["stats"], out / "plan.md")
+    oss_by_gap = state.get("oss_by_gap") or {}
+    jd_files = state.get("jd_files") if state.get("link_jds") else None
+    plan_path = write_plan(
+        state["gaps"], projects, state["stats"], out / "plan.md", oss_by_gap
+    )
+    write_plan_html(
+        state["gaps"], projects, state["stats"], oss_by_gap, out / "plan.html", jd_files
+    )
     save_synthesis_report(projects, out / "synthesis_report.json")
     sg.save(str(out / "graph.json"))
     print(f"\nPlan written: {plan_path}")
@@ -243,23 +381,29 @@ def node_output(state: AgentState, config: RunnableConfig) -> dict:
 
 def build_app(checkpointer=None):
     """Compile the pipeline graph. Pass a checkpointer to make interrupt()
-    pauses resumable across process restarts; the graph shape is unchanged."""
+    pauses resumable (gate questions and the M13 two-phase pause); the graph
+    shape is unchanged by it."""
     g = StateGraph(AgentState)
     g.add_node("ingest", node_ingest)
     g.add_node("judge", node_judge)
     g.add_node("gate", node_gate)
     g.add_node("rank", node_rank)
+    g.add_node("pause", node_pause)
     g.add_node("synthesize", node_synthesize)
+    g.add_node("oss", node_oss)
     g.add_node("output", node_output)
 
     g.add_edge(START, "ingest")
     g.add_edge("ingest", "judge")
     g.add_conditional_edges("judge", gate_needed, {"gate": "gate", "rank": "rank"})
     g.add_edge("gate", "rank")
+    routes = {"pause": "pause", "synthesize": "synthesize", "output": "output"}
+    g.add_conditional_edges("rank", after_rank, routes)
+    g.add_conditional_edges("pause", after_rank, routes)
     g.add_conditional_edges(
-        "rank", synthesis_needed, {"synthesize": "synthesize", "output": "output"}
+        "synthesize", after_synthesize, {"oss": "oss", "output": "output"}
     )
-    g.add_edge("synthesize", "output")
+    g.add_edge("oss", "output")
     g.add_edge("output", END)
     return g.compile(checkpointer=checkpointer)
 

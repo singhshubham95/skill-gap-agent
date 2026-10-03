@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Skill-Gap Agent</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <h1>Skill-Gap Agent</h1>
+    <p id="conn" class="conn">checking local agent…</p>
+  </header>
+
+  <section>
+    <h2>1. Collect job descriptions</h2>
+    <p class="hint">Open a LinkedIn job description, then click capture.
+    Repeat for as many JDs as you like — the list only grows.</p>
+    <button id="capture">Capture JD from this tab</button>
+    <span id="jdcount" class="count"></span>
+    <ul id="jdlist"></ul>
+    <button id="clear" class="secondary" hidden>Clear list</button>
+  </section>
+
+  <section>
+    <h2>2. Analyze gaps</h2>
+    <p class="hint">Ranks what the collected JDs demand against your skills.
+    The first run takes minutes (LLM judge); later runs reuse cached
+    judgments.</p>
+    <label>Top gaps: <input id="topn" type="number" min="1" max="23" value="5"></label>
+    <button id="analyze">Analyze gaps</button>
+    <p id="status" class="status">idle</p>
+    <div id="gapbox" hidden>
+      <table id="gaps">
+        <thead>
+          <tr><th>#</th><th>Skill gap</th><th>Score</th><th>JDs</th><th>Verdict</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="gapnote" class="hint"></p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Generate plan</h2>
+    <p class="hint">Grounded learning projects + live good-first-issues for
+    the top gaps.</p>
+    <button id="plan" disabled>Generate plan</button>
+    <div id="planbox" hidden>
+      <iframe id="planframe" sandbox title="Skill-gap plan"></iframe>
+    </div>
+  </section>
+
+  <details>
+    <summary>Settings</summary>
+    <label>Local agent URL:
+      <input id="serverBase" type="text" spellcheck="false">
+    </label>
+    <p class="hint">If you run the server on another port, update the URL and
+    reload the extension after changing manifest host_permissions.</p>
+  </details>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

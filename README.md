@@ -6,9 +6,13 @@ much your existing skills transfer to missing ones (LLM judge), checks the
 uncertain verdicts with you (human-in-the-loop), and outputs a ranked plan of
 learning projects grounded in what you already know — not generic advice.
 
-Validated against a sealed hand-performed gap analysis of the same data (see
-[Case Study](#case-study-validating-the-pipeline)) — the pipeline's first run
-was scored against it as acceptance criteria.
+Validated against a sealed hand-performed gap analysis of the same data — the
+pipeline's first run was scored against it as acceptance criteria (rubric and
+results: [specs/08-gap-measurer.md](specs/08-gap-measurer.md) §Validation
+rubric). Ongoing quality monitoring runs the pipeline over seeded JD subsets
+and records which subset produced which plan — the sweep harness
+(`sweep.py`, design in
+[specs/01-system-overview.md](specs/01-system-overview.md) §M12 design).
 
 ## Quickstart (for users)
 
@@ -56,20 +60,27 @@ persist in `output/`, so re-runs only ask about what changed.
 
 Full trade-off list with restore triggers: [specs/03-milestones.md](specs/03-milestones.md) §Deferred.
 
-**Roadmap (M7–M8 + M10–M11 built; M9 designed):** LangGraph orchestration with
+**Roadmap (M7–M8 + M10–M13 built; M9 designed):** LangGraph orchestration with
 resumable human-in-the-loop steps, resume PDF/DOCX ingestion, GFI issue
-sourcing, and minimal local UI (`python -m skill_gap_agent.server`) are built;
-next is
-conversational intake + evidence-backed skill validation (M9) and the
-extension shell. Design detail in [specs/01-system-overview.md](specs/01-system-overview.md) §M9 design and
+sourcing, minimal local UI (`python -m skill_gap_agent.server`), the
+JD-subset sweep evaluation harness (`python -m skill_gap_agent.sweep`), and
+the Chrome extension shell ([extension/](extension/) — capture JDs in the
+browser, analyze gaps, generate the plan in a side panel) are built; next is
+conversational intake + evidence-backed skill validation (M9). Design detail in
+[specs/01-system-overview.md](specs/01-system-overview.md) §M9 design / §M12 design /
+§M13 design and
 [specs/03-milestones.md](specs/03-milestones.md).
+
+**Chrome extension:** start `python -m skill_gap_agent.server`, load
+[extension/](extension/) unpacked in `chrome://extensions`, and follow
+[extension/README.md](extension/README.md). Capture is LinkedIn-only for now.
 
 ## For contributors
 
 The specs are the onboarding path — they document not just the design but the
 *reasoning* behind every decision, including revisions made during building:
 
-1. [specs/01-system-overview.md](specs/01-system-overview.md) — stage map, stage↔code table, data flow, repo map, M9 design, graph schema (start here)
+1. [specs/01-system-overview.md](specs/01-system-overview.md) — stage map, stage↔code table, data flow, repo map, M9 + M12 + M13 design, graph schema (start here)
 2. [specs/02-decisions.md](specs/02-decisions.md) — locked decisions, append-only, with rationale (including decisions that were *revised* and why)
 3. [specs/03-milestones.md](specs/03-milestones.md) — roadmap: build order + learnings + deferred trade-offs + open questions
 4. S1–S7 stage files ([specs/04-reader.md](specs/04-reader.md) … [specs/10-flow-runner.md](specs/10-flow-runner.md)) — per-stage mechanics + status
@@ -92,60 +103,7 @@ then dive as needed:
 
 | File | Contents |
 |---|---|
-| [specs/01-system-overview.md](specs/01-system-overview.md) | **Start here** — stage map, stage↔code table, data flow, repo map, M9 design, graph schema |
+| [specs/01-system-overview.md](specs/01-system-overview.md) | **Start here** — stage map, stage↔code table, data flow, repo map, M9 + M12 + M13 design, graph schema |
 | [specs/02-decisions.md](specs/02-decisions.md) | Locked technology and scope decisions, with rationale |
 | [specs/03-milestones.md](specs/03-milestones.md) | Roadmap: build order + learnings + deferred trade-offs + open questions |
 | [specs/04-reader.md](specs/04-reader.md) … [specs/10-flow-runner.md](specs/10-flow-runner.md) | Per-stage mechanics (S1–S7) |
-
-## Case Study: Validating the Pipeline
-
-To prove the pipeline's judgments are sound (not just plausible-sounding LLM
-output), its first full run was scored against a ground truth: the author
-performed the same gap analysis **by hand** — reading the same 13 JDs against
-the same skills dump — before writing any pipeline code. The hand analysis
-was sealed as the acceptance rubric (now in [specs/08-gap-measurer.md](specs/08-gap-measurer.md) §Validation rubric),
-and the pipeline then ran fresh with no hints. The hand analysis itself is not
-in the repo; the rubric below records its conclusions and how the pipeline
-measured against them.
-
-### Rubric results
-
-| Criterion | Result |
-|---|---|
-| ≥70% overlap between pipeline top-5 gaps and the hand analysis | ✅ The hand analysis's headline buckets (GenAI/LLM depth, framework breadth, cloud platforms) all appear in the pipeline's ranked output |
-| Judge independently arrives at "Google ADK → LangGraph is a partial, not full, gap" | ✅ `LangGraph ← Google ADK @ 0.90` with rationale "both are agent development frameworks with similar orchestration and state concepts" — matching the hand conclusion, derived independently |
-| Ambiguous case surfaced, not silently scored | ✅ AWS (9/13 JDs) was judged 0.70-transferable from GCP depth, surfaced by the gate, and the user's depth answer kept it a "bridge" — it ranks **below** lower-demand true gaps in the final plan |
-
-### Before / after
-
-**Before (hand analysis):** one JD at a time, eyeballed overlaps, binary "have/don't
-have" skill matching, no reusable artifact.
-
-**After (this pipeline):** 146 CV phrases + 13 JDs → 119 canonical + 23
-user-approved implied skills → 21 LLM-judged transfer verdicts (122 edges) →
-human-in-the-loop gate on the 4 ambiguous ones → transferability-aware ranking
-→ 4 grounded project recommendations. Re-runnable in minutes as new JDs or
-completed projects change the graph.
-
-### Sample output (`output/plan.md`)
-
-```
-  score  JDs  verdict        target <- top transfer
-   2.70    9  alt-bridged   AWS            <- Google Cloud Platform (0.70)
-   2.05    5  partial       Fine-tuning    <- Hyperparameter search parallelization (0.59)
-   0.00   10  held          Azure          <- Azure Data Factory (1.00)
-   ...
-```
-
-Azure (10 JDs) is **held**, not the #1 gap: the matching ladder resolves it to
-the user's Azure Data Factory experience. AWS (9 JDs) is **alt-bridged**: the
-JDs list cloud platforms as interchangeable ("Azure OpenAI, AWS Bedrock, GCP
-Vertex AI"), and the user's GCP depth satisfies that capability intent — while
-**LangChain stays a full-urgency gap** despite Google ADK experience, because
-employers differentiate on agent frameworks (per-group mention policies).
-Every verdict lists the exact JDs that demand it.
-
-Sample synthesized project: **"Fine-Tune a DistilBERT Multi-Label Classifier
-with Parallel Hyperparameter Search"** — reuses the user's multi-label
-classification and hyperparameter-parallelization background to close the
-fine-tuning gap.
