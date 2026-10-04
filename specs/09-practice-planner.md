@@ -8,8 +8,11 @@ How to close the gap. Consumes S5 `Gap` objects, writes `Project` nodes
 
 ## End goal — Chrome extension (locked 2026-09-27, folded from `8-gfi-pivot.md`; shell Built M13)
 
-User opens one JD in the browser; the extension reads the local resume +
-metadata and returns (1) skill gap + magnitude, (2) hands-on plan to close
+User opens one JD in the browser; the resume lives in the panel (uploaded
+from the extension — M14, ✅ Built 2026-10-04; the `--skills`
+flag / server `--skills` also still works) and the extension returns
+(1) skill gap +
+magnitude, (2) hands-on plan to close
 it, prioritizing **live `good-first-issue` / `help-wanted` issues** on
 open-source repos. Personal-first order: useful for the author before any
 market sale. Low-quality GFI output in iteration one is explicitly
@@ -20,6 +23,10 @@ global (no M8a / v2-M1 renames).
 
 **Status (2026-10-03):** the shell is Built as **M13** (user priority moved
 it ahead of M9 — decision rows in [02-decisions.md](02-decisions.md)).
+**2026-10-04:** setup inputs move into the panel as **M14** (resume upload
++ API key entry — Designed); M9's conversational intake is off the table
+(the panel stays the only interaction model — `03-milestones.md`
+§Deferred #13).
 Full design + server contract in [12-extension.md](12-extension.md);
 install instructions in [../extension/README.md](../extension/README.md).
 Deferred from the design: marking the skills in the JD page text itself

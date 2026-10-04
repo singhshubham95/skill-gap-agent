@@ -28,6 +28,7 @@ Design decisions (locked with user, see §10):
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -193,19 +194,43 @@ def _search(pattern: str, text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def save_extracted(data: dict, path: str | Path = EXTRACTED_PATH) -> Path:
-    """Persist the extraction artifact (reviewable, re-runs reuse it)."""
+def save_extracted(
+    data: dict,
+    path: str | Path = EXTRACTED_PATH,
+    source_sha: str | None = None,
+) -> Path:
+    """Persist the extraction artifact (reviewable, re-runs reuse it).
+
+    source_sha (M14): SHA-256 of the resume that produced this artifact,
+    recorded in a sidecar (`.json` -> `.sha256`). The artifact is only
+    reused when the sidecar matches the resume being extracted — otherwise
+    uploading a second resume would silently serve the first one's skills.
+    """
     p = Path(path)
     p.parent.mkdir(exist_ok=True)
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    if source_sha is not None:
+        p.with_suffix(".sha256").write_text(source_sha + "\n", encoding="utf-8")
     return p
 
 
-def load_extracted(path: str | Path = EXTRACTED_PATH) -> dict | None:
-    """Load a previously saved extraction artifact, if present."""
+def load_extracted(
+    path: str | Path = EXTRACTED_PATH, expect_sha: str | None = None
+) -> dict | None:
+    """Load a previously saved extraction artifact, if present.
+
+    With expect_sha (M14), only reuse an artifact extracted from a resume
+    with that exact hash — a sidecar mismatch means re-extract.
+    """
     p = Path(path)
     if not p.exists():
         return None
+    if expect_sha is not None:
+        sidecar = p.with_suffix(".sha256")
+        if not sidecar.exists():
+            return None
+        if sidecar.read_text(encoding="utf-8").strip() != expect_sha:
+            return None
     return json.loads(p.read_text(encoding="utf-8"))
 
 
@@ -314,8 +339,9 @@ def resume_to_skills_json(
 
     Order of operations:
     1. Extract text (scanned-PDF guard fires here).
-    2. Reuse output/extracted_skills.json if present (no LLM call); else
-       LLM extraction (or regex fallback when use_llm=False / no API key).
+    2. Reuse the extraction artifact only if it was produced from this
+       same resume (SHA-256 sidecar, M14); else LLM extraction (or regex
+       fallback when use_llm=False / no API key).
     3. First-run approval flow over the phrases (silent once approved).
     4. Write the (possibly approved-filtered) JSON to a temp artifact and
        return its path for the ingest node.
@@ -323,8 +349,9 @@ def resume_to_skills_json(
     Returns (json_path, stats) where stats reports which path was taken.
     """
     text = extract_text(resume_path)
+    source_sha = hashlib.sha256(Path(resume_path).read_bytes()).hexdigest()
 
-    data = load_extracted(artifact_path)
+    data = load_extracted(artifact_path, expect_sha=source_sha)
     source = "artifact"
     if data is None:
         if use_llm:
@@ -338,7 +365,7 @@ def resume_to_skills_json(
         else:
             data = extract_skills_regex(text)
             source = "regex"
-        save_extracted(data, artifact_path)
+        save_extracted(data, artifact_path, source_sha=source_sha)
         print(f"Extraction artifact saved: {artifact_path} (source: {source})")
     else:
         print(f"Reusing extraction artifact: {artifact_path}")

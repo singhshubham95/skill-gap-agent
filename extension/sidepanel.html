@@ -12,6 +12,15 @@
   </header>
 
   <section>
+    <h2>Setup — your resume</h2>
+    <p class="hint">Upload the resume to analyze against (PDF, DOCX or
+    TXT). It stays on your machine — the local agent keeps it under
+    <code>output/uploads/</code> and extracts the skills list from it.</p>
+    <input type="file" id="resume" accept=".pdf,.docx,.txt">
+    <p id="resumeinfo" class="hint"></p>
+  </section>
+
+  <section>
     <h2>1. Collect job descriptions</h2>
     <p class="hint">Open a LinkedIn job description, then click capture.
     Repeat for as many JDs as you like — the list only grows.</p>
@@ -59,6 +68,22 @@
     </label>
     <p class="hint">If you run the server on another port, update the URL and
     reload the extension after changing manifest host_permissions.</p>
+    <h3>LLM key</h3>
+    <label>Provider:
+      <select id="provider"></select>
+    </label>
+    <label>API key:
+      <input id="apikey" type="password" spellcheck="false" autocomplete="off">
+    </label>
+    <label class="check">
+      <input type="checkbox" id="remember" checked> Remember on this machine
+    </label>
+    <button id="savekey">Save key</button>
+    <p id="keystate" class="hint"></p>
+    <p class="hint">The key goes straight to the local agent, which stores
+    it in the OS credential vault (Windows Credential Manager / macOS
+    Keychain) — never in the browser. Uncheck "remember" to keep it for
+    this server session only.</p>
   </details>
 
   <script src="sidepanel.js"></script>

@@ -5,9 +5,16 @@ ranking. Two coupled concerns: a tool-calling chat agent that assembles the
 input, and a validation protocol that replaces self-report with elicited,
 evidence-backed proficiency.
 
-**Status: 🎯 Designed** (M9 — no code yet; modules `intake.py`,
-`validate.py` do not exist). This is the next milestone. End-to-end design
-originally folded from `2-architecture.md` §§11–12.
+**Status: ⏸ Deferred / re-scoped** (2026-10-04 user decision: **no
+conversational flow** — the extension panel stays the only interaction
+model; decision row in [02-decisions.md](02-decisions.md)). M9's build
+waits for the plan/gap-quality brainstorm
+([03-milestones.md](03-milestones.md) §Deferred #13); whatever returns must
+be **non-conversational** (e.g. a panel checklist of extracted skills with
+confidence badges). The validation *goal* below stands; the conversational
+*UX* is kept as history, not target state. No code: `intake.py`,
+`validate.py` do not exist. End-to-end design originally folded from
+`2-architecture.md` §§11–12.
 
 ## Conversational intake
 

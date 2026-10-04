@@ -4,6 +4,10 @@
 // served by the local agent (server.py), which escapes its own HTML and
 // opens every plan link in a new browser tab (target='_blank'), so the
 // iframe can never navigate away from the plan.
+// M14: resume upload + API key entry. The key transits this script's
+// memory to the local server only — it is NEVER written to
+// chrome.storage (plaintext in the Chrome profile) or anywhere else in
+// the extension.
 
 const DEFAULT_SERVER = "http://127.0.0.1:8000";
 const STAGE_LABELS = {
@@ -50,6 +54,111 @@ function setBusy(busy) {
   $("clear").disabled = busy;
   if (busy) {
     $("plan").disabled = true;
+  }
+}
+
+// ---- 0. setup: resume upload + LLM key ------------------------------------
+
+function showSkills(info) {
+  if (!info || !info.filename) {
+    $("resumeinfo").textContent = "";
+    return;
+  }
+  const count = info.count == null ? "" : ` — ${info.count} skills`;
+  const src = info.source === "default" ? "" : ` (${info.source})`;
+  $("resumeinfo").textContent =
+    (info.source === "default" ? "Default skills file: " : "Resume ready: ") +
+    info.filename + count + src;
+}
+
+async function refreshSkills() {
+  try {
+    const r = await fetch(server + "/api/status");
+    const s = await r.json();
+    showSkills(s.skills);
+  } catch (e) {
+    /* offline — the connection badge already says so */
+  }
+}
+
+async function uploadResume() {
+  const file = $("resume").files && $("resume").files[0];
+  if (!file) return;
+  setStatus("Uploading resume and extracting skills (first time can take minutes)…");
+  try {
+    const r = await fetch(server + "/api/resume", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Filename": encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
+    showSkills({ filename: body.filename, count: body.skills, source: body.source });
+    setStatus(
+      (body.warning ? body.warning + " " : "") +
+        `Resume ready: ${body.filename} — ${body.skills} skills.`,
+      Boolean(body.warning),
+    );
+  } catch (e) {
+    setStatus("Resume upload failed: " + e.message, true);
+  }
+}
+
+function showKeyState(providers) {
+  const p = providers.find((x) => x.id === $("provider").value);
+  $("keystate").textContent = p
+    ? p.key_set
+      ? `Key configured ✓ for ${p.id}.`
+      : `No key stored for ${p.id} yet.`
+    : "";
+}
+
+async function loadProviders() {
+  try {
+    const r = await fetch(server + "/api/providers");
+    const body = await r.json();
+    const sel = $("provider");
+    sel.replaceChildren();
+    for (const p of body.providers || []) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `${p.id} (${p.model})`;
+      sel.appendChild(opt);
+    }
+    showKeyState(body.providers || []);
+  } catch (e) {
+    $("keystate").textContent = "Local agent offline — key status unknown.";
+  }
+}
+
+async function saveKey() {
+  const apiKey = $("apikey").value.trim();
+  if (!apiKey) {
+    setStatus("Paste the API key first.", true);
+    return;
+  }
+  try {
+    const r = await fetch(server + "/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: $("provider").value,
+        api_key: apiKey,
+        remember: $("remember").checked,
+      }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
+    $("apikey").value = "";
+    $("keystate").textContent =
+      "Key saved (" +
+      (body.stored === "keyring" ? "OS keyring" : "this session only") + ").";
+    setStatus("API key saved.");
+  } catch (e) {
+    setStatus("Could not save key: " + e.message, true);
   }
 }
 
@@ -134,6 +243,7 @@ async function analyze() {
     jds: jds.map((x) => ({ title: x.title, url: x.url, text: x.text })),
     top_n: parseInt($("topn").value || "5", 10),
     reuse_judged: true,
+    provider: $("provider").value || "openrouter",
   };
   const started = await postRun(body);
   if (started) poll();
@@ -284,6 +394,9 @@ $("reopen").addEventListener("click", () => {
   loadPlan();
   setStatus("Plan reopened.");
 });
+$("resume").addEventListener("change", uploadResume);
+$("savekey").addEventListener("click", saveKey);
+$("provider").addEventListener("change", loadProviders);
 $("clear").addEventListener("click", async () => {
   jds = [];
   await saveJds();
@@ -299,4 +412,6 @@ $("serverBase").addEventListener("change", async (e) => {
 loadState().then(() => {
   renderJds();
   checkConnection();
+  loadProviders();
+  refreshSkills();
 });

@@ -112,12 +112,13 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M13; M9 is the only one still Designed)
+## Milestones (linear and global — M1…M14; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
 evaluation harness over the built pipeline and M13 is the browser surface —
-neither is a new pipeline stage.
+neither is a new pipeline stage; M14 is extension self-serve setup,
+likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -201,12 +202,20 @@ neither is a new pipeline stage.
      DeepSeek V4 Flash / OpenRouter (see §Open: extraction latency below);
      artifact reuse makes it a one-time cost per resume.
    **Status: built and validated on the user's real resume.**
-9. **Conversational intake + skill validation.** 🎯 Designed
-   (full design in [13-intake.md](13-intake.md)). Chat agent collects
-   evidence (resume / JSON / JDs) and pre-fills gate questions; triaged
-   skills validated via concept checklist + applied question with hidden
-   rubric; grades persist to `output/proficiency.json` on the gate's 1–5
-   depth scale; gate shrinks to unvalidated skills.
+9. **Conversational intake + skill validation.** ⏸ Deferred / re-scoped
+   2026-10-04 (was 🎯 Designed; original design kept in
+   [13-intake.md](13-intake.md) for history). User decision 2026-10-04:
+   **no conversational flow** — the extension panel stays the only
+   interaction model (decision row in [02-decisions.md](02-decisions.md)).
+   Split on deferral: the *conversational intake* half (chat agent
+   collecting evidence / pre-filling gate questions) is deferred outright
+   (§Deferred #13); the *skill validation* half (evidence-backed depth —
+   concept checklist + applied question with hidden rubric, grades on the
+   gate's 1–5 scale) remains the standing quality lever, but its UX must be
+   redesigned **non-conversational** (e.g. a panel checklist of extracted
+   skills with confidence badges) at the upcoming plan/gap-quality
+   brainstorm. M9 keeps its number (linear, global); its build follows
+   that brainstorm.
 10. **OSS issue sourcing (GFI thin slice).** ✅ Built 2026-09-28
     (mechanics in S6 `09-practice-planner.md`). New `oss.py`
     consumed from `rank_gaps()` `Gap` objects: 2-attempt search loop
@@ -297,7 +306,8 @@ neither is a new pipeline stage.
     [12-extension.md](12-extension.md) — not repeated here. Per user
     priority 2026-10-03 the locked sequence was reordered: the extension
     shell jumped ahead of M9 (decision rows in `02-decisions.md`); M9
-    remains the next milestone.
+    was then the next milestone *(superseded 2026-10-04: M9
+    deferred/re-scoped — M14 is next)*.
     - **M10/M11 wiring completed here (discovery).** The M10/M11 entries
       described the `cli.py` wiring as built, but the code had never landed
       there: `set_stage_listener`/`_stage`, the `oss` node, `plan.html`
@@ -358,6 +368,56 @@ neither is a new pipeline stage.
       `02-decisions.md`. Verified 2026-10-04: `m13_check.py` extended;
       `ruff check .` clean, `pytest` clean, `m10_check`–`m13_check` PASS.
 
+14. **Extension self-serve setup (resume upload + API key entry +
+    launcher).** ✅ Built 2026-10-04 (design in
+    [12-extension.md](12-extension.md) §M14; decision rows in
+    [02-decisions.md](02-decisions.md) M14). Three slices:
+    (A) **Resume upload** from the panel — `POST /api/resume` (raw bytes,
+    10 MB cap, magic-byte checks, stored under `output/uploads/`), with
+    the extraction cache keyed by the resume's SHA-256 sidecar so a second
+    upload re-extracts instead of silently reusing the first resume's
+    skills; (B) **API key entry** — `POST /api/key` → OS keyring
+    ("remember") or session-only process env; `GET /api/providers` returns
+    `key_set` booleans only; the key never touches `chrome.storage`;
+    provider dropdown + `provider` field in the run contract;
+    (C) **`tools/start-server.bat`** double-click launcher (Native
+    Messaging auto-launch deferred — §Deferred #14).
+    - **Verified 2026-10-04:** `m14_check.py` offline PASS (upload
+      validation — size cap / type / magic bytes / traversal-name
+      sanitize, hash-cache hit + re-extract on mismatch, key endpoint with
+      stubbed secrets in both modes + no key leakage in any response,
+      skills/provider precedence, panel markup + launcher); `ruff check .`
+      clean; `pytest` 7 passed (`test_m13.py` + `test_m14.py`);
+      `node --check` clean; `m10_check`–`m13_check` regressions all PASS.
+    - **Live smoke (2026-10-04, real server + real resume):** uploaded
+      `data/Shubham_Singh.pdf` via `POST /api/resume` → 76 skills,
+      `source: "artifact"` (hash sidecar cache hit — the migration-seeded
+      hash of the M8-era artifact), `/api/status` reports what the run
+      will use; `/api/providers` shows the real keyring state
+      (openrouter `key_set: true` — read-only); session-only key flips
+      `key_set` without any storage; a `phase: "gaps"` run consumed the
+      uploaded resume (`skills: Shubham_Singh.pdf, 76`) → `paused` →
+      `/api/gaps` served. The Chrome click-through (upload + key-save in
+      the panel) is the user's one-time step, same as M13.
+    - **Learnings:**
+      - **The stale-server gotcha struck a third time.** A pre-M14 server
+        process (started 15:57) still held port 8000, so the first smoke
+        got 404s on the new endpoints and stale `done` status. Now
+        documented in `extension/README.md`: restart the server after
+        pulling code changes.
+      - **Existing extraction artifacts need one-time hash seeding (or one
+        re-extraction).** The artifact predates the sidecar, so the first
+        hash-checked load would re-extract (a real LLM call). Seeded the
+        sidecar with the SHA-256 of the resume the artifact actually came
+        from — correct by construction, zero cost.
+      - **Filename sanitization must allow spaces** or the display name
+        mangles ("resume b.txt" → "resume_b.txt"); spaces are harmless
+        (separators remain stripped, traversal still impossible).
+      - **Extraction blocks the upload request** (first upload of a new
+        resume can take minutes on the LLM path); the panel warns up front
+        and cache hits are instant. If this hurts in real use, extraction
+        can move behind the existing run-polling pattern.
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -377,6 +437,8 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 10 | **Confidence-threshold auto-tuning** | Manual threshold, start 0.5 → tuned to 0.75 at M4 | Tune empirically against the rubric after the first full run (done — see M4). |
 | 11 | **JD auto-discovery/scraping** | User-supplied JDs | Explicit non-goal of v1; extension prerequisite (browser JD is the input). M13's Capture button covers manual browser-JD input; *automatic* discovery/scraping remains deferred. |
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
+| 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
+| 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
