@@ -14,7 +14,7 @@ from .seed import load_jds, load_skills_json
 
 
 def main() -> None:
-    skills_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/skills.json")
+    skills_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/skillsdataset.json")
     jds_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("data/jds")
 
     sg = SkillGraph()

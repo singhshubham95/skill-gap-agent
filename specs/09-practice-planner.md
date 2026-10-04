@@ -19,14 +19,10 @@ validation and the extension shell. Milestone numbers stay linear and
 global (no M8a / v2-M1 renames).
 
 **Status (2026-10-03):** the shell is Built as **M13** (user priority moved
-it ahead of M9 — decision rows in [02-decisions.md](02-decisions.md)):
-Chrome **side panel** (not a popup/overlay) with an append-only capture
-list (JDs captured one by one while browsing), **Analyze gaps** → gap table
-in the panel, **Generate plan** → projects + good-first-issues in the
-panel. Full design + server contract in
-[01-system-overview.md](01-system-overview.md) §M13 design; install
-instructions in [../extension/README.md](../extension/README.md). Deferred
-from the design: marking the skills in the JD page text itself
+it ahead of M9 — decision rows in [02-decisions.md](02-decisions.md)).
+Full design + server contract in [12-extension.md](12-extension.md);
+install instructions in [../extension/README.md](../extension/README.md).
+Deferred from the design: marking the skills in the JD page text itself
 ([03-milestones.md](03-milestones.md) §Deferred #12).
 
 ## Standalone synthesis (`synthesis.py`, Built M5)

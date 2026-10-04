@@ -1,7 +1,7 @@
 # Roadmap — Build Order, Trade-offs, Open Questions
 
 Build order, deferred trade-offs, and open questions in one place
-(merged 2026-09-27 from `03-milestones.md` + `6-deferred-enhancements.md`
+(merged 2026-09-27 from `5-milestones.md` + `6-deferred-enhancements.md`
 + `7-open-items.md`: all three talked about timeline — what is built,
 what is next, what is deliberately postponed — so they are one file now).
 Each milestone ends with something runnable.
@@ -103,7 +103,7 @@ Each milestone ends with something runnable.
    cloud-platform intent — but groups NEVER erase specific gaps (LangChain
    stays full-urgency despite ADK; per-group mention policies are hand-set).
    Honest limitation recorded: per-JD mention-modality classification via LLM
-   is the proper fix (deferred — see §Deferred #10 below).
+   is the proper fix (deferred — see §Open: mention-modality below).
    Plan output now includes per-verdict JD traceability.
 
 **v1 COMPLETE** — all six milestones done. The LangGraph wiring has since
@@ -112,11 +112,12 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Planned Milestones (v2 target — Designed, no code yet)
+## Milestones (linear and global — M1…M13; M9 is the only one still Designed)
 
-Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7–M9
+Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
-evaluation harness over the built pipeline, not a new pipeline stage.
+evaluation harness over the built pipeline and M13 is the browser surface —
+neither is a new pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -201,7 +202,7 @@ evaluation harness over the built pipeline, not a new pipeline stage.
      artifact reuse makes it a one-time cost per resume.
    **Status: built and validated on the user's real resume.**
 9. **Conversational intake + skill validation.** 🎯 Designed
-   (full design in `01-system-overview.md` §M9 design). Chat agent collects
+   (full design in [13-intake.md](13-intake.md)). Chat agent collects
    evidence (resume / JSON / JDs) and pre-fills gate questions; triaged
    skills validated via concept checklist + applied question with hidden
    rubric; grades persist to `output/proficiency.json` on the gate's 1–5
@@ -245,46 +246,12 @@ evaluation harness over the built pipeline, not a new pipeline stage.
     were accurate for `m5_plan.py`-driven runs, ahead of the code for
     `cli.py`.
 12. **JD-subset sweep evaluation.** ✅ Built 2026-10-03
-    (full design in `01-system-overview.md` §M12 design). An **evaluation
-    harness** (`sweep.py`), not a pipeline stage: it runs the existing
-    pipeline once per JD subset and writes a reviewable record so the user
-    can inspect which subset produced which plan.
-    - **Sampling:** seeded `random.Random(seed)` for replicability. Two
-      families — random `k=3` subsets (typical case) plus **contrastive**
-      subsets (3 near-identical JDs, 3 maximally different, all JDs,
-      singletons). Random-only is deliberately not the whole design: 16 JDs
-      → 560 triples, random draws overlap heavily, so most runs would be
-      near-duplicates.
-    - **Shared caches (the cost insight):** the judge scores target `T`
-      against `prune_candidates(T, sg.current_skills())`; current skills come
-      from the resume (constant across subsets), so the score for `T` is a
-      pure function of `T` — subset-independent. Same for gate overrides
-      (question is about the *source* skill) and OSS issues (query built from
-      `gap.target`). These caches live in `_shared/` and are reused across
-      every subset: ~23 judge calls per sweep instead of `n_subsets × ~20`.
-      Genuinely subset-dependent: JD ingestion (which targets exist),
-      `gap_score = weight × (1 − confidence)`, synthesis (top-N + weight in
-      prompt).
-    - **Manifest records subset membership explicitly.** `Gap.source_jds`
-      records which JDs *mention* a gap, not which were *in the subset*;
-      without membership you cannot tell "this JD doesn't need Spark" from
-      "this JD wasn't in the run". Each JD also gets a content hash so a
-      renamed/edited file can't silently invalidate an old sweep.
-    - **Pre-computed metrics** (target the review, don't replace it):
-      top-5 Jaccard stability across subset pairs, per-gap appearance rate,
-      superset consistency (violations = bugs, not opinions), rank churn per
-      gap, synthesis grounding string-check, GFI link HTTP status.
-    - **Two-pass manual review** to avoid confirmation bias: score plan
-      quality with the JD list hidden, then reveal the subset and check the
-      plan matches what those JDs demand.
-    - **Replicability caveat:** the seed gives subset replicability, not
-      output replicability (`LLMConfig.temperature` is 0.2). Sweep runs set
-      `temperature=0` and record it in the manifest.
-    - **Done criteria:** `sweep.py` runs N subsets end-to-end with shared
-      caches; `manifest.json` + `index.md` map any plan to its exact subset;
-      `m12_check.py` verifies offline (stubbed LLM/search) — deterministic
-      sampling, no output collision, cache sharing, manifest completeness;
-      `ruff check .` and `pytest` clean.
+    (design in [11-sweep.md](11-sweep.md)). An **evaluation harness**
+    (`sweep.py`), not a pipeline stage: it runs the existing pipeline once
+    per JD subset and writes a reviewable record so the user can inspect
+    which subset produced which plan. Design (sampling, shared caches,
+    runner shape, output layout, manifest, metrics, two-pass review, done
+    criteria) lives in [11-sweep.md](11-sweep.md) — not repeated here.
     - **Verified 2026-10-03:** `m12_check.py` offline PASS (sampling
       determinism + contrastive ordering, per-subset output isolation, judge
       cache sharing 4 new + 16 replays on the fixture, manifest/index
@@ -321,21 +288,16 @@ evaluation harness over the built pipeline, not a new pipeline stage.
         functions), so `m12_check.py` drives the true end-to-end path with
         fakes — including manifest/index writing.
 13. **Chrome extension shell.** ✅ Built 2026-10-03
-    (design in `01-system-overview.md` §M13 design; end goal in S6
+    (design in [12-extension.md](12-extension.md); end goal in S6
     `09-practice-planner.md` §End goal). MV3 side panel in `extension/`:
-    **Capture JD** appends the active tab's LinkedIn JD (the bookmarklet's
-    extraction as a content script) to a `chrome.storage.local` list;
-    **Analyze gaps** posts the list to `server.py` (`phase: "gaps"` →
-    captured JDs written to `output/captured_jds/`, graph pauses after
-    `rank`, `GET /api/gaps` serves the ranked table); **Generate plan**
-    (`phase: "plan"`) resumes through synthesize → oss → output and renders
-    `plan.html` in a sandboxed iframe. The extension is a thin client — the
-    pipeline runs in the local `server.py` process. Per user priority
-    2026-10-03 the locked sequence was reordered: the extension shell jumped
-    ahead of M9 (decision rows in `02-decisions.md`); M9 remains the next
-    milestone. Design choices locked same day: side panel over popup or
-    in-page overlay; gap highlighting = the panel's gap table (marking skills
-    in the JD page text deferred — §Deferred #12).
+    capture JDs on LinkedIn → analyze gaps → generate the plan, with the
+    pipeline running in the local `server.py` process. Design (side-panel
+    choice, capture, run contract, two-phase pause, `reuse_judged`,
+    rendering, security posture, non-goals, done criteria) lives in
+    [12-extension.md](12-extension.md) — not repeated here. Per user
+    priority 2026-10-03 the locked sequence was reordered: the extension
+    shell jumped ahead of M9 (decision rows in `02-decisions.md`); M9
+    remains the next milestone.
     - **M10/M11 wiring completed here (discovery).** The M10/M11 entries
       described the `cli.py` wiring as built, but the code had never landed
       there: `set_stage_listener`/`_stage`, the `oss` node, `plan.html`
@@ -344,24 +306,6 @@ evaluation harness over the built pipeline, not a new pipeline stage.
       on the pre-M13 tree (`cli` had no `set_stage_listener`). Completed as
       part of M13 — the extension's backend is exactly this path — and
       `m11_check.py` now passes.
-    - **Two-phase flow reuses the gate's `interrupt()` machinery.** A `pause`
-      node after `rank` (reached only when `two_phase` state is set) raises
-      `interrupt()`; `Command(resume=...)` re-executes the node (LangGraph
-      replay semantics — the `interrupt()` call returns the resume value on
-      the second execution) and the same router continues to synthesize/oss/
-      output. One graph run ⇒ the phase-2 plan is guaranteed to describe the
-      phase-1 gaps; no cache plumbing between two runs.
-    - **Judge cache reuse (`reuse_judged`) for interactive re-analysis.**
-      Copies `TRANSFERS_TO` edges from `output/graph.json`, judges only
-      still-unmatched targets, merges `judge_report.json` by target — the
-      M12 subset-independence insight applied to the extension's re-analyze
-      button (adding one JD doesn't re-pay ~20 LLM calls). CLI default stays
-      fresh-judging (M6 validation semantics).
-    - **Security posture.** No CORS headers on the server on purpose: the
-      extension calls with `host_permissions` (which bypass CORS), while
-      absent ACAO + no OPTIONS handler blocks hostile web pages from reading
-      resume-derived gaps or triggering runs. JD text renders via
-      `textContent` only; the plan renders in a sandboxed iframe.
     - **Verified 2026-10-03:** `m13_check.py` offline PASS (cli wiring,
       manifest validity, two-phase flow through the real server + real graph
       with stubbed judge/synthesis/oss — captured-JD ingestion, `paused` →
@@ -398,34 +342,21 @@ evaluation harness over the built pipeline, not a new pipeline stage.
       works too" was true of `cli.py` but not yet of the server path.
       Tracebacks are now printed in the server's error handlers for
       debuggability.
-    - **Explicit non-goals (recorded, not oversights):** in-page gap marking
-      on the JD text (§Deferred #12), generic non-LinkedIn JD pages
-      (LinkedIn-only content-script matches, like the bookmarklet), run
-      history, hosting, multi-user auth, Web Store packaging.
     - **Fix 2026-10-04 — plan links navigated the iframe away
       (user-reported).** Clicking any link in `plan.html` inside the side
-      panel navigated the sandboxed iframe itself: external GFI links hit
-      GitHub's `X-Frame-Options: deny` ("refused to connect" where the plan
-      had been), and nothing brought the plan back — "Generate plan"
-      re-runs synthesize/oss instead of redrawing. Root cause: plain
-      anchors navigate their containing frame, and `sandbox` (no tokens)
-      blocks scripts/popups but not self-navigation. Fix: every
+      panel navigated the sandboxed iframe itself (external GFI links hit
+      GitHub's `X-Frame-Options: deny`; nothing brought the plan back).
+      Root cause: plain anchors navigate their containing frame, and
+      `sandbox` blocks scripts/popups but not self-navigation. Fix: every
       `render_plan_html` link gets `target='_blank' rel='noopener
-      noreferrer'` (the renderer is the only layer that can — the panel
-      cannot reach a cross-origin, script-blocked iframe), the iframe
-      carries `sandbox="allow-popups allow-popups-to-escape-sandbox"`
-      (either token missing breaks the fix: without `allow-popups` the
-      `target='_blank'` popup is silently blocked, without
-      `...-to-escape-sandbox` the opened tab inherits the no-script
-      sandbox), plus a **Reopen plan** control that re-points the iframe at
-      the on-disk `/plan.html` (recovery without an LLM re-run). Second bug
-      found on the way: captured-JD links always 404'd — they resolve to
-      `output/captured_jds/` while `/jds/` served only `data/jds/`; the
-      viewer now serves both (exact-name + suffix match). Verified
-      2026-10-04: `m13_check.py` extended (every plan anchor targets a new
-      tab; iframe tokens + Reopen control present; captured-JD `/jds/` 200
-      and unknown-name 404); `ruff check .` clean, `pytest` clean,
-      `m10_check`–`m13_check` PASS. Decision rows in `02-decisions.md`.
+      noreferrer'`, the iframe carries
+      `sandbox="allow-popups allow-popups-to-escape-sandbox"`, plus a
+      **Reopen plan** control. Second bug found on the way: captured-JD
+      links always 404'd — the viewer now serves both `data/jds/` and
+      `output/captured_jds/`. Design detail in
+      [12-extension.md](12-extension.md) §Rendering; decision rows in
+      `02-decisions.md`. Verified 2026-10-04: `m13_check.py` extended;
+      `ruff check .` clean, `pytest` clean, `m10_check`–`m13_check` PASS.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -434,7 +365,7 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 
 | # | Deferred | v1 Simplification | Why deferred / trigger to restore |
 |---|---|---|---|
-| 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in `01-system-overview.md` §Graph Schema is already Neo4j-shaped. |
+| 1 | **Neo4j graph store** (Docker dev / AuraDB hosted) | networkx in-memory, persisted as JSON | Setup cost before any pipeline signal. Restore when persistence across sessions or Cypher demo value matters (v1.1). Schema in `06-skill-map.md` §Schema is already Neo4j-shaped. |
 | 2 | **True LangGraph `interrupt()` + checkpointer** → Done (M7) | stdin prompt loop in the confidence gate | Resumable runtime adds complexity for a CLI. Restored for long-running/resumable runs. |
 | 3 | **GitHub Issues sourcing node** (`good-first-issue`/`help-wanted` search) → Built thin slice (M10) | LLM project synthesis only | Fragile external dependency (rate limits, label quality varies by repo). Thin slice in M10 alongside synthesis; quality filtering + search-and-reason refinement loop remain deferred. |
 | 4 | **Chat refinement over the built graph** ("why is X a gap", "re-rank assuming I know Y") | None — static plan output | A second app (tool-calling loop over graph queries). v1.2, after the graph is trustworthy. |
@@ -510,5 +441,7 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   sweep results need to be reported as accuracy numbers.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
-- **Model pick (S2).** Resolved at M3: DeepSeek V4 Flash 0731 via
-  OpenRouter (see M3).
+- **Model pick (S2).** ~~Resolved at M3: DeepSeek V4 Flash 0731 via
+  OpenRouter (see M3).~~ **Closed** — no longer an open item; the decision
+  lives in [02-decisions.md](02-decisions.md) (M3 provider row) and the
+  record in M3 above. Kept here only as a pointer.

@@ -3,7 +3,7 @@
 The end goal from [../specs/09-practice-planner.md](../specs/09-practice-planner.md)
 §End goal: open a JD in the browser, capture it, and get the skill gaps +
 a hands-on plan (with live good-first-issues) in a side panel. Design:
-[../specs/01-system-overview.md](../specs/01-system-overview.md) §M13 design.
+[../specs/12-extension.md](../specs/12-extension.md).
 
 ## What it does
 
