@@ -427,6 +427,47 @@ evaluation harness over the built pipeline, not a new pipeline stage.
       and unknown-name 404); `ruff check .` clean, `pytest` clean,
       `m10_check`–`m13_check` PASS. Decision rows in `02-decisions.md`.
 
+14. **Observability + judge evaluation (LangSmith).** 🎯 Designed 2026-10-04
+    (full design in `01-system-overview.md` §M14 design). Tooling around the
+    built pipeline, not a new stage. Answers two questions the repo cannot
+    today: *what happened inside a run* (tracing) and *is the judge right*
+    (golden-set evaluation — M3 hand-checked 5 skills; M12 measures stability,
+    not correctness). Built in four slices, each runnable on its own:
+    - **14a — Opt-in tracing.** New `tracing.py` (only module importing
+      `langsmith`): `enable_tracing()` (key via `secrets.py`, env → keyring),
+      `wrap_client()` (wraps the OpenAI client in `llm._client()` — covers
+      every LLM caller at once), `traced()` stage labels on `judge_target`,
+      `synthesize_project`, `filter_issues_relevance`, `extract_skills_llm`,
+      `bridge_vocabulary`; `--trace` flag on `cli.py` / `server.py` /
+      `sweep.py`. Off by default; missing key = warning, never a failure.
+      Discovery while designing: `llm.py` imports `openai` but
+      `pyproject.toml` does not declare it (only a runtime ImportError
+      message) — declare `openai` as a dependency and `langsmith` as an
+      optional `trace` extra in the same change.
+    - **14b — Judge golden set + eval runner.** Committed
+      `evals/judge_golden.jsonl` (≥30 rows first: target, candidates,
+      human-agreed confidence band per candidate, seeded from the M6 hand
+      analysis); `judge_eval.py` calls the real `judge_target()` and reports
+      `in_band` (judge accuracy) + `pruner_recall` (did pruning show the
+      right candidates — the M3 known issue) locally, and as a LangSmith
+      experiment with `--langsmith`. `temperature=0`.
+    - **14c — CI.** First `.github/workflows/` file. Offline tier (ruff,
+      pytest, `test_m14.py`) on every PR — no secrets, because GitHub withholds
+      secrets from fork PRs. Live eval on `workflow_dispatch` + pushes to
+      `main` touching `judge.py` / `llm.py` / `synthesis.py`; fails on an
+      `in_band` drop > 5 points vs. baseline.
+    - **14d — Gate decisions as feedback.** `judge_report.json` gains
+      `trace_run_id`; the gate attaches `gate_depth` / `gate_intent` as
+      LangSmith feedback on that judge run. Recorded as an *analysis* signal
+      ("how often does the gate flip a verdict"), **not** as judge ground
+      truth — per M4, the user never judges transfer scores.
+    - **Done criteria:** see §M14 design (trace tree for a `--trace` CLI run
+      and zero network traffic without it; ≥30-row golden set with local +
+      LangSmith reports; `m14_check.py` offline PASS; CI offline tier green;
+      `ruff check .` and `pytest` clean).
+    - **Explicit non-goals:** self-hosted LangSmith/Langfuse, LLM-as-judge
+      grading of `plan.md`, tracing extension JS, production alerting.
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -480,7 +521,9 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   can't separate bridges from gaps, re-prompt the judge with a stricter
   rubric. The automatic re-judge loop was deferred at M7 (decision in
   `02-decisions.md`); revisit trigger: bridge/gap verdicts visibly misfire
-  on clustered-high scores.
+  on clustered-high scores. M14 (Designed) makes this measurable: the
+  golden-set eval reports the judge's confidence distribution and
+  `in_band` rate per prompt/model.
 - **Alias table contents (S4).** Seeded (~130 entries) from M2 merges +
   ~50 M8 variants. The bridge (`vocab_bridge.py`) handles unanticipated
   variants; extend the manual table only for recurring variants.
@@ -507,7 +550,9 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   subset-partitioned. A per-subset hand analysis is the honest way to score
   plan *quality*; until then the sweep's automatic metrics flag where to
   look, and the two-pass manual review supplies the judgment. Revisit if
-  sweep results need to be reported as accuracy numbers.
+  sweep results need to be reported as accuracy numbers. M14 (Designed) adds
+  ground truth for one stage only — the judge (golden set of human-banded
+  skill pairs); plan-level ground truth stays open.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
 - **Model pick (S2).** Resolved at M3: DeepSeek V4 Flash 0731 via

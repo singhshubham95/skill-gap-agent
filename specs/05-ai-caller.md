@@ -3,7 +3,7 @@
 Single door to the language model. Every LLM call in the pipeline goes
 through here; node modules never touch provider SDKs.
 
-**Status: Built** (M3; M8 secrets change — see below).
+**Status: Built** (M3; M8 secrets change — see below); M14 tracing hook Designed.
 
 ## What it does
 
@@ -19,6 +19,17 @@ through here; node modules never touch provider SDKs.
 - Callers: S1 extraction (1 call), S4 bridge (batched), S5 judge
   (1 per target), S6 synthesis (1 per gap), S7 intake/validation (M9).
 
+## Tracing hook (M14) — 🎯 Designed, no code yet
+
+- `_client()` will return `tracing.wrap_client(OpenAI(...))`: when tracing
+  is on, every `chat.completions.create` becomes a LangSmith child run
+  (prompt, response, tokens, latency); when off, the client is returned
+  unchanged. `judge()` / `chat()` signatures do not change.
+- `LANGSMITH_API_KEY` resolves through `secrets.get_secret()` like every
+  other key (env → keyring). Tracing is opt-in and never raises.
+- Design: `01-system-overview.md` §M14 design; decisions in
+  `02-decisions.md` (M14 rows); milestone `03-milestones.md` M14 (14a).
+
 ## Known limits
 
 - Extraction call latency ~19 min on DeepSeek V4 Flash (one-time per
@@ -28,5 +39,5 @@ through here; node modules never touch provider SDKs.
 ## History (links, not copies)
 
 - Decisions: `02-decisions.md` (provider rows, keyring-only secret rule).
-- Milestones: `03-milestones.md` M3, M8.
+- Milestones: `03-milestones.md` M3, M8, M14 (Designed).
 - Deferred: `03-milestones.md` §Deferred #6 (local-model benchmark).

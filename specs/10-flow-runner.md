@@ -4,7 +4,7 @@ Step order and display. Owns no domain logic — calls S1→S6.
 
 **Status: Built** (M7 graph + M8 resume front-end + M11 local UI + M12 sweep
 harness + M13 extension shell); M12/M13 verification harnesses Built;
-M9 intake Designed.
+M9 intake Designed; M14 `--trace` flag Designed.
 
 ## Runners
 
@@ -28,6 +28,11 @@ M9 intake Designed.
   logic. Design in `01-system-overview.md` §M12 design.
 - M8 front-end: non-JSON input → `resume_to_skills_json()` before graph
   starts. Flags: `--auto`, `--no-judge`, `--no-llm`, `--top N`, `--resume`.
+- M14 (🎯 Designed): `--trace` on `cli.py` / `server.py` / `sweep.py` calls
+  `tracing.enable_tracing()` before the graph is built and merges
+  `tracing.run_config()` (run name, tags, model metadata) into the
+  `thread_id` config. Off by default. Design in `01-system-overview.md`
+  §M14 design.
   The M10 OSS flags (`--no-oss`, `--no-llm-oss`) live on `m5_plan.py`; the
   `cli.py` graph honors the same options as state fields (`skip_oss`,
   `no_llm_oss` — settable via `server.py`'s run contract).
