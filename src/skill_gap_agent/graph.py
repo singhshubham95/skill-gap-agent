@@ -1,6 +1,6 @@
 """Graph schema: node/edge models and the networkx graph builder.
 
-Store-agnostic per specs/01-system-overview.md §Graph Schema — the same
+Store-agnostic per specs/06-skill-map.md §Schema — the same
 shape maps 1:1 onto Neo4j later (03-milestones.md §Deferred #1).
 """
 
@@ -41,7 +41,7 @@ class Project(BaseModel):
 
 
 class SkillGraph:
-    """networkx-backed graph with the schema from specs/01-system-overview.md.
+    """networkx-backed graph with the schema from specs/06-skill-map.md.
 
     Nodes: Skill, JD, Project (type standalone | oss_issue as of M10).
     Edges: HAS_SKILL, REQUIRES{weight},

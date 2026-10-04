@@ -55,7 +55,7 @@ ranked gaps are right.
 - **Process (for any future re-validation):** run the full pipeline on the
   seed data with no hints → compare ranked gaps to the sealed buckets above
   → record the comparison in this rubric. The M12 sweep harness
-  (`01-system-overview.md` §M12 design) automates the *running* half of this
+  ([11-sweep.md](11-sweep.md)) automates the *running* half of this
   across JD subsets; the comparison against these buckets stays a human
   judgment, since the hand analysis is not subset-partitioned.
 - **Threshold note:** the gate threshold (~0.5 initial guess) was tuned to

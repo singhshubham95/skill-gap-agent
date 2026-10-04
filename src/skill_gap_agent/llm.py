@@ -5,7 +5,7 @@ structured JSON out. Swapping providers/models is a config change, which is
 what enables the milestone-3 calibration check and the later local-model
 benchmark (deferred-enhancements #6).
 
-v1 primary: GLM 5.3 Flash (Z.ai open-platform API, OpenAI-compatible endpoint).
+v1 primary: DeepSeek V4 Flash 0731 via OpenRouter (see PROVIDERS below).
 """
 
 from __future__ import annotations

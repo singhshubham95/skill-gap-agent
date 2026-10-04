@@ -2,9 +2,10 @@
 
 Step order and display. Owns no domain logic — calls S1→S6.
 
-**Status: Built** (M7 graph + M8 resume front-end + M11 local UI + M12 sweep
-harness + M13 extension shell); M12/M13 verification harnesses Built;
-M9 intake Designed.
+**Status: Built** (M7 graph + M8 resume front-end + M11 local UI);
+M12 sweep harness and M13 extension shell are separate components
+([11-sweep.md](11-sweep.md), [12-extension.md](12-extension.md)); M9
+intake Designed.
 
 ## Runners
 
@@ -25,7 +26,7 @@ M9 intake Designed.
   per seeded JD subset, sharing judge/gate/OSS caches across subsets
   (they are subset-independent) and writing per-subset plans under
   `output/sweeps/<sweep-id>/sNN/`. Not a pipeline stage; it owns no domain
-  logic. Design in `01-system-overview.md` §M12 design.
+  logic. Design in [11-sweep.md](11-sweep.md).
 - M8 front-end: non-JSON input → `resume_to_skills_json()` before graph
   starts. Flags: `--auto`, `--no-judge`, `--no-llm`, `--top N`, `--resume`.
   The M10 OSS flags (`--no-oss`, `--no-llm-oss`) live on `m5_plan.py`; the
@@ -49,36 +50,20 @@ M9 intake Designed.
   `idle|running|done|error` with timestamps. Paths resolve from repo root,
   never hardcoded. `cli.py` / `m5_plan.py` stay the runners. The HTML
   renderer became the extension side-panel body at M13.
-  M10 already ships the thin-slice `plan.html` (static, no JS);
-  M11 hardens it into the local UI. Revised scope (user 2026-10-01):
-  bookmarklet saves JD → `data/jds/` (S1 helper, Built) + local page lists
-  folder contents + Regenerate button runs the `cli.py` graph `--auto`
-  with a loading screen (judge/synthesis/OSS take minutes; poll status,
-  show `plan.html` when `node_output` finishes). Built 2026-10-01:
-  `m11_check.py` offline PASS (16 JDs listed, 202 + 409 guard,
-  running → done, plan served); `ruff` clean.
-  Enhancement 2026-10-02: nodes report via `cli.set_stage_listener()`
+  Progress: nodes report via `cli.set_stage_listener()`
   (`ingest|judge|gate|rank|synthesize|oss|output`); `/api/status` carries
   `stage`, the index poll shows it. `GET /jds/<name>` (exact-name match)
   renders JD text; `render_plan_html(..., jd_files={title: filename})`
   links each gap's source JDs; `node_output` builds the map when state
   `link_jds` is set (server sets it; CLI default plain text).
-  (The listener seam itself landed in `cli.py` with M13 — see the M13
-  discovery note in `03-milestones.md`.)
+  (The listener seam landed in `cli.py` with M13 — see the M13 discovery
+  note in `03-milestones.md`.)
 - Chrome extension side panel (M13, Built): `extension/` (manifest v3,
-  `chrome.sidePanel`). Capture JD (content script extracts the active
-  LinkedIn JD, append-only `chrome.storage.local` list) → **Analyze gaps**
-  (`POST /api/run` `phase: "gaps"` with the captured list; JDs land in
-  `output/captured_jds/`, run pauses after rank, gap table from
-  `GET /api/gaps`) → **Generate plan** (`phase: "plan"` resumes; `plan.html`
-  in a sandboxed iframe). Every plan link opens in a new browser tab
-  (`target='_blank'`) so clicking one cannot navigate the iframe away from
-  the plan; a **Reopen plan** control re-points the iframe at the on-disk
-  `plan.html` if the view is lost anyway. `GET /jds/<name>` (exact-name
-  match) serves both `data/jds/` and `output/captured_jds/`. The panel
-  renders JD text with `textContent` only; no CORS headers on the server —
-  the extension calls with `host_permissions`. Design:
-  `01-system-overview.md` §M13 design; install: `extension/README.md`.
+  `chrome.sidePanel`) — capture JDs on LinkedIn, analyze gaps, generate the
+  plan against the `server.py` run contract (`phase: "gaps"` / `"plan"`).
+  The panel renders JD text with `textContent` only; the plan renders in a
+  sandboxed iframe whose links open in new tabs. Design:
+  [12-extension.md](12-extension.md); install: `extension/README.md`.
 - ASCII-safe console output (cp1252 guard).
 
 ## History (links, not copies)

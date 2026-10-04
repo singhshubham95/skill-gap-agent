@@ -4,15 +4,15 @@ Transferability-aware ranking: for each target skill (gap candidate), combine
 JD demand (REQUIRES weight) with the gate-adjusted transfer confidence from
 its top TRANSFERS_TO edge.
 
-Verdict model (specs/01-system-overview.md "How Judge Output Becomes
-Recommendations"):
+Verdict model (specs/08-gap-measurer.md §Ranking — the authoritative list):
 - held            -> matched to a current skill by the matching ladder (not a gap)
-- high transfer   -> platform switch / bridge (low urgency)
-- alternative-bridged -> belongs to an any-of alternative group (e.g. cloud
+- bridge          -> high transfer: platform switch (low urgency)
+- alt-bridged     -> belongs to an any-of alternative group (e.g. cloud
   platform: AWS/Azure/GCP) and the user holds another member — the JD's
   capability intent is satisfied even though this brand is missing
 - partial         -> adjacent skill (medium urgency, leverage what transfers)
-- no/low          -> true gap (high urgency)
+- gap             -> no/low transfer: true gap (high urgency)
+- declared-gap    -> user answered "not counted" at the gate: full urgency
 
 Score: gap_score = weight * (1 - top_transfer_confidence), so a skill needed
 by many JDs with no transfer path ranks highest. Declared-gap targets (user

@@ -1,4 +1,4 @@
-"""JD-subset sweep evaluation harness (milestone 12, specs/01-system-overview.md §M12 design).
+"""JD-subset sweep evaluation harness (milestone 12, specs/11-sweep.md C1).
 
 Runs the pipeline's stage functions once per seeded JD subset and writes a
 reviewable record that maps every generated plan to the exact JD subset that

@@ -7,12 +7,27 @@ only — no logic lives here beyond queries.
 
 ## Schema (`graph.py`, store-agnostic, Neo4j-shaped)
 
-Nodes: `Skill{name, category, source: current|target}`,
-`JD{title, company}`, `Project{title, description, type}`.
-Edges: `HAS_SKILL` (user → skill), `REQUIRES{weight}` (JD → skill),
-`TRANSFERS_TO{confidence, rationale, gate_*}` (skill → skill),
-`CLOSES_GAP` (project → skill). `TRANSFERS_TO` directional (see
-`03-milestones.md` §Deferred #9).
+The canonical schema reference — same shape later in Neo4j (folded from
+`2-architecture.md`; kept here because this file owns `graph.py`).
+
+**Nodes**
+
+| Label | Key properties |
+|---|---|
+| `Skill` | `name`, `category`, `source` (`current`\|`target`) |
+| `JD` | `title`, `company` |
+| `Project` | `title`, `description`, `type` (`standalone` + `oss_issue` since M10) + `url, repo, labels, updated_at` for oss issues |
+
+**Edges**
+
+| Type | From → To | Properties | Written by |
+|---|---|---|---|
+| `HAS_SKILL` | User (implicit) → `Skill` | — | Ingestion node |
+| `REQUIRES` | `JD` → `Skill` | `weight` (frequency across JDs) | Target-ingestion node |
+| `TRANSFERS_TO` | `Skill` → `Skill` | `confidence` (0–1), `rationale` (short LLM text), `gate_*` (M4) | Transferability-judge node / gate |
+| `CLOSES_GAP` | `Project` → `Skill` | — | Output node |
+
+`TRANSFERS_TO` is directional in v1 (see `03-milestones.md` §Deferred #9).
 
 ## Queries
 

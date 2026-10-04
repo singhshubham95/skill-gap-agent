@@ -27,6 +27,8 @@ state, and follow its links rather than relying on details memorized here.
 - **Keep the details, add the context.** Do not simplify away technical
   specifics; instead, precede each non-obvious point with enough background
   (what the thing is, why it matters here) that a newcomer can follow.
+  This rule governs **conversation with the user**, not spec files: specs
+  follow the one-home-per-register rule and link rather than re-explain.
 - Prefer concrete examples from this repo's own code/data over abstract
   phrasing. Avoid dense jargon-only paragraphs; if a paragraph needs
   unpacking, break it into a short explanation followed by the implication.
@@ -39,6 +41,15 @@ state, and follow its links rather than relying on details memorized here.
 - After implementing a milestone: flip its status markers to Built, record
   learnings in `specs/03-milestones.md`, append any new locked decision to
   `specs/02-decisions.md`.
+- **One home per register.** Design prose lives in exactly one place — the
+  owning component's spec file. `02-decisions.md` holds the decision + a
+  one-line rationale and links to the design; `03-milestones.md` holds the
+  verification record, genuinely new learnings, and links. Never restate
+  the design in a second file — link to it instead. If you find yourself
+  writing the same rationale in two files, that is the signal to delete one
+  copy and link. **Cross-cutting scope does not create an exception:** a
+  design that touches many stages still has exactly one home (the component
+  file that owns it), and every other file links to it.
 
 ## Spec evolution rules
 
@@ -56,25 +67,45 @@ The specs are **living target-state documents**, not per-version snapshots:
    (e.g. "the shipped range" vs. "the current target range"), not document
    boundaries. When new design changes an existing component, revise that
    component's section and note the change; when it adds a component, add a
-   new section.
+   new section in the owning file — or a new file if the component is
+   substantial (see rule 6).
 3. **`02-decisions.md` is append-only.** Add rows, mark superseded ones,
-   never delete or silently rewrite. Same for milestone entries: keep
-   history, append learnings.
+   never delete or silently rewrite. Mark supersessions in a fixed format —
+   `~~struck text~~ (superseded by <Mn> row, <date>)` — so a reader can see
+   at a glance which rows are historical. Same for milestone entries: keep
+   history, append learnings. **Learnings are bounded:** record what
+   surprised you or changed during the build (bugs, discoveries,
+   corrections, measured results) — not the design itself, which lives in
+   the owning component spec.
 4. **Milestone numbers are linear and global** (M1, M2, … M7, M8, …). Never
    restart numbering per version ("v2-M1" is forbidden).
 5. **No stale references.** Specs and README must only reference files,
    modules, and artifacts that exist in the repo. If you delete or rename an
    artifact, grep the docs for it in the same change.
-6. **Component specs are per-stage (S1–S7), eager.** Each pipeline stage owns
-   one spec file (`specs/04-reader.md` through `specs/10-flow-runner.md`;
-   functional names are indexed in `specs/01-system-overview.md`). Component
-   files own mechanics + status only. History stays single-source: decisions
-   in `02-decisions.md`, build order + learnings + trade-offs + open
-   questions in `03-milestones.md` (§§Deferred/Open hold the rest) —
-   component files link by ID (milestone number, decision row, item bullet)
-   and never copy that text. Status markers in component files are derived
-   from the milestone entry, never set independently. Cross-stage design
-   (M9 intake + validation, graph schema) lives in `01-system-overview.md`.
+6. **Component specs are per-component, eager.** Each substantial component
+   owns one spec file: the seven pipeline stages (`specs/04-reader.md`
+   through `specs/10-flow-runner.md`, functional names indexed in
+   `specs/01-system-overview.md`) **and** non-stage components with their own
+   code directory or long-lived surface (e.g. the M12 sweep harness
+   `specs/11-sweep.md`, the M13 Chrome extension `specs/12-extension.md`).
+   A component earns its own file when it has its own code directory or
+   module cluster, its own status lifecycle, and enough design to bloat a
+   shared file; otherwise it stays a section of the nearest component's
+   file. Component files own mechanics + status only. History stays
+   single-source: decisions in `02-decisions.md`, build order + learnings +
+   trade-offs + open questions in `03-milestones.md` (§§Deferred/Open hold
+   the rest) — component files link by ID (milestone number, decision row,
+   item bullet) and never copy that text. Status markers in component files
+   are derived from the milestone entry, never set independently.
+   Cross-stage *scope* does not change ownership: M9 intake + validation
+   has its own file (`specs/13-intake.md`) because it is a component with
+   its own modules and status lifecycle, and the skill-graph schema lives
+   in `specs/06-skill-map.md` because that file owns `graph.py`.
+   `01-system-overview.md` is a **map and router**, never a design host: it
+   holds the stage/component tables, data flow, repo map, Conventions &
+   Guardrails, and — at most — a 2–4 line summary plus a link per
+   component. If a section of `01` reads as design rather than as a map
+   entry, move it to the owning component file.
 
 ## Code conventions
 
