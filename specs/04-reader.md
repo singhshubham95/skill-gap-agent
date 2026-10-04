@@ -38,6 +38,9 @@ files (and later browser pages) into plain text for downstream stages.
 - `output/extracted_skills.json` (raw LLM/regex output, reviewable).
 - `output/extracted_skills.reviewed.json` (post-approval, feeds ingest).
 - `output/extracted_approvals.json` (phrase → keep/drop, silent re-runs).
+- `output/extracted_skills.sha256` (M14 — SHA-256 of the source
+  resume; the artifact is reused only when it matches, so uploading a
+  second resume can never silently serve the first one's skills).
 
 ## History (links, not copies)
 

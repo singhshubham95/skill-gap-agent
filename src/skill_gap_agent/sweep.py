@@ -67,7 +67,11 @@ CACHE_NAMES = (
     "oss_issues.json",
     "implied_skills.json",
 )
-RESUME_CACHE_NAMES = ("extracted_skills.json", "extracted_approvals.json")
+RESUME_CACHE_NAMES = (
+    "extracted_skills.json",
+    "extracted_skills.sha256",  # M14: artifact is keyed to its source resume
+    "extracted_approvals.json",
+)
 
 # Synthesis/oss gap filter — mirrors synthesize_for_gaps: bridges, alt-bridged
 # and held targets need no dedicated project.

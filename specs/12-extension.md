@@ -8,7 +8,9 @@ client.
 **Status: Built** (M13, 2026-10-03; link-navigation fix 2026-10-04 —
 verification record in [03-milestones.md](03-milestones.md) M13). Code:
 [../extension/](../extension/), `m13_check.py`. End goal (why this exists):
-S6 [09-practice-planner.md](09-practice-planner.md) §End goal.
+S6 [09-practice-planner.md](09-practice-planner.md) §End goal. **M14
+self-serve setup ✅ Built 2026-10-04 (§M14 below; verification record in
+[03-milestones.md](03-milestones.md) M14).**
 
 ## End-user flow
 
@@ -105,12 +107,111 @@ neither read resume-derived gaps nor trigger runs (JSON `Content-Type`
 forces a preflight, which fails). Trust model: any local process can reach
 the server — same as M11, acceptable for a personal tool.
 
+## M14 — self-serve setup (✅ Built 2026-10-04)
+
+Goal: the end user never opens a terminal for setup — resume, LLM key and
+server start all happen from the panel or one double-click. Three slices,
+built independently. Decision rows in
+[02-decisions.md](02-decisions.md) (M14); verification record in
+[03-milestones.md](03-milestones.md) M14.
+
+### A. Resume upload (panel + server)
+
+- Panel "Your resume" section: file input `accept=".pdf,.docx,.txt"` (the
+  exact set `resume.extract_text` supports). On selection the file is
+  uploaded; the panel shows filename, extraction path (LLM / regex
+  fallback / cached artifact) and extracted skill count.
+- Transport: `POST /api/resume`, body = **raw file bytes**
+  (`Content-Type: application/octet-stream`), original filename in an
+  `X-Filename` header. No multipart: the stdlib `cgi` module is gone in
+  Python 3.13+, and hand-rolled multipart parsing is a footgun — `fetch`
+  can send the `File` object as the body directly.
+- Server validation before anything touches disk: 10 MB cap (413),
+  extension allow-list (415 otherwise), magic-byte sniff for PDF (`%PDF`)
+  and DOCX (`PK\x03\x04`), sanitized basename only (no separators, no
+  `..`) — server keeps the sanitized name under `output/uploads/`
+  (`output/` is already gitignored, so resume PII never reaches git).
+- On upload the server runs `resume_to_skills_json(use_llm=True, auto=True)`
+  immediately and answers `{ok, filename, skills: n, source: "llm" |
+  "regex" | "artifact", warning?}` — `source: "regex"` carries a warning
+  that extraction quality is degraded (no key / provider down).
+- **Extraction-cache correctness (required):** today
+  `output/extracted_skills.json` is reused whenever it exists, regardless
+  of which resume produced it — acceptable for one resume per session,
+  wrong once the panel has an upload button. Cache is keyed by the source
+  resume's SHA-256 in a sidecar `output/extracted_skills.sha256`; mismatch
+  ⇒ re-extract. Sidecar, not artifact reshaping: ingest + `m8_check` read
+  the artifact JSON directly.
+- Run wiring: `skills_path` resolution precedence for `POST /api/run` =
+  explicit body `skills_path` → uploaded resume → `--skills` default.
+  `GET /api/status` gains `skills: {filename, count, source}` so the panel
+  can always show what the next run will use.
+
+### B. LLM key entry (panel + server)
+
+The key is **entered** in the panel but must never be **stored** there.
+`chrome.storage.local` is plaintext LevelDB in the Chrome profile — wrong
+for secrets. Instead the panel is a secure input form for the existing
+keyring path (`secrets.py`, locked 2026-09-27: OS keyring only).
+
+- Panel Settings: provider dropdown (`openrouter` / `glm` / `openai` from
+  `llm.PROVIDERS`), password-type key input, "Remember on this machine"
+  checkbox (default on), Save. Status shows "key configured ✓ (OS
+  keyring)" or "session only".
+- `GET /api/providers` → `[{id, model, key_set}]` — booleans only, never
+  key material. Any endpoint that could echo a key is a design bug.
+- `POST /api/key` `{provider, api_key, remember}`:
+  - `remember: true` → `secrets.set_secret(key_env, ...)` → Windows
+    Credential Manager / macOS Keychain (encrypted at rest, per-user).
+  - `remember: false` → process env var only (env beats keyring in
+    `get_secret`); dies with the server process, nothing stored.
+  - Response `{ok, key_set: true, stored: "keyring" | "session"}` — never
+    echoes the key. POST-only (never GET/query strings — URLs land in
+    logs); request bodies of this route never logged.
+- Provider plumbing (small code change): `AgentState.provider` +
+  `LLMConfig(provider=...)` at cli's three call sites and the resume
+  extraction cfg; `POST /api/run` body gains `provider` (default
+  `openrouter`).
+- Honesty note for docs: resume text still travels to the chosen LLM
+  provider at extraction/judge time (the existing cloud-tier decision) —
+  uploading keeps it on loopback except for those calls.
+
+### C. Server launcher (double-click, not Native Messaging)
+
+- `tools/start-server.bat`: double-clickable; uses `.venv\Scripts\python.exe`
+  if present, else `py -3`/`python`; runs `python -m skill_gap_agent.server`
+  with passthrough args; on failure keeps the window open and shows the
+  error. Extension offline-hint and READMEs point at it.
+- Native-messaging auto-launch (the only way an extension can start a
+  process) is deferred — registered host + registry entry + pinned
+  extension ID that breaks when an unpacked folder moves. Restore trigger
+  in [03-milestones.md](03-milestones.md) §Deferred #14.
+
+### Done criteria (M14 — met 2026-10-04; verification record in roadmap M14)
+
+1. Resume upload from the panel feeds the run without any CLI flag; a
+   second, different resume re-extracts (hash check) instead of reusing
+   the first one's skills.
+2. Key entry works both "remember" (keyring) and "session only"; no
+   endpoint or storage surface ever returns key material; nothing lands in
+   `chrome.storage`.
+3. `m14_check.py` offline PASS (upload validation + hash cache + key
+   endpoint with stubbed secrets + run precedence, stubbed
+   judge/synthesis/oss like `m13_check.py`); `test_m14.py` wrappers;
+   `ruff check .`, `pytest`, `node --check` clean.
+4. One live interactive pass (real resume + keyring + full run) recorded in
+   [03-milestones.md](03-milestones.md) M14.
+
 ## Explicit non-goals (M13)
 
 In-page gap marking on the JD text
 ([03-milestones.md](03-milestones.md) §Deferred #12), generic non-LinkedIn
 JD pages (content-script matches are LinkedIn-only, like the bookmarklet),
-run history, hosting, multi-user auth, Chrome Web Store packaging.
+run history, hosting, multi-user auth, Chrome Web Store packaging,
+native-messaging server auto-launch ([03-milestones.md](03-milestones.md)
+§Deferred #14), conversational intake
+([03-milestones.md](03-milestones.md) §Deferred #13 — the interaction model
+stays this panel).
 
 ## Done criteria (met at M13 — verification record in roadmap M13)
 
@@ -127,9 +228,11 @@ run history, hosting, multi-user auth, Chrome Web Store packaging.
 
 - Decisions: [02-decisions.md](02-decisions.md) (M13 rows — side panel,
   two-phase pause, captured JDs, no-CORS, M13-before-M9, gap table,
-  `reuse_judged`, link fix, JD viewer fix).
+  `reuse_judged`, link fix, JD viewer fix; M14 rows — non-conversational
+  model, resume upload transport, extraction-cache hashing, keyring key
+  entry, provider plumbing, bat launcher).
 - Milestones: [03-milestones.md](03-milestones.md) M13 (verification record
-  + learnings).
+  + learnings), M14 (self-serve setup, Built).
 - Deferred: [03-milestones.md](03-milestones.md) §Deferred #12 (in-page gap
-  marking).
+  marking), #13 (conversational intake), #14 (native-messaging launcher).
 - Install / load-unpacked instructions: [../extension/README.md](../extension/README.md).

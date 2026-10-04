@@ -100,6 +100,12 @@ class AgentState(TypedDict, total=False):
     oss_by_gap: dict
     link_jds: bool
     jd_files: dict
+    provider: str  # M14: llm provider id (openrouter/glm/openai), default openrouter
+
+
+def _llm_cfg(state: AgentState) -> LLMConfig:
+    """LLM config for a run: provider comes from run state (M14)."""
+    return LLMConfig(provider=state.get("provider") or "openrouter")
 
 
 def ask_via_interrupt(prompt: str) -> str:
@@ -219,7 +225,7 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
     if not unmatched:
         return {"judged": False}
     print(f"Judging {len(unmatched)} unmatched target skills...\n")
-    results = judge_all_unmatched(sg, cfg=LLMConfig())
+    results = judge_all_unmatched(sg, cfg=_llm_cfg(state))
     if state.get("reuse_judged"):
         _save_merged_judge_report(results)
     else:
@@ -333,7 +339,7 @@ def after_synthesize(state: AgentState) -> str:
 def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     _stage("synthesize")
     projects = synthesize_for_gaps(
-        _runtime(config)["sg"], state["gaps"], top_n=state["top_n"], cfg=LLMConfig()
+        _runtime(config)["sg"], state["gaps"], top_n=state["top_n"], cfg=_llm_cfg(state)
     )
     return {"projects": projects}
 
@@ -347,7 +353,7 @@ def node_oss(state: AgentState, config: RunnableConfig) -> dict:
         _runtime(config)["sg"],
         state["gaps"],
         top_n=state["top_n"],
-        cfg=LLMConfig(),
+        cfg=_llm_cfg(state),
         use_llm=not state.get("no_llm_oss", False),
     )
     return {"oss_by_gap": oss_by_gap}
@@ -424,6 +430,11 @@ def main() -> None:
         action="store_true",
         help="force the regex extraction path for resume input (no LLM call)",
     )
+    parser.add_argument(
+        "--provider",
+        default="openrouter",
+        help="LLM provider id: openrouter / glm / openai (default openrouter)",
+    )
     parser.add_argument("--top", type=int, default=5, dest="top_n")
     parser.add_argument(
         "--resume",
@@ -454,6 +465,7 @@ def main() -> None:
             use_llm=not args.no_llm,
             auto=args.auto,
             ask_fn=None if args.auto else (lambda p: _ask_or_interrupt(p, checkpointer, config)),
+            cfg=LLMConfig(provider=args.provider),
         )
         skills_path = str(json_path)
 
@@ -464,6 +476,7 @@ def main() -> None:
         "auto": args.auto,
         "skip_judge": args.no_judge,
         "top_n": args.top_n,
+        "provider": args.provider,
     }
     config = {"configurable": {"thread_id": "cli"}}
 

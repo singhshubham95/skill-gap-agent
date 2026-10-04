@@ -16,6 +16,17 @@ Stdlib-only HTTP server (no new dep — same rationale as M10's urllib):
   GET  /plan.html   -> serve output/plan.html (render_plan_html, GFI links)
   GET  /api/jds     -> JSON list of data/jds/*.txt|.md (folder contents)
 
+M14 self-serve setup (specs/12-extension.md §M14):
+  POST /api/resume  -> upload a resume (raw file bytes; original name in
+                       X-Filename), validate (10 MB cap, .pdf/.docx/.txt,
+                       magic bytes), store under output/uploads/, run the
+                       M8 extraction immediately (blocks until done)
+  GET  /api/providers -> [{id, model, key_set}] — key_set is a boolean;
+                       key material is never returned by any endpoint
+  POST /api/key     -> {provider, api_key, remember} — store the key in
+                       the OS keyring ("remember") or the process env
+                       ("session only"). Never echoes the key.
+
 Single-run guard: POST /api/run while running -> 409. Status carries
 started_at/finished_at/error. Paths resolve from the repo root (this file's
 parents), never hardcoded — data/ and output/ stay gitignored.
@@ -42,11 +53,16 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import secrets
+from .llm import PROVIDERS, LLMConfig
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JD_DIR = REPO_ROOT / "data" / "jds"
 OUTPUT_DIR = REPO_ROOT / "output"
 CAPTURED_DIR = OUTPUT_DIR / "captured_jds"
+UPLOAD_DIR = OUTPUT_DIR / "uploads"  # M14: uploaded resumes (output/ gitignored)
 DEFAULT_SKILLS = REPO_ROOT / "data" / "skillsdataset.json"
+MAX_RESUME_BYTES = 10 * 1024 * 1024  # M14 upload cap
 
 _lock = threading.Lock()
 _run: dict = {
@@ -61,6 +77,10 @@ _run: dict = {
 # SkillGraph lives in cli.py's process-bound runtime registry, so the resume
 # must happen in this process — the app/config pair is kept here until then.
 _paused: dict = {"app": None, "config": None}
+
+# M14: the uploaded resume a run should use when the body carries no
+# explicit skills_path. Never chrome.storage — this is server-side state.
+_resume: dict = {"path": None, "filename": None, "count": None, "source": None}
 
 # Human-readable stage labels for the loading screen. Keys are the node
 # names cli.py reports via set_stage_listener(); values are plain words
@@ -151,6 +171,40 @@ def _drop_paused() -> None:
     _paused["config"] = None
 
 
+def _resolve_skills(options: dict) -> Path:
+    """Skills input precedence (M14): body skills_path -> uploaded resume ->
+    the server's --skills default."""
+    explicit = options.get("skills_path")
+    if explicit:
+        return Path(explicit)
+    with _lock:
+        uploaded = _resume.get("path")
+    if uploaded:
+        return Path(uploaded)
+    return Path(DEFAULT_SKILLS)
+
+
+def _resolve_provider(options: dict) -> str:
+    """Run provider (M14): body provider -> default. Unknown ids raise so
+    the POST layer can answer 400 instead of silently using another key."""
+    provider = str(options.get("provider") or "openrouter")
+    if provider not in PROVIDERS:
+        raise ValueError(f"unknown provider: {provider!r}")
+    return provider
+
+
+def _describe_skills() -> dict:
+    """What the next run will use, for GET /api/status (M14)."""
+    with _lock:
+        if _resume.get("path"):
+            return {
+                "filename": _resume["filename"],
+                "count": _resume["count"],
+                "source": _resume["source"],
+            }
+    return {"filename": Path(DEFAULT_SKILLS).name, "count": None, "source": "default"}
+
+
 def _run_pipeline(options: dict) -> None:
     """Background worker: same graph cli.py runs, forced --auto (no prompts).
 
@@ -172,17 +226,22 @@ def _run_pipeline(options: dict) -> None:
     top_n = int(options.get("top_n", 5))
     phase = str(options.get("phase") or "full")
     two_phase = phase == "gaps"
-    skills_path = str(options.get("skills_path") or DEFAULT_SKILLS)
+    skills_path = _resolve_skills(options)
+    provider = _resolve_provider(options)
     if Path(skills_path).suffix.lower() != ".json":
         # M8 resume front-end (same as cli.main()): resume -> skills JSON
-        # before the graph starts; reuses output/extracted_skills.json, so
-        # the one-time extraction cost is paid only on the first resume.
+        # before the graph starts; the artifact is reused only for the same
+        # resume (SHA-256 sidecar), so the extraction cost is per-resume.
         from .resume import resume_to_skills_json
 
         try:
             skills_path = str(
                 resume_to_skills_json(
-                    skills_path, use_llm=True, auto=True, ask_fn=None
+                    skills_path,
+                    use_llm=True,
+                    auto=True,
+                    ask_fn=None,
+                    cfg=LLMConfig(provider=provider),
                 )[0]
             )
         except Exception as e:  # noqa: BLE001 — surfaced via /api/status
@@ -211,6 +270,7 @@ def _run_pipeline(options: dict) -> None:
         "top_n": top_n,
         "link_jds": True,
         "jd_files": jd_files,
+        "provider": provider,
     }
     checkpointer = None
     if two_phase:
@@ -351,7 +411,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"jds": _jd_files()})
         elif path == "/api/status":
             with _lock:
-                self._json(200, dict(_run))
+                payload = dict(_run)
+            payload["skills"] = _describe_skills()
+            self._json(200, payload)
+        elif path == "/api/providers":
+            # Key material is never returned — key_set is a boolean only.
+            self._json(200, {
+                "providers": [
+                    {
+                        "id": pid,
+                        "model": info["model"],
+                        "key_set": bool(secrets.get_secret(info["key_env"])),
+                    }
+                    for pid, info in PROVIDERS.items()
+                ]
+            })
         elif path == "/api/gaps":
             gaps = OUTPUT_DIR / "gaps.json"
             if not gaps.exists():
@@ -397,6 +471,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/resume":
+            self._handle_resume(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/key":
+            self._handle_key(int(self.headers.get("Content-Length", 0) or 0))
+            return
         if path != "/api/run":
             self._send(404, b"not found", "text/plain")
             return
@@ -411,6 +491,11 @@ class Handler(BaseHTTPRequestHandler):
         phase = options.get("phase") or "full"
         if phase not in ("full", "gaps", "plan"):
             self._json(400, {"error": f"bad phase: {phase!r}"})
+            return
+        try:
+            _resolve_provider(options)
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
             return
         jds = options.get("jds")
         if jds is not None and (
@@ -434,6 +519,92 @@ class Handler(BaseHTTPRequestHandler):
         t.start()
         with _lock:
             self._json(202, dict(_run))
+
+    def _handle_resume(self, length: int) -> None:
+        """M14 resume upload: raw bytes in, extraction runs immediately."""
+        if length <= 0:
+            self._json(400, {"error": "empty upload"})
+            return
+        if length > MAX_RESUME_BYTES:
+            self._json(413, {"error": f"resume too large (max {MAX_RESUME_BYTES} bytes)"})
+            return
+        raw_name = urllib.parse.unquote(self.headers.get("X-Filename", ""))
+        # Sanitized basename only — no separators, no traversal, ever.
+        # Spaces are kept (harmless, and the name doubles as display text).
+        name = re.sub(r"[^A-Za-z0-9._ -]", "_", Path(raw_name.replace("\\", "/")).name)
+        suffix = Path(name).suffix.lower()
+        if name in ("", ".", "..") or suffix not in (".pdf", ".docx", ".txt"):
+            self._json(415, {"error": f"unsupported resume type (want .pdf/.docx/.txt): {raw_name!r}"})
+            return
+        data = self.rfile.read(length)
+        if suffix == ".pdf" and not data.startswith(b"%PDF"):
+            self._json(415, {"error": "not a PDF (missing %PDF header)"})
+            return
+        if suffix == ".docx" and not data.startswith(b"PK\x03\x04"):
+            self._json(415, {"error": "not a DOCX (missing zip header)"})
+            return
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        target = UPLOAD_DIR / name
+        target.write_bytes(data)
+        from .resume import resume_to_skills_json
+
+        try:
+            _json_path, stats = resume_to_skills_json(
+                target, use_llm=True, auto=True, ask_fn=None
+            )
+        except Exception as e:  # noqa: BLE001 — surfaced as 500
+            traceback.print_exc()
+            self._json(500, {"error": f"extraction failed: {e}"})
+            return
+        with _lock:
+            _resume.update(
+                path=str(target),
+                filename=target.name,
+                count=stats.get("phrases"),
+                source=stats.get("source"),
+            )
+        resp = {
+            "ok": True,
+            "filename": target.name,
+            "skills": stats.get("phrases"),
+            "source": stats.get("source"),
+        }
+        if stats.get("source") == "regex":
+            resp["warning"] = (
+                "LLM extraction unavailable - fell back to a regex scan (lower fidelity)."
+            )
+        self._json(200, resp)
+
+    def _handle_key(self, length: int) -> None:
+        """M14 key entry: keyring ("remember") or session env. Never echoed."""
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise TypeError("body must be a JSON object")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return
+        provider = str(body.get("provider") or "")
+        api_key = body.get("api_key")
+        remember = bool(body.get("remember", True))
+        if provider not in PROVIDERS:
+            self._json(400, {"error": f"unknown provider: {provider!r}"})
+            return
+        if not isinstance(api_key, str) or not api_key.strip():
+            self._json(400, {"error": "api_key must be a non-empty string"})
+            return
+        key_env = PROVIDERS[provider]["key_env"]
+        try:
+            if remember:
+                secrets.set_secret(key_env, api_key.strip())
+                stored = "keyring"
+            else:
+                os.environ[key_env] = api_key.strip()
+                stored = "session"
+        except Exception as e:  # noqa: BLE001 — keyring backend missing etc.
+            self._json(500, {"error": f"could not store key: {e}"})
+            return
+        self._json(200, {"ok": True, "key_set": True, "stored": stored})
 
     def log_message(self, fmt: str, *args: object) -> None:
         safe = (fmt % args).encode("ascii", "replace").decode("ascii")

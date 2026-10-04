@@ -64,16 +64,24 @@ intake Designed.
   The panel renders JD text with `textContent` only; the plan renders in a
   sandboxed iframe whose links open in new tabs. Design:
   [12-extension.md](12-extension.md); install: `extension/README.md`.
+- Panel self-serve setup (M14, ✅ Built 2026-10-04): resume upload
+  (`POST /api/resume`, raw bytes → `output/uploads/`, extraction cache
+  keyed by resume SHA-256), LLM key entry (`POST /api/key` → OS keyring or
+  session-only env; `GET /api/providers` returns `key_set` booleans),
+  `provider` field in the run contract, `tools/start-server.bat` launcher.
+  Design: [12-extension.md](12-extension.md) §M14.
 - ASCII-safe console output (cp1252 guard).
 
 ## History (links, not copies)
 
 - Decisions: `02-decisions.md` (M7 state-design + recalibration rows; M13
-  side-panel / two-phase / no-CORS rows).
+  side-panel / two-phase / no-CORS rows; M14 self-serve-setup rows).
 - Milestones: `03-milestones.md` M7, M8, M10 (oss node), M11 (local UI),
-  M13 (extension shell + cli wiring completion).
+  M13 (extension shell + cli wiring completion), M14 (self-serve setup,
+  Designed).
 - Deferred: `03-milestones.md` §Deferred #2 (done M7), #8 (web UI — done
   M11 + M13), #11 (JD scraping — manual capture covered by M13, automatic
-  discovery still deferred), #12 (in-page gap marking).
+  discovery still deferred), #12 (in-page gap marking), #13 (conversational
+  intake), #14 (native-messaging launcher).
 - Open items: `03-milestones.md` §Open (msgpack registration, sweep ground
   truth).

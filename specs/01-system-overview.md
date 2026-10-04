@@ -10,11 +10,14 @@ the Stage Table and the component list below route to them. (Folded from
 S-files. The M9 design and graph schema that survived that merge have since
 moved to `13-intake.md` and `06-skill-map.md`, their owning files.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M13 built; M9 designed**
-(order note: M13's extension shell jumped ahead of M9 on user priority
-2026-10-03 — the capture → analyze → plan flow works on the M8 resume path;
-M9's skill validation improves plan quality but is not a mechanical
-prerequisite for it).
+**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M14 built; M9
+deferred / re-scoped 2026-10-04** (order notes: M13's
+extension shell jumped ahead of M9 on user priority 2026-10-03 — the
+capture → analyze → plan flow works on the M8 resume path; M9's skill
+validation improves plan quality but is not a mechanical prerequisite for
+it. 2026-10-04: the conversational half of M9 is off the table — the
+non-conversational extension panel is the locked interaction model — and
+M14 [extension self-serve setup](12-extension.md) §M14 was built next).
 All pipeline stages are built and validated against a sealed hand-performed
 gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
 §Validation rubric — the acceptance criteria and results live there). The
@@ -101,8 +104,8 @@ flowchart TB
 | Component | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
-| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13) |
-| C3 intake + validation | Conversational input + evidence-backed depth | `intake.py`, `validate.py` (planned) | [13-intake.md](13-intake.md) | 🎯 Designed (M9 — next) |
+| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup) |
+| C3 intake + validation | Evidence-backed skill depth (non-conversational when it returns) | `intake.py`, `validate.py` (planned) | [13-intake.md](13-intake.md) | ⏸ Deferred / re-scoped (M9 — §Deferred #13) |
 
 ## Pipeline (stage order = data flow)
 
@@ -155,13 +158,19 @@ link. If you need the mechanics, open the linked file.
 - **C1 sweep harness (M12, Built)** — [11-sweep.md](11-sweep.md). Runs the
   pipeline over seeded JD subsets with shared judge/gate/OSS caches, and
   records which subset produced which plan.
-- **C2 extension shell (M13, Built)** — [12-extension.md](12-extension.md).
-  Chrome side panel: capture JDs on LinkedIn, analyze gaps, generate the
-  plan; the pipeline runs in the local `server.py`.
-- **C3 intake + skill validation (M9, 🎯 Designed — next)** —
-  [13-intake.md](13-intake.md). A tool-calling chat agent assembles the
-  input, then ranking-relevant skills are validated with calibration
-  questions so the gate gets evidence-backed depth instead of self-report.
+- **C2 extension shell (M13 + M14, Built)** —
+  [12-extension.md](12-extension.md). Chrome side panel: capture JDs on
+  LinkedIn, analyze gaps, generate the plan; the pipeline runs in the
+  local `server.py`. M14 (same file §M14, Built 2026-10-04) made the
+  panel self-serve: resume upload, LLM key entry (OS keyring), and a
+  double-click server launcher.
+- **C3 intake + skill validation (M9, ⏸ Deferred / re-scoped 2026-10-04)** —
+  [13-intake.md](13-intake.md). Originally: a tool-calling chat agent
+  assembles the input, then ranking-relevant skills are validated with
+  calibration questions so the gate gets evidence-backed depth instead of
+  self-report. The conversational half is deferred (§Deferred #13) — the
+  extension panel is the locked interaction model; the validation goal
+  returns non-conversational after the plan/gap-quality brainstorm.
 
 ## Skill graph schema (summary — canonical reference in S3)
 
@@ -260,7 +269,7 @@ accurate (workflow rules live in
 - **Why these choices:** [02-decisions.md](02-decisions.md)
 - **Build order + progress + trade-offs + open questions:** [03-milestones.md](03-milestones.md) (roadmap — §§Deferred/Open hold the rest)
 - **Stage mechanics:** S1–S7 files (`04-reader.md` … `10-flow-runner.md`), routed via the Stage Table above
-- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell), [13-intake.md](13-intake.md) (C3 intake + validation, Designed)
+- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup), [13-intake.md](13-intake.md) (C3 intake + validation, Deferred / re-scoped)
 - **Skill graph schema:** S3 [06-skill-map.md](06-skill-map.md) §Schema
 - **Validation rubric:** S5 [08-gap-measurer.md](08-gap-measurer.md) §Validation rubric
 - **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal
