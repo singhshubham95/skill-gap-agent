@@ -4,14 +4,17 @@ Checks:
 1. cli.py wiring complete (the M10/M11 completion): set_stage_listener/_stage
    exist and the graph contains the oss + pause nodes.
 2. extension/manifest.json is valid MV3 with side panel + content script and
-   every referenced file exists.
+   every referenced file exists; the plan iframe allows popups (so plan
+   links can open in new tabs) and a Reopen plan control exists.
 3. Two-phase flow through the real server + real graph (stubbed
    judge/synthesis/oss at the cli seams): POST /api/run phase "gaps" with
    captured JDs -> status "paused", output/captured_jds/ written in the
    bookmarklet shape, GET /api/gaps serves ranked gaps; POST phase "plan" ->
-   done, plan.html carries projects + Good-First-Issues; a second phase
-   "plan" -> 409 (no paused run). The judge-reuse path runs with
-   output/graph.json absent (deterministic stub scores).
+   done, plan.html carries projects + Good-First-Issues with every link
+   targeting a new tab (link-policy fix 2026-10-04), captured JD links
+   resolve via /jds/; a second phase "plan" -> 409 (no paused run). The
+   judge-reuse path runs with output/graph.json absent (deterministic stub
+   scores).
 
 Run: python -m skill_gap_agent.m13_check
 
@@ -23,11 +26,13 @@ judge_report.json, graph.json and implied_skills.json are saved and restored.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -224,6 +229,15 @@ def check_extension_manifest() -> None:
         refs.extend(cs.get("js", []))
     for rel in refs:
         assert (EXTENSION_DIR / rel).is_file(), f"missing extension/{rel}"
+
+    panel = (EXTENSION_DIR / "sidepanel.html").read_text(encoding="utf-8")
+    iframe = re.search(r'<iframe\b[^>]*id="planframe"[^>]*>', panel)
+    assert iframe, "sidepanel.html: planframe iframe missing"
+    assert "allow-popups" in iframe.group(0), iframe.group(0)
+    assert "allow-popups-to-escape-sandbox" in iframe.group(0), iframe.group(0)
+    assert 'id="reopen"' in panel, "sidepanel.html: Reopen plan control missing"
+    js = (EXTENSION_DIR / "sidepanel.js").read_text(encoding="utf-8")
+    assert "$(\"reopen\")" in js, "sidepanel.js: Reopen plan not wired"
     print(f"manifest OK: MV3 side panel + content script ({len(refs)} files)")
 
 
@@ -301,6 +315,28 @@ def check_two_phase_flow() -> None:
             assert b"Recommended Projects" in html_doc, "plan.html missing projects"
             assert b"Good-First-Issues" in html_doc, "plan.html missing GFI section"
             assert b"https://github.com/example/repo/issues/" in html_doc
+
+            # Link policy (2026-10-04 fix): every plan link must open in a
+            # new tab, so a mis-click cannot navigate the side-panel iframe
+            # away from the plan.
+            anchors = re.findall(rb"<a\b[^>]*>", html_doc)
+            assert anchors, "plan.html has no links"
+            for a in anchors:
+                assert b"target='_blank'" in a, a
+                assert b"rel='noopener noreferrer'" in a, a
+            print(f"link policy OK: {len(anchors)} links target new tabs")
+
+            # Captured JD links resolve from output/captured_jds/ (not
+            # data/jds/), and unknown names still 404.
+            code, page = _get(base, "/jds/" + urllib.parse.quote(captured[0].name))
+            assert code == 200, (code, captured[0].name)
+            assert b"<pre>" in page, "jd viewer page malformed"
+            try:
+                _get(base, "/jds/no_such_jd.txt")
+                raise AssertionError("expected 404 for unknown jd name")
+            except urllib.error.HTTPError as e:
+                assert e.code == 404, e.code
+            print("jd viewer OK: captured JDs served from output/captured_jds/")
             print("plan OK: projects + Good-First-Issues rendered")
 
             # Phase 2 again: nothing left to resume.

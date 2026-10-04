@@ -48,5 +48,9 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
   [../specs/02-decisions.md](../specs/02-decisions.md)).
 - JD text is untrusted web content — the panel renders it with `textContent`
   only; the plan renders in a sandboxed iframe served by the local agent.
+  Every link in the plan opens in a **new browser tab**, so a mis-click
+  cannot navigate the panel away from the plan; if the plan view ever gets
+  lost anyway, **Reopen plan** brings it straight back — `plan.html` stays
+  on disk, no re-run needed.
 - Capture is LinkedIn-only for now (like the bookmarklet); generic JD pages
   are recorded future work.

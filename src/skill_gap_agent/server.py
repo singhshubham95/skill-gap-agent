@@ -92,6 +92,28 @@ def _jd_files() -> list[str]:
     )
 
 
+def _find_jd(name: str) -> Path | None:
+    """Resolve a JD-viewer filename against data/jds/ AND output/captured_jds/.
+
+    plan.html's JD links are built from whichever folder the run ingested:
+    bookmarklet saves land in data/jds/, extension captures in
+    output/captured_jds/ (see _write_captured_jds). Exact-name match against
+    the folder listing only — the caller has already rejected path
+    separators, so no traversal can reach here.
+    """
+    for d in (JD_DIR, CAPTURED_DIR):
+        if not d.exists():
+            continue
+        names = {
+            f.name
+            for f in d.iterdir()
+            if f.is_file() and f.suffix.lower() in (".txt", ".md")
+        }
+        if name in names:
+            return d / name
+    return None
+
+
 def _write_captured_jds(jds: list) -> dict[str, str]:
     """Write the extension's captured JDs to output/captured_jds/ and return
     the {title-stem: filename} map used for plan.html JD links.
@@ -348,17 +370,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, plan.read_bytes(), "text/html; charset=utf-8")
         elif path.startswith("/jds/"):
             # JD viewer: exact-name match only (no path traversal — the
-            # filename must equal a real file in data/jds/).
+            # filename must equal a real file in data/jds/ or, for
+            # extension-captured runs, output/captured_jds/).
             name = urllib.parse.unquote(path[len("/jds/"):])
             if "/" in name or "\\" in name:
                 self._send(400, b"bad jd name", "text/plain")
                 return
-            target = JD_DIR / name
-            if (
-                not target.is_file()
-                or target.suffix.lower() not in (".txt", ".md")
-                or target.name not in _jd_files()
-            ):
+            target = _find_jd(name)
+            if target is None:
                 self._send(404, b"jd not found", "text/plain")
                 return
             text = target.read_text(encoding="utf-8", errors="replace")

@@ -1,7 +1,9 @@
 // Skill-Gap Agent side panel: capture JDs -> analyze gaps -> generate plan.
 // All JD text is untrusted web content: it is rendered with textContent
 // only, never innerHTML. The plan itself renders in a sandboxed iframe
-// served by the local agent (server.py), which escapes its own HTML.
+// served by the local agent (server.py), which escapes its own HTML and
+// opens every plan link in a new browser tab (target='_blank'), so the
+// iframe can never navigate away from the plan.
 
 const DEFAULT_SERVER = "http://127.0.0.1:8000";
 const STAGE_LABELS = {
@@ -186,8 +188,15 @@ async function generatePlan() {
   if (started) poll();
 }
 
+function loadPlan() {
+  // Re-assigning the same src does not reload an iframe, so drop it first.
+  const frame = $("planframe");
+  frame.removeAttribute("src");
+  frame.src = server + "/plan.html";
+}
+
 function showPlan() {
-  $("planframe").src = server + "/plan.html";
+  loadPlan();
   $("planbox").hidden = false;
   $("plan").disabled = false;
   setStatus("Plan ready below.");
@@ -271,6 +280,10 @@ async function checkConnection() {
 $("capture").addEventListener("click", captureJd);
 $("analyze").addEventListener("click", analyze);
 $("plan").addEventListener("click", generatePlan);
+$("reopen").addEventListener("click", () => {
+  loadPlan();
+  setStatus("Plan reopened.");
+});
 $("clear").addEventListener("click", async () => {
   jds = [];
   await saveJds();

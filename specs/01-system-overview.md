@@ -362,10 +362,20 @@ report merges by target. The CLI default stays fresh-judging (the M6
 validation semantics); the extension sets the flag.
 
 **Rendering.** The gap table is rendered natively in the panel from
-`/api/gaps` JSON. The full plan renders in an `<iframe sandbox>` pointed at
+`/api/gaps` JSON. The full plan renders in an
+`<iframe sandbox="allow-popups allow-popups-to-escape-sandbox">` pointed at
 `/plan.html` — the M10 renderer (self-contained, escaped, no JS) becomes the
-side-panel body as S6 predicted; JD links resolve against the local server
-inside the iframe.
+side-panel body as S6 predicted. Every plan link carries
+`target='_blank' rel='noopener noreferrer'`, so clicking one opens a new
+browser tab and can never navigate the iframe away from the plan (amended
+2026-10-04 after a user-reported mis-click lost the plan — fix note in
+[03-milestones.md](03-milestones.md) M13). The two `allow-popups*` tokens
+are what make `target='_blank'` work inside a sandbox at all (without them
+the popup is silently blocked or inherits the no-script sandbox);
+`allow-scripts` stays off. A **Reopen plan** control re-points the iframe at
+`/plan.html` — the file stays on disk, so recovery costs no re-run. JD links
+resolve against `data/jds/` **and** `output/captured_jds/` (exact-name
+matches only), so extension-run links work too.
 
 **Security posture.** Server binds `127.0.0.1` only. **No CORS headers on
 purpose**: the extension calls with `host_permissions` for

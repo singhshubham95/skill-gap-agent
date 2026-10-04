@@ -124,6 +124,11 @@ def render_plan_html(
     source-JD title -> JD filename, each verdict's JD list renders as links
     to the M11 /jds/<filename> viewer (served by server.py); without the
     map (plain CLI runs) titles render as plain text as before.
+
+    Every link carries target='_blank' rel='noopener noreferrer' so that
+    clicking a link inside the side panel's sandboxed iframe opens a new
+    browser tab instead of navigating the iframe away from the plan (M13
+    fix, 2026-10-04).
     """
     esc = html.escape
     parts: list[str] = []
@@ -157,7 +162,8 @@ def render_plan_html(
                 fname = (jd_files or {}).get(jd)
                 if fname:
                     parts.append(
-                        f"<li><a href='/jds/{esc(fname, quote=True)}'>{esc(jd)}</a></li>"
+                        f"<li><a href='/jds/{esc(fname, quote=True)}' "
+                        f"target='_blank' rel='noopener noreferrer'>{esc(jd)}</a></li>"
                     )
                 else:
                     parts.append(f"<li>{esc(jd)}</li>")
@@ -185,7 +191,8 @@ def render_plan_html(
                 label_str = f" ({esc(', '.join(it.labels))})" if getattr(it, "labels", None) else ""
                 updated = f" — updated {esc(it.updated_at[:10])}" if getattr(it, "updated_at", "") else ""
                 parts.append(
-                    f"<li><a href='{esc(it.url, quote=True)}'>{esc(it.title)}</a> — "
+                    f"<li><a href='{esc(it.url, quote=True)}' "
+                    f"target='_blank' rel='noopener noreferrer'>{esc(it.title)}</a> — "
                     f"{esc(it.repo)}{label_str}{updated}"
                     + (f"<br><em>Why: {esc(it.relevance_why)}</em>" if getattr(it, "relevance_why", "") else "")
                     + "</li>"

@@ -402,6 +402,30 @@ evaluation harness over the built pipeline, not a new pipeline stage.
       on the JD text (§Deferred #12), generic non-LinkedIn JD pages
       (LinkedIn-only content-script matches, like the bookmarklet), run
       history, hosting, multi-user auth, Web Store packaging.
+    - **Fix 2026-10-04 — plan links navigated the iframe away
+      (user-reported).** Clicking any link in `plan.html` inside the side
+      panel navigated the sandboxed iframe itself: external GFI links hit
+      GitHub's `X-Frame-Options: deny` ("refused to connect" where the plan
+      had been), and nothing brought the plan back — "Generate plan"
+      re-runs synthesize/oss instead of redrawing. Root cause: plain
+      anchors navigate their containing frame, and `sandbox` (no tokens)
+      blocks scripts/popups but not self-navigation. Fix: every
+      `render_plan_html` link gets `target='_blank' rel='noopener
+      noreferrer'` (the renderer is the only layer that can — the panel
+      cannot reach a cross-origin, script-blocked iframe), the iframe
+      carries `sandbox="allow-popups allow-popups-to-escape-sandbox"`
+      (either token missing breaks the fix: without `allow-popups` the
+      `target='_blank'` popup is silently blocked, without
+      `...-to-escape-sandbox` the opened tab inherits the no-script
+      sandbox), plus a **Reopen plan** control that re-points the iframe at
+      the on-disk `/plan.html` (recovery without an LLM re-run). Second bug
+      found on the way: captured-JD links always 404'd — they resolve to
+      `output/captured_jds/` while `/jds/` served only `data/jds/`; the
+      viewer now serves both (exact-name + suffix match). Verified
+      2026-10-04: `m13_check.py` extended (every plan anchor targets a new
+      tab; iframe tokens + Reopen control present; captured-JD `/jds/` 200
+      and unknown-name 404); `ruff check .` clean, `pytest` clean,
+      `m10_check`–`m13_check` PASS. Decision rows in `02-decisions.md`.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 

@@ -71,10 +71,14 @@ M9 intake Designed.
   (`POST /api/run` `phase: "gaps"` with the captured list; JDs land in
   `output/captured_jds/`, run pauses after rank, gap table from
   `GET /api/gaps`) → **Generate plan** (`phase: "plan"` resumes; `plan.html`
-  in a sandboxed iframe). The panel renders JD text with `textContent`
-  only; no CORS headers on the server — the extension calls with
-  `host_permissions`. Design: `01-system-overview.md` §M13 design;
-  install: `extension/README.md`.
+  in a sandboxed iframe). Every plan link opens in a new browser tab
+  (`target='_blank'`) so clicking one cannot navigate the iframe away from
+  the plan; a **Reopen plan** control re-points the iframe at the on-disk
+  `plan.html` if the view is lost anyway. `GET /jds/<name>` (exact-name
+  match) serves both `data/jds/` and `output/captured_jds/`. The panel
+  renders JD text with `textContent` only; no CORS headers on the server —
+  the extension calls with `host_permissions`. Design:
+  `01-system-overview.md` §M13 design; install: `extension/README.md`.
 - ASCII-safe console output (cp1252 guard).
 
 ## History (links, not copies)
