@@ -51,6 +51,44 @@ class LLMError(RuntimeError):
     pass
 
 
+# --- M15: LLM presence policy (specs/05-ai-caller.md §LLM presence policy) ---
+# Provenance labels are defined once here; output.py and the extension panel
+# render them. Reused LLM output must never read as freshly generated.
+LABEL_LLM = "LLM"
+LABEL_LLM_CACHED = "LLM (cached)"
+LABEL_RULE = "Rule-based"
+
+
+def rule_unavailable_label(reason: str) -> str:
+    """Label for rule-based output that was forced by an LLM failure."""
+    return f"Rule-based (LLM unavailable — {reason})"
+
+
+def key_present(provider: str) -> bool:
+    """M15 pre-flight probe: is a key stored for this provider?"""
+    p = PROVIDERS.get(provider)
+    if p is None:
+        raise LLMError(f"Unknown provider: {provider}")
+    key = get_secret(p["key_env"])
+    return bool(key) and key != "your-key-here"
+
+
+def require_api_key(provider: str) -> None:
+    """M15 fail-fast: LLM mode with no key must refuse before any work.
+
+    Presence check only — an invalid key fails at the first call, which is
+    the loud-degradation path (specs/05-ai-caller.md §Degradation).
+    """
+    if not key_present(provider):
+        key_env = PROVIDERS[provider]["key_env"] if provider in PROVIDERS else provider
+        raise LLMError(
+            f"LLM mode needs an API key for '{provider}'. Save one in the "
+            f"extension panel's LLM section (or set {key_env} in the OS "
+            f"keyring), or turn off 'Use LLM intelligence' to run in "
+            f"Rule-based mode."
+        )
+
+
 def _client(cfg: LLMConfig):
     try:
         from openai import OpenAI

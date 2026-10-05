@@ -34,6 +34,21 @@ section {
   color: #cf222e;
 }
 
+.banner {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid #d4a72c;
+  border-radius: 6px;
+  background: #fff8c5;
+  color: #7d4e00;
+  font-size: 13px;
+}
+
+.banner ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
 .conn {
   margin: 0;
   color: #1a7f37;

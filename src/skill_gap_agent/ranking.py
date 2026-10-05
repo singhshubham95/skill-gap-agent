@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .graph import SkillGraph
+from .llm import LABEL_LLM, LABEL_LLM_CACHED, LABEL_RULE, rule_unavailable_label
 from .requirements import alternative_satisfied
 
 # Verdict bands on top-transfer confidence (post-gate).
@@ -36,13 +37,14 @@ class Gap:
     target: str
     weight: int  # JD demand
     top_transfer_skill: str
-    top_transfer_confidence: float
-    verdict: str  # "held" | "alt-bridged" | "bridge" | "partial" | "gap" | "declared-gap"
-    gap_score: float  # weight * (1 - confidence)
+    top_transfer_confidence: float | None  # None = never judged (M15 "unjudged")
+    verdict: str  # "held" | "alt-bridged" | "bridge" | "partial" | "gap" | "declared-gap" | "unjudged"
+    gap_score: float  # weight * (1 - confidence); unjudged rows: weight alone
     rationale: str = ""
     note: str = ""  # gate note (depth/intent) if any
     alt_group: str = ""  # alternative group name if alt-bridged
     source_jds: list[str] = field(default_factory=list)  # JD titles requiring this skill
+    provenance: str = ""  # M15 label: LLM / LLM (cached) / Rule-based / Rule-based (LLM unavailable — …)
 
 
 def _source_jds(sg: SkillGraph, target: str) -> list[str]:
@@ -54,10 +56,20 @@ def _source_jds(sg: SkillGraph, target: str) -> list[str]:
     )
 
 
-def rank_gaps(sg: SkillGraph) -> list[Gap]:
-    """Rank all target skills by gap_score = weight * (1 - top transfer)."""
+def rank_gaps(
+    sg: SkillGraph, unjudged: dict[str, str | None] | None = None
+) -> list[Gap]:
+    """Rank all target skills by gap_score = weight * (1 - top transfer).
+
+    unjudged (M15): targets whose judge call was skipped or failed, mapped
+    to its failure reason (None = deliberately not judged). Those rows
+    render verdict "unjudged" with confidence None — a missing edge must
+    never read as a measured confidence-0 gap
+    (specs/05-ai-caller.md §LLM presence policy).
+    """
     weights = sg.requires_weights()
     gaps: list[Gap] = []
+    unjudged = unjudged or {}
 
     for target in sorted(sg.target_skills()):
         weight = weights.get(target, 0)
@@ -71,6 +83,7 @@ def rank_gaps(sg: SkillGraph) -> list[Gap]:
                 Gap(target=target, weight=weight,
                     top_transfer_skill=held, top_transfer_confidence=1.0,
                     verdict="held", gap_score=0.0, rationale="matched to current skill",
+                    provenance=LABEL_RULE,
                     source_jds=_source_jds(sg, target))
             )
             continue
@@ -81,14 +94,42 @@ def rank_gaps(sg: SkillGraph) -> list[Gap]:
             if d.get("type") == "TRANSFERS_TO"
         ]
         if edges:
-            d, src = max(edges, key=lambda e: e[0]["confidence"])
+            # Ties prefer the reused edge (M15): when a cache-reused score
+            # equals a re-judged one — the M12 purity insight says they are
+            # the same value — the honest label is "LLM (cached)", not
+            # freshly-judged.
+            d, src = max(
+                edges, key=lambda e: (e[0]["confidence"], 1 if e[0].get("cached") else 0)
+            )
             conf = float(d["confidence"])
             top_skill = src.removeprefix("skill:")
             rationale = d.get("rationale", "")
             note = d.get("gate_note", "")
             intent = d.get("gate_intent", "")
+            if intent == "declared-gap":
+                provenance = LABEL_RULE  # the user's declaration, not a score
+            else:
+                provenance = LABEL_LLM_CACHED if d.get("cached") else LABEL_LLM
+        elif target in unjudged and unjudged[target] != "no candidates":
+            # M15: never judged (rule-based mode / judge failure) — labeled,
+            # weight-ranked, and never scored as a measured 0.0 confidence.
+            reason = unjudged[target]
+            gaps.append(
+                Gap(target=target, weight=weight,
+                    top_transfer_skill="", top_transfer_confidence=None,
+                    verdict="unjudged", gap_score=float(weight),
+                    note=("" if reason is None else str(reason)),
+                    provenance=(LABEL_RULE if reason is None
+                                else rule_unavailable_label(str(reason))),
+                    source_jds=_source_jds(sg, target))
+            )
+            continue
         else:
+            # No transfer edges. Either the LLM judged and found none
+            # (labeled LLM), or the target structurally had no candidates
+            # ("no candidates" — rule-based matching, a true 0 by absence).
             conf, top_skill, rationale, note, intent = 0.0, "", "", "", ""
+            provenance = LABEL_RULE if target in unjudged else LABEL_LLM
 
         if intent == "declared-gap":
             verdict = "declared-gap"
@@ -110,6 +151,7 @@ def rank_gaps(sg: SkillGraph) -> list[Gap]:
             Gap(target=target, weight=weight, top_transfer_skill=top_skill,
                 top_transfer_confidence=conf, verdict=verdict,
                 gap_score=gap_score, rationale=rationale, note=note,
+                provenance=provenance,
                 alt_group=alt_group if intent != "declared-gap" and verdict == "alt-bridged" else "",
                 source_jds=_source_jds(sg, target))
         )
@@ -122,8 +164,14 @@ def format_ranking(gaps: list[Gap]) -> str:
     """Human-readable ranking table for the run log."""
     lines = ["  score  JDs  verdict        target <- top transfer"]
     for g in gaps:
+        if g.top_transfer_confidence is None:
+            transfer = "unjudged"
+        else:
+            transfer = (
+                f"{g.top_transfer_skill or '—'} ({g.top_transfer_confidence:.2f})"
+            )
         lines.append(
             f"  {g.gap_score:5.2f}  {g.weight:3d}  {g.verdict:13} "
-            f"{g.target:25} <- {g.top_transfer_skill or '—'} ({g.top_transfer_confidence:.2f})"
+            f"{g.target:25} <- {transfer}"
         )
     return "\n".join(lines)

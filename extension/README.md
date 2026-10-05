@@ -7,16 +7,21 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
 
 ## What it does
 
-0. **Setup** — upload your resume (PDF/DOCX/TXT) and paste the LLM API key
+0. **Setup** — upload your resume (PDF/DOCX/TXT) and, if you want LLM
+   analysis, keep **Use LLM intelligence** on and paste the LLM API key
    right in the panel. No command-line flags, no env vars: the key goes to
-   the local agent, which keeps it in the OS keyring.
+   the local agent, which keeps it in the OS keyring. Toggle off = a
+   clearly labeled **Rule-based** run (no LLM calls).
 1. **Capture JD** — reads the LinkedIn job description on the active tab
    (same extraction as [../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js))
    and appends it to a list. Navigate to the next JD and capture again —
    the side panel stays open and the list only grows.
 2. **Analyze gaps** — sends the collected JDs to the local agent
    (`server.py`) and shows the ranked gap table. First run takes minutes
-   (LLM judge); re-analysis reuses cached judgments.
+   (LLM judge); re-analysis reuses cached judgments. Every row states its
+   source (`LLM` / `LLM (cached)` / `Rule-based`), and if any LLM call
+   fails mid-run a banner says exactly which parts fell back — results
+   are never silently non-LLM.
 3. **Generate plan** — resumes the paused run: grounded projects +
    good-first-issues, rendered in the panel.
 
@@ -45,11 +50,13 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
      machine (`output/uploads/`); the panel shows the extracted skill
      count. First upload of a new resume can take minutes (LLM
      extraction); the same file is instant afterwards.
-   - **Settings › LLM key** — paste the API key and click **Save key**.
-     "Remember on this machine" stores it in the OS credential vault
-     (Windows Credential Manager / macOS Keychain); uncheck it to keep the
-     key for this server session only. The key is never stored in the
-     browser.
+   - **Analyze gaps › LLM key** — shown while **Use LLM intelligence** is
+     on. Paste the API key and click **Save key**. "Remember on this
+     machine" stores it in the OS credential vault (Windows Credential
+     Manager / macOS Keychain); uncheck it to keep the key for this server
+     session only. The key is never stored in the browser. With the
+     toggle on and no key saved, **Analyze gaps** refuses up front with
+     the same message — it will not quietly run without the LLM.
 
 ## First capture
 

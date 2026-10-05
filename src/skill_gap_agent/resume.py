@@ -32,7 +32,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .llm import LLMConfig, judge
+from .llm import LABEL_LLM, LABEL_LLM_CACHED, LABEL_RULE, LLMConfig, judge
 
 EXTRACTED_PATH = Path("output/extracted_skills.json")
 
@@ -198,6 +198,7 @@ def save_extracted(
     data: dict,
     path: str | Path = EXTRACTED_PATH,
     source_sha: str | None = None,
+    source: str | None = None,
 ) -> Path:
     """Persist the extraction artifact (reviewable, re-runs reuse it).
 
@@ -205,12 +206,17 @@ def save_extracted(
     recorded in a sidecar (`.json` -> `.sha256`). The artifact is only
     reused when the sidecar matches the resume being extracted — otherwise
     uploading a second resume would silently serve the first one's skills.
+
+    source (M15): "llm" or "regex" — recorded on the sidecar's second line
+    so a cache hit can label its provenance honestly ("LLM (cached)" vs
+    "Rule-based"), per specs/05-ai-caller.md §Provenance vocabulary.
     """
     p = Path(path)
     p.parent.mkdir(exist_ok=True)
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     if source_sha is not None:
-        p.with_suffix(".sha256").write_text(source_sha + "\n", encoding="utf-8")
+        sidecar = source_sha + "\n" + (source or "") + "\n"
+        p.with_suffix(".sha256").write_text(sidecar, encoding="utf-8")
     return p
 
 
@@ -229,9 +235,19 @@ def load_extracted(
         sidecar = p.with_suffix(".sha256")
         if not sidecar.exists():
             return None
-        if sidecar.read_text(encoding="utf-8").strip() != expect_sha:
+        lines = sidecar.read_text(encoding="utf-8").splitlines()
+        if not lines or lines[0].strip() != expect_sha:
             return None
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def extracted_provenance(path: str | Path = EXTRACTED_PATH) -> str | None:
+    """M15: how the saved artifact was produced ("llm" / "regex" / None)."""
+    sidecar = Path(path).with_suffix(".sha256")
+    if not sidecar.exists():
+        return None
+    lines = sidecar.read_text(encoding="utf-8").splitlines()
+    return lines[1].strip() if len(lines) > 1 and lines[1].strip() else None
 
 
 def _flatten_phrases(data: dict) -> list[str]:
@@ -365,10 +381,16 @@ def resume_to_skills_json(
         else:
             data = extract_skills_regex(text)
             source = "regex"
-        save_extracted(data, artifact_path, source_sha=source_sha)
+        save_extracted(data, artifact_path, source_sha=source_sha, source=source)
         print(f"Extraction artifact saved: {artifact_path} (source: {source})")
+        provenance = LABEL_LLM if source == "llm" else LABEL_RULE
     else:
         print(f"Reusing extraction artifact: {artifact_path}")
+        # M15: a reused artifact never reads as fresh LLM output.
+        provenance = (
+            LABEL_RULE if extracted_provenance(artifact_path) == "regex"
+            else LABEL_LLM_CACHED
+        )
 
     reviewed = review_extracted(data, approvals_path=approvals_path, auto_accept=auto, ask_fn=ask_fn)
 
@@ -379,4 +401,4 @@ def resume_to_skills_json(
 
     n_phrases = len(_flatten_phrases(reviewed))
     print(f"Resume -> skills JSON: {n_phrases} phrases (source: {source})")
-    return json_path, {"source": source, "phrases": n_phrases}
+    return json_path, {"source": source, "phrases": n_phrases, "provenance": provenance}

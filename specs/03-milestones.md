@@ -112,13 +112,15 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M14; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M16; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
 evaluation harness over the built pipeline and M13 is the browser surface —
-neither is a new pipeline stage; M14 is extension self-serve setup,
-likewise not a pipeline stage.
+neither is a new pipeline stage; M14 is extension self-serve setup and M15
+is an LLM-usage policy across existing stages, likewise not pipeline
+stages. M16 is LLM access + reliability plumbing (free-tier routing,
+OAuth connect, retry hardening) — likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -418,6 +420,89 @@ likewise not a pipeline stage.
         and cache hits are instant. If this hurts in real use, extraction
         can move behind the existing run-polling pattern.
 
+15. **LLM intelligence mode — explicit intent + honest degradation.**
+    ✅ Built 2026-10-05 (design home:
+    [05-ai-caller.md](05-ai-caller.md) §LLM presence policy; panel
+    surface: [12-extension.md](12-extension.md) §M15; decision rows in
+    [02-decisions.md](02-decisions.md) M15). Origin: user report
+    2026-10-05 — with the keyring key deleted, analyze + plan still ran
+    to completion and produced rule-based output that nothing identified
+    as non-LLM (failed judge calls read as confidence-0 gaps). Built: a
+    run-level `use_llm` flag surfaced as the extension's LLM toggle
+    (default on) and a widened `--no-llm`; fail-fast refusal when LLM
+    mode has no key (server 409 / CLI exit 2); loud mid-run degradation
+    (banner + per-section provenance labels) at the judge / synthesis /
+    GFI-filter touchpoints; a labeled "Rule-based mode" for deliberate
+    OFF (`unjudged` verdict rows — confidence `null`, never fake 0.0);
+    `LLM (cached)` labels for reused judge edges, OSS cache and the
+    extraction sidecar (`.sha256` line 2 records llm/regex).
+    - **Verified 2026-10-05:** `m15_check.py` + `test_m15.py` PASS (5
+      checks: vocabulary + panel markup incl. no-key-in-storage,
+      pre-flight refusal + full rule-based run, loud degradation with
+      stubbed failing judge/synthesis/oss through the real pipeline,
+      fresh `LLM` vs cache-reuse `LLM (cached)` labels, extraction-sidecar
+      provenance); `ruff check .` clean; `pytest` 12 passed; `node
+      --check` clean; `m10_check`–`m14_check` regressions all PASS
+      (`m14_check`'s sidecar asserts updated for the two-line format).
+    - **Live smoke 2026-10-05 (real server + real keyring; fixture JDs;
+      output/ artifacts backed up and restored afterwards):** (1) LLM
+      mode without a key (provider `openai`) → **409 with the actionable
+      refusal message** — the user-reported silent run is now
+      impossible; (2) deliberate OFF run → `llm_mode: rule-based`,
+      rows `unjudged | conf=null | Rule-based`, plan header "Rule-based
+      mode" + synthesis-skip note + 4 source labels, 0 LLM-labeled
+      sections; (3) keyed run with the stored OpenRouter key → the key
+      itself returns **401 "User not found"** (stale/revoked), and the
+      run degraded exactly as designed: `degraded_reasons` with judge +
+      synthesis entries, rows labeled `Rule-based (LLM unavailable —
+      401…)`, plan warning block + "Not generated for" placeholders, 0
+      fake-LLM sections. GFI results came from the OSS cache written by
+      run (2) and were labeled `Rule-based` — the cache-provenance rule
+      got an unplanned live check and passed.
+    - **Learnings:**
+      - **`"no candidates"` is structural, not an outage.** `judge_target`
+        returns `error="no candidates"` when nothing plausible exists to
+        judge against — a true 0 by absence, not an LLM failure. It keeps
+        its structural verdict labeled `Rule-based` and must not raise
+        the degraded banner (first harness run caught this).
+      - **Provenance tie-break: equal-confidence edges prefer the reused
+        one.** A re-judged score equals the cached score (M12 purity), so
+        "LLM (cached)" is the honest label for a tied value; a strictly
+        higher fresh score still wins and labels `LLM`.
+      - **Pre-existing M13 quirk surfaced:** `unmatched_target_skills()`
+        is matching-ladder-based ("no current-skill match"), not
+        edge-based — so `reuse_judged` copies prior edges *and then
+        re-judges the same targets anyway*, re-paying the LLM calls the
+        M13 design meant to skip (`m13_check` deletes `graph.json`, so it
+        never saw this). Not fixed here (pre-existing); the fix is to
+        filter the judge input to targets lacking usable edges when
+        `reuse_judged` is set.
+      - **The stale-server gotcha struck a fourth time** (old process
+        held port 8000 before the smoke); the documented "restart the
+        server after code changes" rule again saved the diagnosis.
+
+16. **Free-tier LLM access — connect button + free models + retry
+    hardening.** 📋 Designed 2026-10-05 (design home:
+    [05-ai-caller.md](05-ai-caller.md) §Free-tier routing + §Retry &
+    failure handling; panel surface:
+    [12-extension.md](12-extension.md) §M16; decision rows in
+    [02-decisions.md](02-decisions.md) M16). Origin: user request
+    2026-10-05 — users without a paid LLM subscription need a zero-cost
+    path; the imagined shared extension key was rejected as unworkable
+    (world-readable bundle, per-account free quota, key-sharing terms) in
+    favor of OpenRouter's OAuth PKCE "connect" flow, which mints each
+    user their own key with no pasting. Scope: panel "Connect free LLM"
+    button (PKCE → localhost callback on `server.py` → code exchange →
+    OS keyring, same slot as pasted keys); opt-in free-model mode
+    (`:free` fallback list) behind a consent gate (the resume is
+    personal data; free providers may log/train) with server-side
+    `privacy_ack`; retry hardening in `llm.py` (transient-only error
+    classification, `Retry-After`, jittered capped backoff, bounded
+    attempt nesting, free-model fallback rotation, per-touchpoint
+    timeouts incl. the extraction call); quota exhaustion surfaced via
+    M15's banner + provenance machinery. Done criteria:
+    [05-ai-caller.md](05-ai-caller.md) §Done criteria (M16).
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -448,8 +533,10 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   small/medium prompts. Likely long reasoning on structured extraction;
   artifact reuse makes it one-time per resume, but interactive use is
   painful. Options: faster extraction model (mechanical, not judgment —
-  a config change) or request timeout + retry in `llm.py`. Revisit if M9
-  intake needs faster turnaround.
+  a config change) or request timeout + retry in `llm.py` (the M16 option —
+  [05-ai-caller.md](05-ai-caller.md) §Retry & failure handling implements
+  it; the faster-model option stays open). Revisit if M9 intake needs
+  faster turnaround.
 - **Checkpoint msgpack type registration (S7).** LangGraph (1.2.11) warns
   that `GateDecision`/`Gap`/`SynthesizedProject` are unregistered msgpack
   types ("will be blocked in a future version"). Works today; register

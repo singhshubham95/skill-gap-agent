@@ -39,12 +39,17 @@ No command-line flags: the side panel handles everything.
    folder. Click the toolbar icon — the side panel opens.
 
 4. **Configure in the panel:** upload your resume in **Setup** (PDF/DOCX/TXT
-   — kept locally in `output/uploads/`) and paste your API key in
-   **Settings › LLM key** (stored in the OS keyring — Windows Credential
-   Manager / macOS Keychain — never in the browser).
+   — kept locally in `output/uploads/`) and, under **Analyze gaps**, keep
+   **Use LLM intelligence** on (default) and paste your API key there
+   (stored in the OS keyring — Windows Credential Manager / macOS
+   Keychain — never in the browser). LLM mode without a key refuses to
+   run; toggled off, you get a clearly labeled **Rule-based** run
+   (keyword matching, no LLM calls).
 
 5. **Use it:** open a LinkedIn JD → **Capture JD** (repeat per JD — the
-   list only grows) → **Analyze gaps** → **Generate plan**.
+   list only grows) → **Analyze gaps** → **Generate plan**. Every gap row
+   and plan section states its source (`LLM` / `LLM (cached)` /
+   `Rule-based`).
 
 Full details (including troubleshooting): [extension/README.md](extension/README.md).
 After pulling code changes, restart the server and reload the extension.

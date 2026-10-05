@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
+from .llm import LABEL_LLM, LABEL_RULE, rule_unavailable_label
 from .ranking import Gap, format_ranking
 from .synthesis import SynthesizedProject
 
@@ -19,7 +20,30 @@ VERDICT_EXPLAIN = {
     "bridge": "**Platform switch** — mostly transferable; a small bridging exercise suffices (not ranked for synthesis)",
     "alt-bridged": "**Alternative-satisfied** — the JDs list this brand as one interchangeable option; your depth in a comparable option from the same capability category satisfies the requirement (see note)",
     "declared-gap": "**User-declared gap** — you chose not to count the transfer path; treated as a full gap",
+    "unjudged": "**Unjudged** — the LLM transfer judgment was skipped or unavailable; ranked by JD demand alone (see source label)",
 }
+
+
+def _mode_block(run_info: dict | None) -> tuple[str, list[str]]:
+    """M15: the plan header states the run's mode and any loud degradations.
+
+    Returns (mode_line, degraded_reason_lines). Labels come from the shared
+    vocabulary in llm.py (specs/05-ai-caller.md §Provenance vocabulary).
+    """
+    info = run_info or {}
+    if info.get("llm_mode") == "rule-based":
+        mode = (
+            "Rule-based mode — no LLM calls were made. Gap rows and "
+            "sections below state their own source."
+        )
+    else:
+        mode = "LLM mode."
+    reasons = [
+        f"{r.get('touchpoint', '?')}: {r.get('error', '?')}"
+        for r in (info.get("degraded_reasons") or [])
+        if isinstance(r, dict)
+    ]
+    return mode, reasons
 
 
 def render_plan(
@@ -27,8 +51,10 @@ def render_plan(
     projects: list[SynthesizedProject],
     stats: dict,
     oss_by_gap: dict[str, list] | None = None,
+    run_info: dict | None = None,
 ) -> str:
     lines: list[str] = []
+    mode_line, degraded = _mode_block(run_info)
     lines.append("# Skill-Gap Plan")
     lines.append("")
     lines.append(
@@ -37,6 +63,13 @@ def render_plan(
         f"LLM-judged transferability (gap score = JD weight × (1 − top transfer confidence))."
     )
     lines.append("")
+    lines.append(f"_{mode_line}_")
+    if degraded:
+        lines.append("")
+        lines.append(f"**Warning — {len(degraded)} step(s) fell back to rule-based output:**")
+        for r in degraded:
+            lines.append(f"- {r}")
+        lines.append("")
 
     # 1. Ranked gap list
     lines.append("## Ranked Gaps")
@@ -52,6 +85,9 @@ def render_plan(
     for g in gaps:
         lines.append(f"### {g.target} — {g.verdict} (score {g.gap_score}, {g.weight} JDs)")
         lines.append("")
+        if g.provenance:
+            lines.append(f"_Source: {g.provenance}_")
+            lines.append("")
         if g.verdict == "bridge":
             lines.append(
                 f"Mostly transferable from **{g.top_transfer_skill}** "
@@ -59,6 +95,8 @@ def render_plan(
             )
             lines.append("")
             lines.append("_Not prioritized for a dedicated project — a small bridging exercise suffices._")
+        elif g.verdict == "unjudged":
+            lines.append("Not judged — ranked by JD demand alone (no transfer score measured).")
         elif g.top_transfer_skill:
             lines.append(
                 f"Top transfer: **{g.top_transfer_skill}** ({g.top_transfer_confidence:.2f}). "
@@ -78,12 +116,25 @@ def render_plan(
     # 3. Recommended projects
     lines.append("## Recommended Projects")
     lines.append("")
-    if not projects:
+    rule_mode = (run_info or {}).get("llm_mode") == "rule-based"
+    if rule_mode:
+        lines.append(
+            f"_{LABEL_RULE} mode: project synthesis needs the LLM — skipped._"
+        )
+    elif not projects:
         lines.append("_No projects synthesized._")
     for r in projects:
+        if getattr(r, "error", None):
+            lines.append(f"### Not generated for {r.gap.target}")
+            lines.append("")
+            lines.append(f"_Source: {rule_unavailable_label(str(r.error))}_")
+            lines.append("")
+            continue
         lines.append(f"### {r.title}")
         lines.append("")
         lines.append(f"**Closes gap:** {r.gap.target} ({r.gap.verdict}, score {r.gap.gap_score})")
+        lines.append("")
+        lines.append(f"_Source: {LABEL_LLM}_")
         lines.append("")
         lines.append(r.description)
         lines.append("")
@@ -99,6 +150,10 @@ def render_plan(
             continue
         lines.append(f"## Good-First-Issues: {g.target}")
         lines.append("")
+        src = getattr(issues[0], "provenance", "")
+        if src:
+            lines.append(f"_Source: {src}_")
+            lines.append("")
         for it in issues:
             label_str = f" ({', '.join(it.labels)})" if getattr(it, "labels", None) else ""
             updated = f" — updated {it.updated_at[:10]}" if getattr(it, "updated_at", "") else ""
@@ -116,6 +171,7 @@ def render_plan_html(
     stats: dict,
     oss_by_gap: dict[str, list] | None = None,
     jd_files: dict[str, str] | None = None,
+    run_info: dict | None = None,
 ) -> str:
     """Minimal plan.html (M10 thin slice): same data as plan.md, clickable links.
 
@@ -131,6 +187,7 @@ def render_plan_html(
     fix, 2026-10-04).
     """
     esc = html.escape
+    mode_line, degraded = _mode_block(run_info)
     parts: list[str] = []
     parts.append("<!doctype html><html><head><meta charset='utf-8'>")
     parts.append("<title>Skill-Gap Plan</title></head><body>")
@@ -140,6 +197,16 @@ def render_plan_html(
         f"{stats.get('implied', '?')} implied skills vs. "
         f"{stats.get('jds', '?')} target job descriptions.</p>"
     )
+    # M15: the plan states its mode and any loud degradations up front.
+    parts.append(f"<p><em>{esc(mode_line)}</em></p>")
+    if degraded:
+        parts.append(
+            f"<p><strong>Warning — {len(degraded)} step(s) fell back to "
+            "rule-based output:</strong></p><ul>"
+        )
+        for r in degraded:
+            parts.append(f"<li>{esc(r)}</li>")
+        parts.append("</ul>")
     parts.append("<h2>Ranked Gaps</h2><pre>")
     parts.append(esc(format_ranking(gaps)))
     parts.append("</pre>")
@@ -147,7 +214,14 @@ def render_plan_html(
     for g in gaps:
         parts.append(f"<h3>{esc(g.target)} — {esc(g.verdict)} "
                        f"(score {g.gap_score}, {g.weight} JDs)</h3>")
-        if g.top_transfer_skill:
+        if g.provenance:
+            parts.append(f"<p><em>Source: {esc(g.provenance)}</em></p>")
+        if g.verdict == "unjudged":
+            parts.append(
+                "<p>Not judged — ranked by JD demand alone "
+                "(no transfer score measured).</p>"
+            )
+        elif g.top_transfer_skill:
             parts.append(
                 f"<p>Top transfer: <strong>{esc(g.top_transfer_skill)}</strong> "
                 f"({g.top_transfer_confidence:.2f}). {esc(g.rationale)}</p>"
@@ -169,14 +243,27 @@ def render_plan_html(
                     parts.append(f"<li>{esc(jd)}</li>")
             parts.append("</ul>")
     parts.append("<h2>Recommended Projects</h2>")
-    if not projects:
+    rule_mode = (run_info or {}).get("llm_mode") == "rule-based"
+    if rule_mode:
+        parts.append(
+            f"<p><em>{LABEL_RULE} mode: project synthesis needs the LLM — "
+            "skipped.</em></p>"
+        )
+    elif not projects:
         parts.append("<p><em>No projects synthesized.</em></p>")
     for r in projects:
+        if getattr(r, "error", None):
+            parts.append(f"<h3>Not generated for {esc(r.gap.target)}</h3>")
+            parts.append(
+                f"<p><em>Source: {esc(rule_unavailable_label(str(r.error)))}</em></p>"
+            )
+            continue
         parts.append(f"<h3>{esc(r.title)}</h3>")
         parts.append(
             f"<p><strong>Closes gap:</strong> {esc(r.gap.target)} "
             f"({esc(r.gap.verdict)}, score {r.gap.gap_score})</p>"
         )
+        parts.append(f"<p><em>Source: {LABEL_LLM}</em></p>")
         parts.append(f"<p>{esc(r.description)}</p>")
         if r.why:
             parts.append(f"<p><em>Why this project: {esc(r.why)}</em></p>")
@@ -186,7 +273,11 @@ def render_plan_html(
             issues = [it for it in (oss_by_gap.get(g.target, [])) if getattr(it, "url", "")]
             if not issues:
                 continue
-            parts.append(f"<h3>{esc(g.target)}</h3><ul>")
+            parts.append(f"<h3>{esc(g.target)}</h3>")
+            src = getattr(issues[0], "provenance", "")
+            if src:
+                parts.append(f"<p><em>Source: {esc(src)}</em></p>")
+            parts.append("<ul>")
             for it in issues:
                 label_str = f" ({esc(', '.join(it.labels))})" if getattr(it, "labels", None) else ""
                 updated = f" — updated {esc(it.updated_at[:10])}" if getattr(it, "updated_at", "") else ""
@@ -208,10 +299,13 @@ def write_plan(
     stats: dict,
     path: str | Path = Path("output/plan.md"),
     oss_by_gap: dict[str, list] | None = None,
+    run_info: dict | None = None,
 ) -> Path:
     p = Path(path)
     p.parent.mkdir(exist_ok=True)
-    p.write_text(render_plan(gaps, projects, stats, oss_by_gap), encoding="utf-8")
+    p.write_text(
+        render_plan(gaps, projects, stats, oss_by_gap, run_info), encoding="utf-8"
+    )
     return p
 
 
@@ -222,8 +316,12 @@ def write_plan_html(
     oss_by_gap: dict[str, list] | None = None,
     path: str | Path = Path("output/plan.html"),
     jd_files: dict[str, str] | None = None,
+    run_info: dict | None = None,
 ) -> Path:
     p = Path(path)
     p.parent.mkdir(exist_ok=True)
-    p.write_text(render_plan_html(gaps, projects, stats, oss_by_gap, jd_files), encoding="utf-8")
+    p.write_text(
+        render_plan_html(gaps, projects, stats, oss_by_gap, jd_files, run_info),
+        encoding="utf-8",
+    )
     return p

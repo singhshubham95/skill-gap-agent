@@ -28,9 +28,11 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import operator
+import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -40,7 +42,7 @@ from .gate import DEFAULT_THRESHOLD, gate_summary, review_targets
 from .graph import SkillGraph
 from .ingest import build_seed_graph
 from .judge import judge_all_unmatched, save_judge_report
-from .llm import LLMConfig
+from .llm import LLMConfig, LLMError, require_api_key
 from .oss import source_oss_for_gaps
 from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
@@ -101,6 +103,12 @@ class AgentState(TypedDict, total=False):
     link_jds: bool
     jd_files: dict
     provider: str  # M14: llm provider id (openrouter/glm/openai), default openrouter
+    use_llm: bool  # M15: run-level LLM mode (false = Rule-based mode)
+    # M15 append-only channels (specs/05-ai-caller.md §LLM presence policy):
+    # unjudged targets (target + reason) and per-touchpoint degradation
+    # records ({touchpoint, error}) accumulate across nodes and phases.
+    unjudged: Annotated[list[dict], operator.add]
+    degraded_reasons: Annotated[list[dict], operator.add]
 
 
 def _llm_cfg(state: AgentState) -> LLMConfig:
@@ -178,7 +186,11 @@ def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
 
 
 def _copy_previous_transfers(sg: SkillGraph) -> int:
-    """Copy TRANSFERS_TO edges from the last saved graph into this run."""
+    """Copy TRANSFERS_TO edges from the last saved graph into this run.
+
+    Copied edges are marked cached=True so ranking can label their rows
+    "LLM (cached)" instead of freshly-judged (M15 provenance).
+    """
     prev_path = Path("output/graph.json")
     if not prev_path.exists():
         return 0
@@ -186,7 +198,7 @@ def _copy_previous_transfers(sg: SkillGraph) -> int:
     reused = 0
     for u, v, d in prev.g.edges(data=True):
         if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(v):
-            sg.g.add_edge(u, v, **d)
+            sg.g.add_edge(u, v, **{**d, "cached": True})
             reused += 1
     return reused
 
@@ -215,11 +227,29 @@ def _save_merged_judge_report(results: list) -> None:
 def node_judge(state: AgentState, config: RunnableConfig) -> dict:
     _stage("judge")
     sg: SkillGraph = _runtime(config)["sg"]
+    if not state.get("use_llm", True):
+        # M15 Rule-based mode: nothing is measured, so rows render "unjudged"
+        # instead of a fake confidence-0 transfer score.
+        targets = sorted(sg.unmatched_target_skills())
+        print(
+            f"Rule-based mode: LLM judging skipped "
+            f"({len(targets)} target(s) marked unjudged)"
+        )
+        return {
+            "judged": False,
+            "unjudged": [{"target": t, "reason": None} for t in targets],
+        }
     if state.get("skip_judge") or state.get("reuse_judged"):
         reused = _copy_previous_transfers(sg)
         print(f"Reused {reused} TRANSFERS_TO edges from output/graph.json")
         if state.get("skip_judge"):
-            return {"judged": False}
+            # --no-judge measures nothing new: remaining unmatched targets
+            # are unjudged, not measured gaps (M15).
+            targets = sorted(sg.unmatched_target_skills())
+            return {
+                "judged": False,
+                "unjudged": [{"target": t, "reason": None} for t in targets],
+            }
 
     unmatched = sg.unmatched_target_skills()
     if not unmatched:
@@ -230,7 +260,21 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
         _save_merged_judge_report(results)
     else:
         save_judge_report(results, Path("output/judge_report.json"))
-    return {"judged": True}
+    out: dict = {"judged": True}
+    # M15: a failed judge call must never read as a measured 0-confidence
+    # gap — the target is labeled unjudged and the run is marked degraded.
+    # "no candidates" is structural (nothing plausible to judge against),
+    # not an outage: it rides the unjudged channel for classification but
+    # does not raise the degraded banner.
+    failed = [{"target": r.target, "reason": r.error} for r in results if r.error]
+    if failed:
+        out["unjudged"] = failed
+        out["degraded_reasons"] = [
+            {"touchpoint": f"judge({r.target})", "error": r.error}
+            for r in results
+            if r.error and r.error != "no candidates"
+        ]
+    return out
 
 
 def gate_needed(state: AgentState, config: RunnableConfig) -> str:
@@ -287,7 +331,12 @@ def _write_gaps_json(gaps: list) -> Path:
 
 def node_rank(state: AgentState, config: RunnableConfig) -> dict:
     _stage("rank")
-    gaps = rank_gaps(_runtime(config)["sg"])
+    unjudged = {
+        u["target"]: u.get("reason")
+        for u in state.get("unjudged", [])
+        if isinstance(u, dict) and u.get("target")
+    }
+    gaps = rank_gaps(_runtime(config)["sg"], unjudged=unjudged or None)
     print("\n=== Gap ranking ===")
     print(format_ranking(gaps))
     gaps_path = _write_gaps_json(gaps)
@@ -338,10 +387,22 @@ def after_synthesize(state: AgentState) -> str:
 
 def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     _stage("synthesize")
+    if not state.get("use_llm", True):
+        # M15 Rule-based mode: project synthesis is LLM-only — the plan
+        # renders a labeled note instead of template filler.
+        print("Rule-based mode: project synthesis skipped (needs the LLM)")
+        return {"projects": []}
     projects = synthesize_for_gaps(
         _runtime(config)["sg"], state["gaps"], top_n=state["top_n"], cfg=_llm_cfg(state)
     )
-    return {"projects": projects}
+    out: dict = {"projects": projects}
+    failed = [r for r in projects if r.error]
+    if failed:
+        out["degraded_reasons"] = [
+            {"touchpoint": f"synthesis({r.gap.target})", "error": r.error}
+            for r in failed
+        ]
+    return out
 
 
 def node_oss(state: AgentState, config: RunnableConfig) -> dict:
@@ -349,14 +410,18 @@ def node_oss(state: AgentState, config: RunnableConfig) -> dict:
     _stage("oss")
     if state.get("skip_oss"):
         return {"oss_by_gap": {}}
+    # M15: Rule-based mode implies keyword-only sourcing (no LLM filter).
+    use_llm_oss = state.get("use_llm", True) and not state.get("no_llm_oss", False)
+    degraded: list[dict] = []
     oss_by_gap = source_oss_for_gaps(
         _runtime(config)["sg"],
         state["gaps"],
         top_n=state["top_n"],
         cfg=_llm_cfg(state),
-        use_llm=not state.get("no_llm_oss", False),
+        use_llm=use_llm_oss,
+        degraded_out=degraded,
     )
-    return {"oss_by_gap": oss_by_gap}
+    return {"oss_by_gap": oss_by_gap, "degraded_reasons": degraded}
 
 
 def node_output(state: AgentState, config: RunnableConfig) -> dict:
@@ -366,11 +431,19 @@ def node_output(state: AgentState, config: RunnableConfig) -> dict:
     projects = state.get("projects", [])
     oss_by_gap = state.get("oss_by_gap") or {}
     jd_files = state.get("jd_files") if state.get("link_jds") else None
+    # M15: the plan states its mode and any loud degradations (provenance
+    # vocabulary lives in llm.py / specs/05-ai-caller.md §Provenance).
+    run_info = {
+        "llm_mode": "llm" if state.get("use_llm", True) else "rule-based",
+        "degraded_reasons": state.get("degraded_reasons", []),
+    }
     plan_path = write_plan(
-        state["gaps"], projects, state["stats"], out / "plan.md", oss_by_gap
+        state["gaps"], projects, state["stats"], out / "plan.md", oss_by_gap,
+        run_info=run_info,
     )
     write_plan_html(
-        state["gaps"], projects, state["stats"], oss_by_gap, out / "plan.html", jd_files
+        state["gaps"], projects, state["stats"], oss_by_gap, out / "plan.html", jd_files,
+        run_info=run_info,
     )
     save_synthesis_report(projects, out / "synthesis_report.json")
     sg.save(str(out / "graph.json"))
@@ -428,7 +501,8 @@ def main() -> None:
     parser.add_argument(
         "--no-llm",
         action="store_true",
-        help="force the regex extraction path for resume input (no LLM call)",
+        help="Rule-based mode (M15): no LLM calls anywhere — regex extraction, "
+        "unjudged transfers, keyword GFI, no project synthesis",
     )
     parser.add_argument(
         "--provider",
@@ -443,6 +517,15 @@ def main() -> None:
         "run can be resumed by re-running with --resume",
     )
     args = parser.parse_args()
+
+    # M15 pre-flight (specs/05-ai-caller.md §Availability): LLM mode with no
+    # key refuses before any work instead of silently degrading mid-run.
+    if not args.no_llm:
+        try:
+            require_api_key(args.provider)
+        except LLMError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(2) from e
 
     checkpointer = None
     if args.resume:
@@ -477,6 +560,7 @@ def main() -> None:
         "skip_judge": args.no_judge,
         "top_n": args.top_n,
         "provider": args.provider,
+        "use_llm": not args.no_llm,
     }
     config = {"configurable": {"thread_id": "cli"}}
 

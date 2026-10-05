@@ -35,13 +35,39 @@
     <p class="hint">Ranks what the collected JDs demand against your skills.
     The first run takes minutes (LLM judge); later runs reuse cached
     judgments.</p>
+    <label class="check">
+      <input type="checkbox" id="usellm" checked> Use LLM intelligence
+    </label>
+    <div id="llmarea">
+      <p class="hint">LLM mode needs an API key for the selected provider —
+      results are labeled with their source either way.</p>
+      <label>Provider:
+        <select id="provider"></select>
+      </label>
+      <label>API key:
+        <input id="apikey" type="password" spellcheck="false" autocomplete="off">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="remember" checked> Remember on this machine
+      </label>
+      <button id="savekey">Save key</button>
+      <p id="keystate" class="hint"></p>
+      <p class="hint">The key goes straight to the local agent, which stores
+      it in the OS credential vault (Windows Credential Manager / macOS
+      Keychain) — never in the browser. Uncheck "remember" to keep it for
+      this server session only.</p>
+    </div>
+    <p id="rulehint" class="hint" hidden>Rule-based mode — no LLM calls.
+    Gaps are ranked by JD demand alone and results say "Rule-based"; project
+    synthesis is skipped.</p>
+    <div id="degraded" class="banner" hidden></div>
     <label>Top gaps: <input id="topn" type="number" min="1" max="23" value="5"></label>
     <button id="analyze">Analyze gaps</button>
     <p id="status" class="status">idle</p>
     <div id="gapbox" hidden>
       <table id="gaps">
         <thead>
-          <tr><th>#</th><th>Skill gap</th><th>Score</th><th>JDs</th><th>Verdict</th></tr>
+          <tr><th>#</th><th>Skill gap</th><th>Score</th><th>JDs</th><th>Verdict</th><th>Source</th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -68,22 +94,8 @@
     </label>
     <p class="hint">If you run the server on another port, update the URL and
     reload the extension after changing manifest host_permissions.</p>
-    <h3>LLM key</h3>
-    <label>Provider:
-      <select id="provider"></select>
-    </label>
-    <label>API key:
-      <input id="apikey" type="password" spellcheck="false" autocomplete="off">
-    </label>
-    <label class="check">
-      <input type="checkbox" id="remember" checked> Remember on this machine
-    </label>
-    <button id="savekey">Save key</button>
-    <p id="keystate" class="hint"></p>
-    <p class="hint">The key goes straight to the local agent, which stores
-    it in the OS credential vault (Windows Credential Manager / macOS
-    Keychain) — never in the browser. Uncheck "remember" to keep it for
-    this server session only.</p>
+    <p class="hint">The LLM key form lives under "Analyze gaps" (shown while
+    "Use LLM intelligence" is on).</p>
   </details>
 
   <script src="sidepanel.js"></script>

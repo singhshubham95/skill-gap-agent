@@ -27,6 +27,13 @@ M14 self-serve setup (specs/12-extension.md §M14):
                        the OS keyring ("remember") or the process env
                        ("session only"). Never echoes the key.
 
+M15 LLM presence policy (specs/05-ai-caller.md §LLM presence policy):
+  POST /api/run body gains use_llm (bool, default true). LLM mode with no
+  stored key is refused up front (409, actionable message) — a run never
+  silently produces non-LLM output. /api/status carries llm_mode
+  ("llm" | "rule-based") and degraded_reasons [{touchpoint, error}]; every
+  rendered section/row labels its source (llm.py vocabulary).
+
 Single-run guard: POST /api/run while running -> 409. Status carries
 started_at/finished_at/error. Paths resolve from the repo root (this file's
 parents), never hardcoded — data/ and output/ stay gitignored.
@@ -54,7 +61,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import secrets
-from .llm import PROVIDERS, LLMConfig
+from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JD_DIR = REPO_ROOT / "data" / "jds"
@@ -72,6 +79,9 @@ _run: dict = {
     "started_at": None,
     "finished_at": None,
     "error": None,
+    # M15 LLM presence policy: the run's mode and any loud degradations.
+    "llm_mode": None,
+    "degraded_reasons": [],
 }
 # The paused two-phase run (phase "gaps" -> waiting for "plan"). The
 # SkillGraph lives in cli.py's process-bound runtime registry, so the resume
@@ -193,6 +203,32 @@ def _resolve_provider(options: dict) -> str:
     return provider
 
 
+def _resolve_use_llm(options: dict) -> bool:
+    """M15: run-level LLM mode (default on). use_llm:false = Rule-based."""
+    return bool(options.get("use_llm", True))
+
+
+def _sync_run_state(app, config: dict, status: str) -> dict:
+    """M15: copy llm_mode + degraded_reasons from the graph state into _run.
+
+    The banner must state the truth even when only part of the run used the
+    LLM, so the accumulated degrade records ride in state and are read out
+    at every status transition (paused/done/error).
+    """
+    with _lock:
+        _run["status"] = status
+        if app is not None:
+            try:
+                values = app.get_state(config).values or {}
+            except Exception:  # noqa: BLE001 — no checkpointer: best effort
+                values = {}
+            if values.get("degraded_reasons"):
+                _run["degraded_reasons"] = values["degraded_reasons"]
+            if "use_llm" in values:
+                _run["llm_mode"] = "llm" if values.get("use_llm", True) else "rule-based"
+        return dict(_run)
+
+
 def _describe_skills() -> dict:
     """What the next run will use, for GET /api/status (M14)."""
     with _lock:
@@ -228,6 +264,16 @@ def _run_pipeline(options: dict) -> None:
     two_phase = phase == "gaps"
     skills_path = _resolve_skills(options)
     provider = _resolve_provider(options)
+    use_llm = _resolve_use_llm(options)
+    if use_llm:
+        # Race-safe backstop for the POST-layer pre-flight (M15): never
+        # start a run that would silently degrade the whole pipeline.
+        try:
+            require_api_key(provider)
+        except LLMError as e:
+            with _lock:
+                _run.update(status="error", finished_at=time.time(), error=str(e))
+            return
     if Path(skills_path).suffix.lower() != ".json":
         # M8 resume front-end (same as cli.main()): resume -> skills JSON
         # before the graph starts; the artifact is reused only for the same
@@ -238,7 +284,7 @@ def _run_pipeline(options: dict) -> None:
             skills_path = str(
                 resume_to_skills_json(
                     skills_path,
-                    use_llm=True,
+                    use_llm=use_llm,
                     auto=True,
                     ask_fn=None,
                     cfg=LLMConfig(provider=provider),
@@ -271,6 +317,7 @@ def _run_pipeline(options: dict) -> None:
         "link_jds": True,
         "jd_files": jd_files,
         "provider": provider,
+        "use_llm": use_llm,
     }
     checkpointer = None
     if two_phase:
@@ -281,13 +328,11 @@ def _run_pipeline(options: dict) -> None:
         app = build_app(checkpointer=checkpointer)
         app.invoke(state, config=config)
         if two_phase and pending_interrupt(app, config) is not None:
+            _sync_run_state(app, config, "paused")
             with _lock:
+                _run.update(stage=None, finished_at=time.time(), error=None)
                 _paused["app"] = app
                 _paused["config"] = config
-                _run.update(
-                    status="paused", stage=None,
-                    finished_at=time.time(), error=None,
-                )
             return
     except Exception as e:  # noqa: BLE001 — surfaced via /api/status
         traceback.print_exc()
@@ -296,8 +341,9 @@ def _run_pipeline(options: dict) -> None:
         return
     finally:
         set_stage_listener(None)
+    _sync_run_state(app, config, "done")
     with _lock:
-        _run.update(status="done", stage=None, finished_at=time.time(), error=None)
+        _run.update(stage=None, finished_at=time.time(), error=None)
 
 
 def _resume_pipeline(options: dict) -> None:
@@ -325,8 +371,9 @@ def _resume_pipeline(options: dict) -> None:
     finally:
         set_stage_listener(None)
         _drop_paused()
+    _sync_run_state(app, config, "done")
     with _lock:
-        _run.update(status="done", stage=None, finished_at=time.time(), error=None)
+        _run.update(stage=None, finished_at=time.time(), error=None)
 
 
 INDEX_HTML = """<!doctype html><html><head><meta charset="utf-8">
@@ -510,9 +557,21 @@ class Handler(BaseHTTPRequestHandler):
             if phase == "plan" and _paused["app"] is None:
                 self._json(409, {"error": "no paused run - run phase 'gaps' first"})
                 return
+        # M15 pre-flight (specs/05-ai-caller.md §Availability): LLM mode
+        # with no stored key refuses before any work — never a silent
+        # rule-based run. Rule-based mode (use_llm: false) always starts.
+        if phase != "plan" and _resolve_use_llm(options):
+            try:
+                require_api_key(_resolve_provider(options))
+            except LLMError as e:
+                self._json(409, {"error": str(e)})
+                return
+        with _lock:
             _run.update(
                 status="running", stage=None, phase=phase, started_at=time.time(),
                 finished_at=None, error=None,
+                llm_mode="llm" if _resolve_use_llm(options) else "rule-based",
+                degraded_reasons=[],
             )
         worker = _resume_pipeline if phase == "plan" else _run_pipeline
         t = threading.Thread(target=worker, args=(options,), daemon=True)
@@ -568,10 +627,11 @@ class Handler(BaseHTTPRequestHandler):
             "filename": target.name,
             "skills": stats.get("phrases"),
             "source": stats.get("source"),
+            "provenance": stats.get("provenance"),
         }
-        if stats.get("source") == "regex":
+        if stats.get("provenance") == "Rule-based":
             resp["warning"] = (
-                "LLM extraction unavailable - fell back to a regex scan (lower fidelity)."
+                "Skills extracted without the LLM (regex scan, lower fidelity)."
             )
         self._json(200, resp)
 
