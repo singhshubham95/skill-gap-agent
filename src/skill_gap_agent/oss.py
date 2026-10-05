@@ -40,7 +40,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .graph import Project, SkillGraph
-from .llm import LLMConfig, judge
+from .llm import (
+    LABEL_LLM,
+    LABEL_LLM_CACHED,
+    LABEL_RULE,
+    LLMConfig,
+    judge,
+    rule_unavailable_label,
+)
 from .ranking import Gap
 from .secrets import get_secret
 
@@ -107,6 +114,7 @@ class OssIssue:
     body: str = ""
     relevance_why: str = ""
     error: str | None = None
+    provenance: str = ""  # M15 label (llm.py): LLM / LLM (cached) / Rule-based / …
 
 
 def build_query(gap_target: str, attempt: int = 0) -> str:
@@ -221,10 +229,15 @@ def filter_issues_relevance(
     sg: SkillGraph,
     issues: list[OssIssue],
     cfg: LLMConfig | None = None,
-) -> list[OssIssue]:
-    """S2 relevance filter: one judge() call per gap; LLM-down -> keep top raw."""
+) -> tuple[list[OssIssue], str | None]:
+    """S2 relevance filter: one judge() call per gap.
+
+    Returns (kept_issues, error). On LLM failure the raw top-5 are kept —
+    but never silently (M15): the caller labels them and marks the run
+    degraded from the returned error.
+    """
     if not issues:
-        return []
+        return [], None
     if len(issues) <= 5:
         candidates = issues
     else:
@@ -241,11 +254,14 @@ def filter_issues_relevance(
     )
     try:
         result = judge(prompt, system=FILTER_SYSTEM_PROMPT, cfg=cfg or LLMConfig())
-    except Exception:  # noqa: BLE001 — LLM down: keep top raw (reviewable)
-        return _prefer_curated(candidates)[:5]
+    except Exception as e:  # noqa: BLE001 — LLM down: keep top raw (labeled)
+        return _prefer_curated(candidates)[:5], str(e)
     relevant = result.get("relevant")
     if not isinstance(relevant, list) or not relevant:
-        return _prefer_curated(candidates)[:5]
+        return (
+            _prefer_curated(candidates)[:5],
+            "LLM filter returned no usable selection",
+        )
     by_url = {it.url: it for it in candidates}
     kept: list[OssIssue] = []
     for entry in relevant:
@@ -259,7 +275,12 @@ def filter_issues_relevance(
         kept.append(it)
         if len(kept) >= 5:
             break
-    return kept or _prefer_curated(candidates)[:5]
+    if not kept:
+        return (
+            _prefer_curated(candidates)[:5],
+            "LLM filter returned no usable selection",
+        )
+    return kept, None
 
 
 def source_oss_for_gaps(
@@ -270,12 +291,17 @@ def source_oss_for_gaps(
     cache_path: str | Path = OSS_CACHE_PATH,
     search_fn=None,
     use_llm: bool = True,
+    degraded_out: list | None = None,
 ) -> dict[str, list[OssIssue]]:
     """Source good-first-issues for the top-n actionable gaps.
 
     Same gap filter as synthesize_for_gaps (excludes bridge / alt-bridged /
     held). Cache-first: cached gaps write Project nodes with zero API calls.
     Returns {gap_target: [OssIssue, ...]}.
+
+    M15: every issue carries a provenance label (llm.py vocabulary); an LLM
+    filter failure keeps the raw top-5 but labels them and appends a record
+    to degraded_out (if given) — never a silent fallback.
     """
     token = get_secret("GITHUB_TOKEN")
     search = search_fn or (lambda q: github_search_issues(q, token=token))
@@ -290,6 +316,9 @@ def source_oss_for_gaps(
         cached = cache.get(gap.target)
         if cached and isinstance(cached.get("issues"), list):
             issues = [OssIssue(gap=gap.target, **{k: v for k, v in it.items() if k in OssIssue.__dataclass_fields__}) for it in cached["issues"]]
+            # Reused LLM output must not read as fresh (M15 provenance).
+            for it in issues:
+                it.provenance = LABEL_LLM_CACHED if it.relevance_why else LABEL_RULE
             out[gap.target] = issues
             _write_projects(sg, gap, issues)
             continue
@@ -311,13 +340,24 @@ def source_oss_for_gaps(
                 break
         issues = _prefer_curated([_raw_to_issue(gap.target, it) for it in raw_items])
         if use_llm:
-            issues = filter_issues_relevance(gap, sg, issues, cfg=cfg)
+            issues, filter_err = filter_issues_relevance(gap, sg, issues, cfg=cfg)
+            if filter_err:
+                prov = rule_unavailable_label(filter_err)
+                if degraded_out is not None:
+                    degraded_out.append(
+                        {"touchpoint": f"oss-filter({gap.target})", "error": filter_err}
+                    )
+            else:
+                prov = LABEL_LLM
         else:
             issues = issues[:5]
+            prov = LABEL_RULE
         if error and not issues:
             issues = [OssIssue(gap=gap.target, title="", url="", error=error)]
         else:
             issues = [it for it in issues if it.url][:5]
+        for it in issues:
+            it.provenance = prov
 
         cache[gap.target] = {
             "query": attempts[-1] if attempts else "",
@@ -332,6 +372,7 @@ def source_oss_for_gaps(
                     "updated_at": it.updated_at,
                     "body": it.body,
                     "relevance_why": it.relevance_why,
+                    "provenance": it.provenance,
                 }
                 for it in issues
             ],
@@ -381,6 +422,7 @@ def save_oss_report(
                 "updated_at": it.updated_at,
                 "body": it.body,
                 "relevance_why": it.relevance_why,
+                "provenance": it.provenance,
             }
             for it in issues
         ]

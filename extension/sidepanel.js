@@ -227,7 +227,38 @@ async function captureJd() {
   setStatus(`Captured: ${jd.title} — ${jds.length} in list.`);
 }
 
-// ---- 2. analyze gaps ------------------------------------------------------
+// ---- 2. analyze gaps (M15: LLM toggle + degradation banner) --------------
+
+function toggleLlm() {
+  const on = $("usellm").checked;
+  $("llmarea").hidden = !on;
+  $("rulehint").hidden = on;
+  if (on) loadProviders();
+}
+
+function showDegraded(s) {
+  const box = $("degraded");
+  const reasons = (s && s.degraded_reasons) || [];
+  if (!reasons.length) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  box.replaceChildren();
+  const head = document.createElement("strong");
+  head.textContent =
+    "⚠ Parts of this result were generated without the LLM — " +
+    "re-run after fixing the key:";
+  box.appendChild(head);
+  const ul = document.createElement("ul");
+  for (const r of reasons) {
+    const li = document.createElement("li");
+    li.textContent = `${r.touchpoint || "?"}: ${r.error || "unknown error"}`;
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+  box.hidden = false;
+}
 
 async function analyze() {
   if (!jds.length) {
@@ -244,6 +275,7 @@ async function analyze() {
     top_n: parseInt($("topn").value || "5", 10),
     reuse_judged: true,
     provider: $("provider").value || "openrouter",
+    use_llm: $("usellm").checked,
   };
   const started = await postRun(body);
   if (started) poll();
@@ -271,6 +303,7 @@ async function showGaps() {
       String(g.gap_score ?? ""),
       String(g.weight ?? ""),
       g.verdict || "",
+      g.provenance || "",
     ];
     for (const text of cells) {
       const td = document.createElement("td");
@@ -324,7 +357,15 @@ async function postRun(body) {
     if (r.status === 409) {
       const err = await r.json().catch(() => ({}));
       setBusy(false);
-      setStatus(err.error || "A run is already in progress.", true);
+      const msg = err.error || "A run is already in progress.";
+      setStatus(msg, true);
+      // M15: a keyless LLM run is refused up front — surface the fix
+      // where it happens (the key form), not just in the status line.
+      if (/API key/i.test(msg)) {
+        $("usellm").checked = true;
+        toggleLlm();
+        $("keystate").textContent = msg;
+      }
       return false;
     }
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -351,6 +392,7 @@ async function poll() {
     setStatus("Lost contact with the local agent: " + e.message, true);
     return;
   }
+  showDegraded(s); // M15: banner tracks live degradations
   if (s.status === "running") {
     setStatus("Running — " + (STAGE_LABELS[s.stage] || s.stage || "working") + "…");
     setTimeout(poll, 2500);
@@ -397,6 +439,7 @@ $("reopen").addEventListener("click", () => {
 $("resume").addEventListener("change", uploadResume);
 $("savekey").addEventListener("click", saveKey);
 $("provider").addEventListener("change", loadProviders);
+$("usellm").addEventListener("change", toggleLlm);
 $("clear").addEventListener("click", async () => {
   jds = [];
   await saveJds();
@@ -411,6 +454,7 @@ $("serverBase").addEventListener("change", async (e) => {
 
 loadState().then(() => {
   renderJds();
+  toggleLlm();
   checkConnection();
   loadProviders();
   refreshSkills();

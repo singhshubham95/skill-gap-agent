@@ -47,7 +47,9 @@ needs. JD text is **untrusted web content** — the panel renders it with
 ## Run contract (extension → local server)
 
 `POST /api/run` body:
-`{phase, jds, top_n, skills_path?, skip_judge?, skip_oss?, no_llm_oss?}`.
+`{phase, jds, top_n, skills_path?, provider?, skip_judge?, skip_oss?, no_llm_oss?}`
+(`use_llm?` arrives with M15 — §M15 below; `free_tier?` + `privacy_ack?`
+with M16 — §M16 below).
 
 | `phase` | Behaviour |
 |---|---|
@@ -202,6 +204,97 @@ keyring path (`secrets.py`, locked 2026-09-27: OS keyring only).
 4. One live interactive pass (real resume + keyring + full run) recorded in
    [03-milestones.md](03-milestones.md) M14.
 
+## M15 — LLM mode control (✅ Built 2026-10-05)
+
+Semantics — what the toggle means, the pre-flight refusal, degradation
+and the provenance labels — live in
+[05-ai-caller.md](05-ai-caller.md) §LLM presence policy (the design
+home). This section is the panel surface only. Decision rows:
+`02-decisions.md` M15; done criteria: [05-ai-caller.md](05-ai-caller.md)
+§Done criteria (M15).
+
+- **LLM toggle** (on by default) in the run section. ON reveals the key
+  area beneath it: provider dropdown + key state ("key saved ✓ (OS
+  keyring)" / "not saved") from `GET /api/providers`, and the M14 key
+  form (password input, "Remember on this machine", Save). OFF hides the
+  key area and shows "Rule-based mode — no LLM calls".
+- **Run contract** gains `use_llm` (bool, default true). LLM mode + no
+  key for the selected provider → `/api/run` refuses (409) and the panel
+  shows the actionable message inline next to the key field instead of
+  starting a run. (`use_llm: false` implies the existing `no_llm_oss`.)
+- **Degradation banner**: when `GET /api/status` reports
+  `degraded_reasons`, a prominent banner lists them with a re-run hint;
+  gap rows and plan sections carry the per-item provenance labels from
+  [05-ai-caller.md](05-ai-caller.md) §Provenance vocabulary, and the
+  plan header states the run's mode.
+
+## M16 — free LLM access (Designed)
+
+Mechanics — free-model routing, refusal rules, retry semantics — live in
+[05-ai-caller.md](05-ai-caller.md) §Free-tier routing + §Retry & failure
+handling (the design homes). This section is the panel + server surface:
+getting a key without pasting one, and the consent gate. Decision rows:
+`02-decisions.md` M16; done criteria:
+[05-ai-caller.md](05-ai-caller.md) §Done criteria (M16).
+
+### A. "Connect free LLM" button (OAuth PKCE)
+
+Lives in the M15 key area (LLM toggle ON), beside the M14 paste form —
+which stays as the fallback for users who already hold a key from any
+provider. A shared extension key was rejected at design time (decision
+row, `02-decisions.md` M16): the bundle is world-readable, OpenRouter's
+free quota is per-account, and key sharing breaks the provider's terms and
+the per-user consent model. Flow:
+
+1. The panel generates `code_verifier`, its S256 `code_challenge`, and a
+   random `state` (Web Crypto — no bundler needed; base64url via `btoa`),
+   keeping verifier and state in memory only.
+2. `chrome.tabs.create` (no new permissions) to
+   `https://openrouter.ai/auth?callback_url=http://localhost:8000/api/oauth/callback&code_challenge=…&code_challenge_method=S256&state=…&key_label=skill-gap-agent`.
+   The user logs in or signs up — a free OpenRouter account needs no card —
+   and authorizes.
+3. OpenRouter redirects the tab to the local server, which stores the
+   one-time `code` (in-memory, 10-minute TTL) and serves a tiny
+   "Connected — return to the side panel" page. Localhost callbacks on any
+   port are supported; `server.py` is already bound to `127.0.0.1:8000`.
+   The callback is a top-level browser navigation (no CORS involved), and
+   the panel's subsequent polls behave like every other extension →
+   server call under the existing security posture.
+4. The panel polls `GET /api/oauth/pending?state=…` (state must match),
+   then `POST /api/oauth/exchange {code, code_verifier}`. The server
+   exchanges at `POST https://openrouter.ai/api/v1/auth/keys`, receives a
+   **user-owned** key, and stores it in the OS keyring — the same
+   `OPENROUTER_API_KEY` slot as the M14 paste form; the key transits the
+   server's exchange handler only, never `chrome.storage` (extends the M14
+   keyring decision). The panel shows "Connected ✓" plus a "Manage key on
+   OpenRouter" link (key-hash deep link) so the user can inspect or revoke
+   the key at any time.
+5. Failure paths: denial or 10-minute expiry → panel message + retry;
+   state mismatch or exchange failure → rejected, nothing stored.
+
+### B. Free-mode consent gate
+
+- **Toggle "Use free models (costs nothing)"** under the key area
+  (`free_tier` in the run contract; default off). ON reveals the consent
+  block and disables the run button until consented.
+- **Disclaimer copy (verbatim):** "Free models cost nothing, but the
+  providers behind them may log or use your inputs for training. Job
+  descriptions are public — **your resume is not**: it contains personal
+  information (name, contact details, work history) and will be sent to
+  these third-party providers. Your own key's paid endpoints generally do
+  not train on inputs. Consent is required before any free-mode run."
+- Consent is one explicit checkbox (never pre-checked), recorded in
+  `chrome.storage.local` as `{free_consent_at, consent_version}` — a flag
+  and timestamp only, never data. Changing the copy bumps
+  `consent_version` and re-prompts. The run contract sends
+  `free_tier: true, privacy_ack: true` only while consented, and the
+  server refuses without `privacy_ack`
+  ([05-ai-caller.md](05-ai-caller.md) §Free-tier routing) — the gate is
+  not UI-only.
+- **Free-mode run header**: "Free mode — model: <llm_model>" from
+  `GET /api/status`. Quota exhaustion surfaces through the M15 banner
+  with the hint "add your own key or wait for the free quota to reset".
+
 ## Explicit non-goals (M13)
 
 In-page gap marking on the JD text
@@ -230,9 +323,13 @@ stays this panel).
   two-phase pause, captured JDs, no-CORS, M13-before-M9, gap table,
   `reuse_judged`, link fix, JD viewer fix; M14 rows — non-conversational
   model, resume upload transport, extraction-cache hashing, keyring key
-  entry, provider plumbing, bat launcher).
+  entry, provider plumbing, bat launcher; M15 rows — presence-policy
+  home, pre-flight refusal, rule-based mode, provenance labels; M16
+  rows — OAuth connect, shared-key rejection, free-mode consent gate,
+  retry policy, keyring reuse).
 - Milestones: [03-milestones.md](03-milestones.md) M13 (verification record
-  + learnings), M14 (self-serve setup, Built).
+  + learnings), M14 (self-serve setup, Built), M16 (free LLM access,
+  Designed).
 - Deferred: [03-milestones.md](03-milestones.md) §Deferred #12 (in-page gap
   marking), #13 (conversational intake), #14 (native-messaging launcher).
 - Install / load-unpacked instructions: [../extension/README.md](../extension/README.md).

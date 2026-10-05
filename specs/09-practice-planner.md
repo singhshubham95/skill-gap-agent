@@ -57,6 +57,9 @@ still works (verified live 2026-09-28). Network via stdlib `urllib`
 (no new dependency). No pagination / ETag handling in the thin slice.
 Builds on the M8 resume path (resume → skills JSON works); no dependency
 on M9. Flags: `--no-oss` skips; `--no-llm-oss` keeps raw top-5 (offline).
+Provenance labeling of these results (including the LLM-filter fallback
+and cache reuse) is governed by the M15 presence policy —
+[05-ai-caller.md](05-ai-caller.md) §LLM presence policy.
 Verified: `m10_check.py` offline (stub search, cache-reuse, md+html) PASS;
 live seed run `--auto --no-judge --top 2 --no-llm-oss` sourced 5+5 issues
 (Fine-tuning, Streaming data), links HTTP 200, second run zero API calls,

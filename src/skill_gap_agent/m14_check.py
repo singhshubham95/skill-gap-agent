@@ -167,7 +167,8 @@ def check_resume_endpoint() -> None:
             sha_a = hashlib.sha256(RESUME_A.encode("utf-8")).hexdigest()
             sidecar = OUTPUT_DIR / "extracted_skills.sha256"
             assert sidecar.exists(), "hash sidecar missing"
-            assert sidecar.read_text(encoding="utf-8").strip() == sha_a
+            # Sidecar line 1 = source hash, line 2 = extraction source (M15).
+            assert sidecar.read_text(encoding="utf-8").splitlines()[0] == sha_a
             artifact_a = (OUTPUT_DIR / "extracted_skills.json").read_bytes()
 
             # Same resume again -> cache hit (artifact path, no re-extract).
@@ -184,7 +185,7 @@ def check_resume_endpoint() -> None:
                 "extraction did not follow the new resume"
             )
             sha_b = hashlib.sha256(RESUME_B.encode("utf-8")).hexdigest()
-            assert sidecar.read_text(encoding="utf-8").strip() == sha_b
+            assert sidecar.read_text(encoding="utf-8").splitlines()[0] == sha_b
 
             # Status reports what a run will use.
             code, status = _get_json(base, "/api/status")
