@@ -1,0 +1,27 @@
+# Path guard: enforce per-role write rules on every push/PR.
+# Rules live in scripts/path_guard.py (single source of truth).
+# Branch naming is the role signal: plan/*, impl/*, review/*.
+name: agent-gates
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  path-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Enforce role write rules
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="origin/${{ github.event.repository.default_branch }}"
+          fi
+          python scripts/path_guard.py --base "$BASE"

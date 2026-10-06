@@ -1,0 +1,33 @@
+# agent-devkit role -> model configuration.
+# One pipeline = planner -> implementer -> reviewer, sequential within,
+# multiple pipelines in parallel. Models are set at session creation
+# (session-chaining passes them explicitly); edit here to change the stack.
+
+roles:
+  planner:
+    model: xiaomi/mimo-v2.6-pro
+    effort: high
+    fallback: null            # retry-only, no fallback model
+  implementer:
+    model: z-ai/glm-5.3-flash
+    effort: medium
+    fallback: deepseek/deepseek-v4.1-flash
+  reviewer:
+    model: deepseek/deepseek-v4.1-flash
+    effort: low
+    fallback: xiaomi/mimo-v2.6-flash
+
+retry:
+  base_seconds: 2
+  factor: 2
+  cap_seconds: 60
+  max_attempts: 3
+
+locks:
+  stale_minutes: 30           # auto-reclaim, logged to board/BOARD.md
+  claim_timeout_seconds: 3600 # a blocking claim never hangs forever
+
+branches:
+  planner: "plan/{task}"
+  implementer: "impl/{task}"
+  # reviewer is read-only on code; no branch of its own

@@ -19,3 +19,8 @@ output/
 # OS
 .DS_Store
 Thumbs.db
+
+# Agent workflow (transient coordination state)
+board/locks/*
+!board/locks/.gitkeep
+board/lock-events.log
