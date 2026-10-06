@@ -92,7 +92,7 @@ flowchart TB
 | Stage | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
 | S1 reader | Raw text capture (resume + JDs), no AI | `resume.py`, `ingest.py` file loop | [04-reader.md](04-reader.md) | ✅ Built (M2 JSON/TXT; M8 PDF/DOCX) |
-| S2 AI caller | Single LLM door (`judge`/`chat`), keyring secrets | `llm.py`, `secrets.py` | [05-ai-caller.md](05-ai-caller.md) | ✅ Built (M3); M15 presence policy ✅ Built; M16 free-tier + retries 📋 Designed |
+| S2 AI caller | Single LLM door (`judge`/`chat`), keyring secrets | `llm.py`, `secrets.py` | [05-ai-caller.md](05-ai-caller.md) | ✅ Built (M3); M15 presence policy ✅ Built; M16 free-tier + retries ✅ Built (M16) |
 | S3 skill map | Graph store: schema + queries, JSON round-trip | `graph.py` | [06-skill-map.md](06-skill-map.md) | ✅ Built (M1) |
 | S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [07-skill-cleaner.md](07-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
 | S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [08-gap-measurer.md](08-gap-measurer.md) | ✅ Built (M3–M6) |
@@ -104,7 +104,7 @@ flowchart TB
 | Component | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
-| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode 📋 Designed |
+| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16) |
 | C3 intake + validation | Evidence-backed skill depth (non-conversational when it returns) | `intake.py`, `validate.py` (planned) | [13-intake.md](13-intake.md) | ⏸ Deferred / re-scoped (M9 — §Deferred #13) |
 
 ## Pipeline (stage order = data flow)
@@ -166,9 +166,9 @@ link. If you need the mechanics, open the linked file.
   double-click server launcher. M15 (same file §M15, ✅ Built 2026-10-05) adds the
   LLM-mode toggle, keyless-run refusal and the degraded banner — policy
   home: [05-ai-caller.md](05-ai-caller.md) §LLM presence policy. M16
-  (same file §M16, Designed) adds a "Connect free LLM" button (OpenRouter
-  OAuth PKCE → OS keyring), an opt-in free-model mode behind a consent
-  gate, and retry hardening — mechanics home:
+  (same file §M16, ✅ Built 2026-10-06) adds a "Connect free LLM" button
+  (OpenRouter OAuth PKCE → OS keyring), an opt-in free-model mode behind
+  a consent gate, and retry hardening — mechanics home:
   [05-ai-caller.md](05-ai-caller.md) §Free-tier routing.
 - **C3 intake + skill validation (M9, ⏸ Deferred / re-scoped 2026-10-04)** —
   [13-intake.md](13-intake.md). Originally: a tool-calling chat agent

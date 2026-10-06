@@ -1,5 +1,5 @@
 # Verification report — T-M16
-Run: 2026-10-06 12:36:44
+Run: 2026-10-06 12:43:54
 
 ## PASS — `ruff check .`
 
@@ -23,7 +23,7 @@ src\skill_gap_agent\test_m14.py ....                                     [ 33%]
 src\skill_gap_agent\test_m15.py .....                                    [ 57%]
 src\skill_gap_agent\test_m16.py .........                                [100%]
 
-============================= 21 passed in 8.96s ==============================
+============================= 21 passed in 8.86s ==============================
 
 ```
 
@@ -85,6 +85,7 @@ api/jds OK: 16 names match data/jds/
 [m11] &quot;POST /api/run HTTP/1.1&quot; 202 -
 [m11] &quot;POST /api/run HTTP/1.1&quot; 409 -
 api/run OK: 202 start + 409 single-run guard
+[m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
@@ -212,11 +213,11 @@ Graph saved: 13 nodes, 20 edges
 [m11] &quot;GET /plan.html HTTP/1.1&quot; 200 -
 llm labels OK: fresh 'LLM', cache-reuse 'LLM (cached)'
 LLM extraction unavailable (m15: simulated LLM outage); falling back to regex scan.
-Extraction artifact saved: C:\Users\singh\AppData\Local\Temp\m15-resume-nu8qd1hi\extracted_skills.json (source: regex)
+Extraction artifact saved: C:\Users\singh\AppData\Local\Temp\m15-resume-j7ue5tlm\extracted_skills.json (source: regex)
 Resume -> skills JSON: 4 phrases (source: regex)
-Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-nu8qd1hi\extracted_skills.json
+Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-j7ue5tlm\extracted_skills.json
 Resume -> skills JSON: 4 phrases (source: artifact)
-Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-nu8qd1hi\extracted_skills.json
+Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-j7ue5tlm\extracted_skills.json
 Resume -> skills JSON: 4 phrases (source: artifact)
 extraction provenance OK: sidecar line 2 labels cache hits
 M15 CHECK PASS: LLM presence policy — refusal, loud degradation, labels OK.

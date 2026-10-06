@@ -228,7 +228,7 @@ home). This section is the panel surface only. Decision rows:
   [05-ai-caller.md](05-ai-caller.md) §Provenance vocabulary, and the
   plan header states the run's mode.
 
-## M16 — free LLM access (Designed)
+## M16 — free LLM access (✅ Built 2026-10-06)
 
 Mechanics — free-model routing, refusal rules, retry semantics — live in
 [05-ai-caller.md](05-ai-caller.md) §Free-tier routing + §Retry & failure
@@ -298,7 +298,8 @@ the per-user consent model. Flow:
   not UI-only.
 - **Free-mode run header**: "Free mode — model: <llm_model>" from
   `GET /api/status`. Quota exhaustion surfaces through the M15 banner
-  with the hint "add your own key or wait for the free quota to reset".
+  with the reason defined in
+  [05-ai-caller.md](05-ai-caller.md) §Free-tier routing.
 
 ## Explicit non-goals (M13)
 
@@ -334,7 +335,7 @@ stays this panel).
   retry policy, keyring reuse).
 - Milestones: [03-milestones.md](03-milestones.md) M13 (verification record
   + learnings), M14 (self-serve setup, Built), M16 (free LLM access,
-  Designed).
+  Built).
 - Deferred: [03-milestones.md](03-milestones.md) §Deferred #12 (in-page gap
   marking), #13 (conversational intake), #14 (native-messaging launcher).
 - Install / load-unpacked instructions: [../extension/README.md](../extension/README.md).
