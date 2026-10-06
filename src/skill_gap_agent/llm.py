@@ -69,6 +69,9 @@ RETRY_BASE_SECONDS = 2.0
 RETRY_FACTOR = 2.0
 RETRY_CAP_SECONDS = 60.0
 RETRY_ATTEMPTS_FREE = 5
+# Sentinel for "the caller did not choose an attempt budget" — free mode
+# raises the budget to RETRY_ATTEMPTS_FREE only when this is untouched.
+_DEFAULT_MAX_RETRIES = 3
 # Per-touchpoint request timeouts: judge/synthesis/bridge/OSS get 120s;
 # extraction keeps a 30-minute budget until the extraction-latency open
 # item resolves the speed side.
@@ -204,21 +207,42 @@ def _free_model_for(cfg: LLMConfig, rotation: int) -> str:
     return FREE_MODELS[min(rotation, len(FREE_MODELS) - 1)]
 
 
+# M16: the :free ID that last answered a call (moves when the fallback list
+# rotates). Read by the server for GET /api/status (specs/05-ai-caller.md
+# §Free-tier routing — status fields).
+_last_model: str | None = None
+
+
+def last_model() -> str | None:
+    """The model ID that most recently answered an LLM call."""
+    return _last_model
+
+
 def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
     """Single completion -> raw text.
 
     M16 retry policy: transient failures (429/5xx/timeout/connection) retry
     with jittered capped backoff honoring Retry-After; non-transient errors
     (401/403/400/404) fail on the first attempt. In free mode the attempt
-    cap rises to 5 and model-unavailable/exhausted attempts rotate to the
-    next FREE_MODELS entry (one rotation) before the call fails.
+    cap rises to 5 (unless the caller set an explicit budget — judge()'s
+    bounded nesting relies on that) and model-unavailable or transiently
+    exhausted attempts rotate to the next FREE_MODELS entry (one rotation)
+    before the call fails.
     """
     cfg = cfg or LLMConfig()
     client, p = _client(cfg)
     messages = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt}
     ]
-    max_retries = RETRY_ATTEMPTS_FREE if cfg.free_tier else cfg.max_retries
+    # V2: an explicit caller budget (e.g. judge()'s single-attempt nesting)
+    # wins over the free-mode default — the spec's bound is on total
+    # attempts per logical call, so the override must not be re-derived.
+    # The sentinel marks "caller did not choose a budget" (the dataclass
+    # default); free mode then raises it to 5.
+    if cfg.max_retries == _DEFAULT_MAX_RETRIES:
+        max_retries = RETRY_ATTEMPTS_FREE if cfg.free_tier else cfg.max_retries
+    else:
+        max_retries = cfg.max_retries
     last_err: Exception | None = None
     rotation = 0
     for attempt in range(max_retries):
@@ -226,18 +250,21 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
             cfg.model or p["model"]
         )
         try:
-            resp = client.completions.create(
+            resp = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=cfg.temperature,
             )
+            global _last_model
+            _last_model = model
             return resp.choices[0].message.content or ""
         except Exception as e:
             last_err = e
             transient, retry_after = _classify_error(e)
-            if cfg.free_tier and _model_unavailable(e):
+            if cfg.free_tier and (_model_unavailable(e) or not transient):
                 # M16 free-mode fallback: advance to the next FREE_MODELS
-                # entry (one rotation) instead of retrying the same model.
+                # entry (one rotation) on model-unavailable. Non-transient
+                # errors still fail immediately below.
                 rotation += 1
                 if attempt < max_retries - 1:
                     time.sleep(_backoff_seconds(attempt, retry_after))
@@ -246,6 +273,14 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
                 raise LLMNonTransientError(
                     f"LLM call failed (non-transient, not retried): {e}"
                 ) from e
+            # V5: transient exhaustion (429/5xx) rotates the model too —
+            # the spec's fallback trigger is "attempts exhausted via
+            # 429/5xx, or model-unavailable". Rotating on the LAST
+            # transient attempt means the next attempt (if the caller
+            # retries) starts on the next entry; within this call the
+            # rotation advances on every transient failure.
+            if cfg.free_tier:
+                rotation += 1
             if attempt < max_retries - 1:
                 time.sleep(_backoff_seconds(attempt, retry_after))
     raise LLMError(f"LLM call failed after {max_retries} retries: {last_err}")
@@ -286,9 +321,16 @@ def judge(prompt: str, system: str, cfg: LLMConfig | None = None) -> dict[str, A
     max_retries = RETRY_ATTEMPTS_FREE if cfg.free_tier else cfg.max_retries
     last_err: Exception | None = None
     for attempt in range(max_retries):
-        # Each chat() call gets exactly one API attempt; the parse-retry
-        # loop owns the whole budget.
-        raw = chat(prompt, system=system, cfg=_single_attempt(cfg))
+        # Each chat() call gets exactly one API attempt (the explicit
+        # max_retries=1 budget wins over the free-mode default); the
+        # parse-retry loop owns the whole budget. A chat() failure (e.g. a
+        # 429 that exhausted its single attempt) is a parse-retry-able
+        # outcome like unparseable JSON — the loop continues within budget.
+        try:
+            raw = chat(prompt, system=system, cfg=_single_attempt(cfg))
+        except LLMError as e:
+            last_err = e
+            continue
         try:
             result = _extract_json(raw)
             if isinstance(result, dict):
@@ -310,3 +352,10 @@ def free_cfg(cfg: LLMConfig | None = None) -> LLMConfig:
     """M16: a config for free-mode runs — free_tier on, extraction-budget
     timeout preserved when the caller set one."""
     return replace(cfg or LLMConfig(), free_tier=True)
+
+
+def extraction_cfg(cfg: LLMConfig | None = None) -> LLMConfig:
+    """M16: the extraction touchpoint keeps a 30-minute budget (specs/
+    05-ai-caller.md §Retry & failure handling) until the extraction-latency
+    open item resolves the speed side."""
+    return replace(cfg or LLMConfig(), timeout=EXTRACTION_TIMEOUT_SECONDS)

@@ -201,6 +201,17 @@ async function connectFree() {
   try {
     const { verifier, challenge } = await pkcePair();
     const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+    // Register the state with the server first: the callback's state is
+    // validated server-side (specs/12-extension.md §M16 A step 3).
+    const r = await fetch(server + "/api/oauth/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || "HTTP " + r.status);
+    }
     oauthPending = { verifier, state };
     const callback = encodeURIComponent(server + "/api/oauth/callback");
     const url =
@@ -250,6 +261,8 @@ async function exchangeOauth() {
   const { verifier, state } = oauthPending || {};
   if (!verifier || !state) return;
   try {
+    // The panel sends {code_verifier, state} only — the code stays
+    // server-side, paired with the state (specs/12-extension.md §M16 A).
     const r = await fetch(server + "/api/oauth/exchange", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

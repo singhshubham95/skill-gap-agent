@@ -54,6 +54,15 @@ def _get(base: str, path: str) -> tuple[int, bytes]:
         return resp.status, resp.read()
 
 
+def _get_allow_error(base: str, path: str) -> tuple[int, bytes]:
+    """GET that returns the error status instead of raising (for checks
+    that assert on 4xx responses)."""
+    try:
+        return _get(base, path)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
 def _get_json(base: str, path: str) -> tuple[int, dict]:
     code, body = _get(base, path)
     return code, json.loads(body.decode("utf-8"))
@@ -83,7 +92,8 @@ def _start() -> tuple[ThreadingHTTPServer, str]:
             llm_mode=None, degraded_reasons=[],
             free_tier=False, llm_model=None,
         )
-        server._oauth.update(code=None, created_at=None)
+        server._oauth["codes"].clear()
+        server._oauth["expected_states"].clear()
     server._drop_paused()
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
 
@@ -101,23 +111,32 @@ class _FakeStatusError(Exception):
 
 
 def _ok_response(text: str):
-    """Minimal stand-in for a chat.completions response."""
+    """Minimal stand-in for a chat.completions response (message.content)."""
     message = type("M", (), {"content": text})()
     choice = type("C", (), {"message": message})()
     return type("R", (), {"choices": [choice]})()
 
 
 class _StubClient:
-    """Chat client whose create() replays a scripted list of outcomes.
+    """Chat client whose chat.completions.create() replays a scripted list
+    of outcomes, asserting the exact call shape.
 
-    Each create() call consumes one outcome: an Exception is raised, any
-    other value is returned as the response. Every call is recorded.
+    The stub exposes ONLY the chat.completions resource (the real SDK
+    shape): a call to any other resource — e.g. the legacy
+    client.completions — raises AttributeError, so a wrong resource name
+    fails the check instead of silently "working" (review V1 lesson). Each
+    create() call consumes one outcome: an Exception is raised, any other
+    value is returned as the response. Every call is recorded.
     """
 
     def __init__(self, outcomes: list):
         self.outcomes = list(outcomes)
         self.calls: list[dict] = []
-        self.completions = self._Completions(self)
+        self.chat = self._Chat(self)
+
+    class _Chat:
+        def __init__(self, outer: _StubClient):
+            self.completions = outer._Completions(outer)
 
     class _Completions:
         def __init__(self, outer: _StubClient):
@@ -125,6 +144,10 @@ class _StubClient:
 
         def create(self, **kwargs):
             self._outer.calls.append(kwargs)
+            if "messages" not in kwargs or "model" not in kwargs:
+                raise AssertionError(
+                    f"chat.completions.create needs model + messages, got {sorted(kwargs)}"
+                )
             outcome = (
                 self._outer.outcomes.pop(0)
                 if self._outer.outcomes else None
@@ -175,19 +198,33 @@ def check_oauth_connect_flow() -> None:
 
     server._exchange_openrouter_code = fake_exchange
     try:
-        # No callback yet -> nothing pending.
+        # No callback yet -> nothing pending (state not even registered).
         code, body = _get_json(base, "/api/oauth/pending?state=abc")
         assert code == 200 and body.get("pending") is False, (code, body)
 
-        # Step 3: OpenRouter redirects the tab to the callback.
+        # Step 2/3: the panel registers its state, then OpenRouter
+        # redirects the tab to the callback with that state.
+        code, body = _post(base, "/api/oauth/state", {"state": "abc"})
+        assert code == 200 and body.get("ok") is True, (code, body)
         code, raw = _get(base, "/api/oauth/callback?code=one-time-code&state=abc")
         assert code == 200 and b"Connected" in raw, (code, raw[:200])
         code, body = _get_json(base, "/api/oauth/pending?state=abc")
         assert body.get("pending") is True, body
 
-        # Step 4: the panel exchanges; the key lands in the keyring slot.
+        # A callback with an UNKNOWN state is rejected, stores nothing.
+        code, raw = _get_allow_error(base, "/api/oauth/callback?code=evil-code&state=unknown")
+        assert code == 400, (code, raw[:200])
+        code, body = _get_json(base, "/api/oauth/pending?state=unknown")
+        assert body.get("pending") is False, body
+
+        # A callback with a MISSING state is rejected too.
+        code, raw = _get_allow_error(base, "/api/oauth/callback?code=evil-code")
+        assert code == 400, (code, raw[:200])
+
+        # Step 4: the panel exchanges {code_verifier, state} — never the
+        # code; the server pairs the state with its stored code.
         code, body = _post(base, "/api/oauth/exchange", {
-            "code": "one-time-code", "code_verifier": "verifier-xyz",
+            "code_verifier": "verifier-xyz", "state": "abc",
         })
         assert code == 200 and body.get("key_set") is True, (code, body)
         assert stored.get("OPENROUTER_API_KEY") == "sk-or-m16-minted-key", stored
@@ -198,17 +235,17 @@ def check_oauth_connect_flow() -> None:
         code, body = _get_json(base, "/api/oauth/pending?state=abc")
         assert body.get("pending") is False, body
 
-        # A second exchange with the same code is refused, nothing stored.
+        # A second exchange for the same state is refused, nothing stored.
         code, body = _post(base, "/api/oauth/exchange", {
-            "code": "one-time-code", "code_verifier": "verifier-xyz",
+            "code_verifier": "verifier-xyz", "state": "abc",
         })
         assert code == 409, (code, body)
 
-        # A code mismatch is rejected and stores nothing.
-        code, _ = _get(base, "/api/oauth/callback?code=fresh-code&state=abc")
+        # An exchange for a state with no stored code is refused.
+        code, body = _post(base, "/api/oauth/state", {"state": "def"})
         assert code == 200
         code, body = _post(base, "/api/oauth/exchange", {
-            "code": "wrong-code", "code_verifier": "verifier-xyz",
+            "code_verifier": "verifier-xyz", "state": "def",
         })
         assert code == 409, (code, body)
         assert stored.get("OPENROUTER_API_KEY") == "sk-or-m16-minted-key", stored
@@ -218,26 +255,37 @@ def check_oauth_connect_flow() -> None:
             raise RuntimeError("openrouter down")
 
         server._exchange_openrouter_code = failing_exchange
-        code, _ = _get(base, "/api/oauth/callback?code=boom-code&state=abc")
+        code, body = _post(base, "/api/oauth/state", {"state": "abc"})
+        assert code == 200
+        code, _ = _get_allow_error(base, "/api/oauth/callback?code=boom-code&state=abc")
         assert code == 200
         code, body = _post(base, "/api/oauth/exchange", {
-            "code": "boom-code", "code_verifier": "verifier-xyz",
+            "code_verifier": "verifier-xyz", "state": "abc",
         })
         assert code == 502, (code, body)
         assert stored.get("OPENROUTER_API_KEY") == "sk-or-m16-minted-key", stored
 
-        # Panel surface: Connect button + PKCE wiring; no key in storage.
+        # Panel surface: Connect button + PKCE wiring; no key in storage;
+        # the panel sends {code_verifier, state} only — never a code.
         html = (EXTENSION_DIR / "sidepanel.html").read_text(encoding="utf-8")
         assert 'id="connectfree"' in html, "Connect free LLM button missing"
         assert 'id="freetier"' in html and 'id="privacyack"' in html, html
         js = (EXTENSION_DIR / "sidepanel.js").read_text(encoding="utf-8")
         assert "code_challenge" in js and "S256" in js, "PKCE wiring missing"
         assert "/api/oauth/pending" in js and "/api/oauth/exchange" in js, js
+        assert "/api/oauth/state" in js, "panel must register its state"
         assert "chrome.tabs.create" in js, "connect must open a tab"
+        assert re.search(r"code_verifier:\s*verifier", js), (
+            "exchange body must carry code_verifier"
+        )
+        assert not re.search(r"code:\s*(?!verifier)", js.split("exchangeOauth")[1][:600] if "exchangeOauth" in js else ""), (
+            "exchange body must never carry the code"
+        )
         assert not re.search(
             r"chrome\.storage\.local\.set\([^)]*key", js, re.IGNORECASE | re.DOTALL
         ), "key material must never go into chrome.storage"
-        print("oauth connect OK: callback -> pending -> exchange -> keyring slot")
+        print("oauth connect OK: state-validated callback -> pending -> "
+              "exchange {code_verifier, state} -> keyring slot")
     finally:
         secrets_mod.set_secret = real_set
         secrets_mod.get_secret = real_get
@@ -364,6 +412,41 @@ def check_bounded_attempts() -> None:
         _unpatch_client()
 
 
+def check_free_bounded_attempts() -> None:
+    """V2 regression: free-mode judge() must be bounded by 5 total API
+    attempts (the old shape spent 5 per chat() x 5 parse-retries = 25)."""
+    real_sleep = llm_mod.time.sleep
+    llm_mod.time.sleep = lambda s: None
+    try:
+        # Transient 429s everywhere: the worst case for attempt nesting.
+        stub = _patch_client([_FakeStatusError(429)] * 30)
+        try:
+            llm_mod.judge("p", "s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected judge failure")
+        except llm_mod.LLMError:
+            pass
+        assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, (
+            f"free-mode attempts multiplied: {len(stub.calls)} "
+            f"(spec bound: {llm_mod.RETRY_ATTEMPTS_FREE})"
+        )
+        # Unparseable-JSON responses: the parse-retry loop must also stay
+        # within the 5-attempt budget in free mode.
+        stub = _patch_client([_ok_response("garbage")] * 30)
+        try:
+            llm_mod.judge("p", "s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected judge failure")
+        except llm_mod.LLMError:
+            pass
+        assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, (
+            f"free-mode parse-retry attempts multiplied: {len(stub.calls)}"
+        )
+        print(f"free bounded attempts OK: {llm_mod.RETRY_ATTEMPTS_FREE} "
+              "API attempts per logical judge() call in free mode")
+    finally:
+        llm_mod.time.sleep = real_sleep
+        _unpatch_client()
+
+
 def check_model_fallback() -> None:
     real_sleep = llm_mod.time.sleep
     llm_mod.time.sleep = lambda s: None
@@ -384,7 +467,8 @@ def check_model_fallback() -> None:
         assert models[0] != models[1], "fallback must advance the model"
         _unpatch_client()
 
-        # Free-mode attempt cap is 5: five 429s exhaust the budget.
+        # V5 regression: transient exhaustion (429) rotates too — five 429s
+        # must NOT hit the same model five times.
         stub = _patch_client([_FakeStatusError(429)] * 5)
         try:
             llm_mod.chat("p", system="s", cfg=llm_mod.LLMConfig(free_tier=True))
@@ -392,6 +476,22 @@ def check_model_fallback() -> None:
         except llm_mod.LLMError as e:
             assert "5" in str(e), e
         assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, len(stub.calls)
+        models = [c["model"] for c in stub.calls]
+        assert models == llm_mod.FREE_MODELS[:2] + [llm_mod.FREE_MODELS[-1]] * 3, (
+            f"429 exhaustion must rotate models: {models}"
+        )
+        assert len(set(models)) > 1, "429 exhaustion must advance the model"
+        _unpatch_client()
+
+        # 5xx exhaustion rotates as well.
+        stub = _patch_client([_FakeStatusError(503)] * 5)
+        try:
+            llm_mod.chat("p", system="s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected exhaustion")
+        except llm_mod.LLMError:
+            pass
+        models = [c["model"] for c in stub.calls]
+        assert len(set(models)) > 1, f"5xx exhaustion must advance the model: {models}"
         _unpatch_client()
 
         # judge() in free mode is bounded by 5 total attempts too.
@@ -402,7 +502,23 @@ def check_model_fallback() -> None:
         except llm_mod.LLMError:
             pass
         assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, len(stub.calls)
-        print("model fallback OK: :free rotation + 5-attempt free cap")
+        print("model fallback OK: :free rotation on 404 + 429/5xx exhaustion, "
+              "5-attempt free cap")
+    finally:
+        llm_mod.time.sleep = real_sleep
+        _unpatch_client()
+
+
+def check_llm_model_status() -> None:
+    """V4 regression: llm_model is populated once a model answers."""
+    real_sleep = llm_mod.time.sleep
+    llm_mod.time.sleep = lambda s: None
+    try:
+        _patch_client([_ok_response(json.dumps({"ok": True}))])
+        llm_mod.chat("p", system="s", cfg=llm_mod.LLMConfig(free_tier=True))
+        assert llm_mod.last_model() == llm_mod.FREE_MODELS[0], llm_mod.last_model()
+        _unpatch_client()
+        print("llm_model OK: last_model() reports the answering :free ID")
     finally:
         llm_mod.time.sleep = real_sleep
         _unpatch_client()
@@ -413,9 +529,11 @@ def main() -> None:
     check_consent_gate()
     check_retry_classification()
     check_bounded_attempts()
+    check_free_bounded_attempts()
     check_model_fallback()
+    check_llm_model_status()
     print("M16 CHECK PASS: OAuth connect, consent gate, retry classification, "
-          "bounded attempts, model fallback OK.")
+          "bounded attempts (free + paid), model fallback, llm_model status OK.")
 
 
 if __name__ == "__main__":

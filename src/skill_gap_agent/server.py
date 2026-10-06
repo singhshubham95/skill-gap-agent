@@ -60,6 +60,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import llm as llm_mod
 from . import secrets
 from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
 
@@ -96,10 +97,11 @@ _paused: dict = {"app": None, "config": None}
 _resume: dict = {"path": None, "filename": None, "count": None, "source": None}
 
 # M16 OAuth connect (specs/12-extension.md §M16 A): the one-time code
-# OpenRouter redirects back with, kept in memory with a 10-minute TTL.
-# No key material is ever stored here — only the pending code.
+# OpenRouter redirects back with, kept in memory keyed by the panel's
+# state with a 10-minute TTL. No key material is ever stored here — only
+# the pending code, and it never leaves the server.
 OAUTH_CODE_TTL_SECONDS = 600
-_oauth: dict = {"code": None, "created_at": None}
+_oauth: dict = {"codes": {}, "expected_states": set()}
 
 # Human-readable stage labels for the loading screen. Keys are the node
 # names cli.py reports via set_stage_listener(); values are plain words
@@ -236,9 +238,11 @@ def _sync_run_state(app, config: dict, status: str) -> dict:
             if "use_llm" in values:
                 _run["llm_mode"] = "llm" if values.get("use_llm", True) else "rule-based"
             # M16 status fields (specs/05-ai-caller.md §Free-tier routing):
-            # free_tier + llm_model (the :free ID currently answering calls).
+            # free_tier + llm_model (the :free ID currently answering calls —
+            # it moves when the fallback list rotates).
             _run["free_tier"] = bool(values.get("free_tier", False))
-            _run["llm_model"] = values.get("llm_model")
+            if values.get("free_tier"):
+                _run["llm_model"] = llm_mod.last_model()
         return dict(_run)
 
 
@@ -254,15 +258,33 @@ def _describe_skills() -> dict:
     return {"filename": Path(DEFAULT_SKILLS).name, "count": None, "source": "default"}
 
 
-def _oauth_pending_code() -> str | None:
-    """The stored callback code, or None if absent/expired (10-min TTL)."""
+def _oauth_pending_code(state: str) -> str | None:
+    """The code stored for this state, or None if absent/expired (10-min
+    TTL). The code is keyed by the panel's state (specs/12-extension.md
+    §M16 A step 3) and never leaves the server."""
     with _lock:
-        code, created = _oauth["code"], _oauth["created_at"]
+        entry = _oauth["codes"].get(state)
+        if not entry:
+            return None
+        code, created = entry["code"], entry["created_at"]
         if not code or created is None:
             return None
         if time.time() - created > OAUTH_CODE_TTL_SECONDS:
-            _oauth["code"] = None
-            _oauth["created_at"] = None
+            del _oauth["codes"][state]
+            return None
+        return code
+
+
+def _oauth_consume_code(state: str) -> str | None:
+    """Pop the one-time code for this state (used by the exchange)."""
+    with _lock:
+        entry = _oauth["codes"].pop(state, None)
+        if not entry:
+            return None
+        code, created = entry["code"], entry["created_at"]
+        if not code or created is None:
+            return None
+        if time.time() - created > OAUTH_CODE_TTL_SECONDS:
             return None
         return code
 
@@ -531,9 +553,10 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif path == "/api/oauth/callback":
             # M16 A step 3: OpenRouter redirects the tab here with the
-            # one-time code. Top-level navigation (no CORS involved); the
-            # code is stored in memory with a 10-minute TTL and consumed
-            # by the panel's exchange call.
+            # one-time code + the panel's state. The state is validated
+            # server-side: missing or unknown state -> reject, store
+            # nothing. The code is stored keyed by state with a 10-minute
+            # TTL and consumed by the panel's exchange call.
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if query.get("error"):
                 self._send(
@@ -544,21 +567,41 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
             code = (query.get("code") or [""])[0]
-            if not code:
-                self._send(400, b"missing code", "text/plain")
+            state = (query.get("state") or [""])[0]
+            if not code or not state:
+                self._send(400, b"missing code or state", "text/plain")
                 return
+            # The state must have been minted by the panel (it is present
+            # in the pending-poll set) — a callback with an unknown state
+            # stores nothing.
             with _lock:
-                _oauth["code"] = code
-                _oauth["created_at"] = time.time()
+                known = state in _oauth["expected_states"]
+                if known:
+                    _oauth["codes"][state] = {
+                        "code": code, "created_at": time.time(),
+                    }
+            if not known:
+                self._send(
+                    400,
+                    "<h1>Connection not completed</h1><p>Unknown state — "
+                    "return to the side panel and try again.</p>".encode(),
+                    "text/html; charset=utf-8",
+                )
+                return
             self._send(
                 200, OAUTH_CALLBACK_PAGE.encode("utf-8"), "text/html; charset=utf-8"
             )
         elif path == "/api/oauth/pending":
-            # M16 A step 4: the panel polls this with its state; the state
-            # must match what it sent (checked panel-side against its own
-            # in-memory value) — the server only reports whether a code is
-            # waiting, never the code itself.
-            self._json(200, {"pending": _oauth_pending_code() is not None})
+            # M16 A step 4: the panel polls this with its state; a pending
+            # flag is returned only for a matching state — never the code
+            # itself (the code stays server-side).
+            state = (urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query
+            ).get("state") or [""])[0]
+            with _lock:
+                known = state in _oauth["expected_states"]
+            pending = known and _oauth_pending_code(state) is not None
+            self._json(200, {"pending": pending})
         elif path == "/api/gaps":
             gaps = OUTPUT_DIR / "gaps.json"
             if not gaps.exists():
@@ -612,6 +655,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/oauth/exchange":
             self._handle_oauth_exchange(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/oauth/state":
+            self._handle_oauth_state(int(self.headers.get("Content-Length", 0) or 0))
             return
         if path != "/api/run":
             self._send(404, b"not found", "text/plain")
@@ -767,12 +813,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(200, {"ok": True, "key_set": True, "stored": stored})
 
-    def _handle_oauth_exchange(self, length: int) -> None:
-        """M16 A step 4: exchange the OAuth code for a user-owned key and
-        store it in the OPENROUTER_API_KEY keyring slot (same slot as the
-        M14 paste form). The key transits this handler only — never echoed,
-        never chrome.storage. State mismatch or exchange failure -> nothing
-        stored."""
+    def _handle_oauth_state(self, length: int) -> None:
+        """M16 A step 2/3: the panel registers its freshly minted state so
+        the server can validate the callback's state server-side. Only the
+        state value is registered — no secret material."""
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(body, dict):
@@ -780,21 +824,44 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError) as e:
             self._json(400, {"error": f"bad JSON body: {e}"})
             return
-        code = body.get("code")
+        state = body.get("state")
+        if not isinstance(state, str) or not state or len(state) > 256:
+            self._json(400, {"error": "state must be a non-empty string (<=256 chars)"})
+            return
+        with _lock:
+            _oauth["expected_states"].add(state)
+        self._json(200, {"ok": True})
+
+    def _handle_oauth_exchange(self, length: int) -> None:
+        """M16 A step 4: exchange the server-held code (paired with the
+        panel's state) for a user-owned key and store it in the
+        OPENROUTER_API_KEY keyring slot (same slot as the M14 paste form).
+        The panel sends {code_verifier, state} — never the code. The key
+        transits this handler only — never echoed, never chrome.storage.
+        State mismatch or exchange failure -> nothing stored."""
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise TypeError("body must be a JSON object")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return
+        state = body.get("state")
         code_verifier = body.get("code_verifier")
-        if not isinstance(code, str) or not code:
-            self._json(400, {"error": "code must be a non-empty string"})
+        if not isinstance(state, str) or not state:
+            self._json(400, {"error": "state must be a non-empty string"})
             return
         if not isinstance(code_verifier, str) or not code_verifier:
             self._json(400, {"error": "code_verifier must be a non-empty string"})
             return
-        stored_code = _oauth_pending_code()
-        if stored_code is None:
-            self._json(409, {"error": "no pending OAuth code (expired or already used)"})
-            return
-        if code != stored_code:
-            # One-time code: a mismatch consumes nothing but rejects.
-            self._json(409, {"error": "code mismatch"})
+        # State must match a callback the server actually stored (checked
+        # at exchange time, per §M16 A step 5).
+        code = _oauth_consume_code(state)
+        if code is None:
+            self._json(409, {
+                "error": "no pending OAuth code for this state (expired, "
+                "already used, or the callback never completed)",
+            })
             return
         try:
             resp = _exchange_openrouter_code(code, code_verifier)
@@ -811,8 +878,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": f"could not store key: {e}"})
             return
         with _lock:
-            _oauth["code"] = None
-            _oauth["created_at"] = None
+            _oauth["expected_states"].discard(state)
         self._json(200, {"ok": True, "key_set": True, "stored": "keyring"})
 
     def log_message(self, fmt: str, *args: object) -> None:
