@@ -14,6 +14,7 @@ from skill_gap_agent.m16_check import (
     check_llm_model_status,
     check_model_fallback,
     check_oauth_connect_flow,
+    check_quota_reason,
     check_retry_classification,
 )
 
@@ -48,3 +49,7 @@ def test_llm_model_status() -> None:
 
 def test_extraction_timeout() -> None:
     check_extraction_timeout()
+
+
+def test_quota_reason() -> None:
+    check_quota_reason()

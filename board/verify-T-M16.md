@@ -1,5 +1,5 @@
 # Verification report — T-M16
-Run: 2026-10-06 12:31:03
+Run: 2026-10-06 12:36:44
 
 ## PASS — `ruff check .`
 
@@ -16,14 +16,14 @@ platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
 rootdir: C:\Users\singh\Documents\personal\learning\projects\skill-gap-agent
 configfile: pyproject.toml
 plugins: anyio-4.15.1, langsmith-0.12.4
-collected 20 items
+collected 21 items
 
-src\skill_gap_agent\test_m13.py ...                                      [ 15%]
-src\skill_gap_agent\test_m14.py ....                                     [ 35%]
-src\skill_gap_agent\test_m15.py .....                                    [ 60%]
-src\skill_gap_agent\test_m16.py ........                                 [100%]
+src\skill_gap_agent\test_m13.py ...                                      [ 14%]
+src\skill_gap_agent\test_m14.py ....                                     [ 33%]
+src\skill_gap_agent\test_m15.py .....                                    [ 57%]
+src\skill_gap_agent\test_m16.py .........                                [100%]
 
-============================= 20 passed in 9.32s ==============================
+============================= 21 passed in 8.96s ==============================
 
 ```
 
@@ -36,7 +36,7 @@ src\skill_gap_agent\test_m16.py ........                                 [100%]
 ## PASS — `python -m skill_gap_agent.m16_check`
 
 ```
-[m11] &quot;GET /api/oauth/pending?state=abc HTTP/1.1&quot; 200 -
+ 200 -
 [m11] &quot;POST /api/oauth/state HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/oauth/callback?code=one-time-code&amp;state=abc HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/oauth/pending?state=abc HTTP/1.1&quot; 200 -
@@ -61,7 +61,8 @@ free bounded attempts OK: 5 API attempts per logical judge() call in free mode
 model fallback OK: :free rotation on 404 + 429/5xx exhaustion, 5-attempt free cap
 llm_model OK: last_model() reports the answering :free ID
 extraction timeout OK: 30-minute budget on every path, caller provider/free_tier preserved
-M16 CHECK PASS: OAuth connect, consent gate, retry classification, bounded attempts (free + paid), model fallback (chat + judge), llm_model status, extraction timeout OK.
+quota reason OK: free-mode 429 exhaustion surfaces the spec's loud-degradation message; paid mode keeps diagnostics
+M16 CHECK PASS: OAuth connect, consent gate, retry classification, bounded attempts (free + paid), model fallback (chat + judge), llm_model status, extraction timeout, quota reason OK.
 
 ```
 
@@ -211,11 +212,11 @@ Graph saved: 13 nodes, 20 edges
 [m11] &quot;GET /plan.html HTTP/1.1&quot; 200 -
 llm labels OK: fresh 'LLM', cache-reuse 'LLM (cached)'
 LLM extraction unavailable (m15: simulated LLM outage); falling back to regex scan.
-Extraction artifact saved: C:\Users\singh\AppData\Local\Temp\m15-resume-y433av83\extracted_skills.json (source: regex)
+Extraction artifact saved: C:\Users\singh\AppData\Local\Temp\m15-resume-nu8qd1hi\extracted_skills.json (source: regex)
 Resume -> skills JSON: 4 phrases (source: regex)
-Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-y433av83\extracted_skills.json
+Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-nu8qd1hi\extracted_skills.json
 Resume -> skills JSON: 4 phrases (source: artifact)
-Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-y433av83\extracted_skills.json
+Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-nu8qd1hi\extracted_skills.json
 Resume -> skills JSON: 4 phrases (source: artifact)
 extraction provenance OK: sidecar line 2 labels cache hits
 M15 CHECK PASS: LLM presence policy — refusal, loud degradation, labels OK.

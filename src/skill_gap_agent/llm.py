@@ -89,6 +89,20 @@ class LLMNonTransientError(LLMError):
     loud-degradation path — retrying a bad key burns the run's budget."""
 
 
+class LLMQuotaError(LLMError):
+    """M16: a free-mode call that died of 429 quota exhaustion after its
+    retries. Carries the spec's reason text (05-ai-caller.md §Free-tier
+    routing) so M15's banner shows it instead of raw SDK error text."""
+
+
+# M16: the loud-degradation reason for free-mode quota exhaustion —
+# verbatim from specs/05-ai-caller.md §Free-tier routing ("Interaction
+# with M15"). Surface: degraded_reasons -> M15 banner.
+QUOTA_EXHAUSTED_MESSAGE = (
+    "free quota exhausted — add your own key or wait for the reset"
+)
+
+
 # --- M15: LLM presence policy (specs/05-ai-caller.md §LLM presence policy) ---
 # Provenance labels are defined once here; output.py and the extension panel
 # render them. Reused LLM output must never read as freshly generated.
@@ -284,6 +298,10 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
                 rotation += 1
             if attempt < max_retries - 1:
                 time.sleep(_backoff_seconds(attempt, retry_after))
+    if cfg.free_tier and _is_quota_exhausted(last_err):
+        # M16: a 429 that survives the retries degrades loudly through
+        # M15's banner carrying the spec's reason — not raw SDK text (AC4).
+        raise LLMQuotaError(QUOTA_EXHAUSTED_MESSAGE) from last_err
     raise LLMError(f"LLM call failed after {max_retries} retries: {last_err}")
 
 
@@ -295,6 +313,17 @@ def _model_unavailable(e: Exception) -> bool:
         return True
     text = str(e).lower()
     return "unavailable" in text or "not a valid model" in text
+
+
+def _is_quota_exhausted(e: Exception | None) -> bool:
+    """M16: did this failure come from a 429 (the free quota)?"""
+    if e is None:
+        return False
+    if isinstance(e, LLMQuotaError):
+        return True
+    if getattr(e, "status_code", None) == 429:
+        return True
+    return bool(re.search(r"\b429\b", str(e)))
 
 
 def _extract_json(text: str) -> Any:
@@ -361,6 +390,8 @@ def judge(prompt: str, system: str, cfg: LLMConfig | None = None) -> dict[str, A
             last_err = e
             # Nudge the model on retry
             prompt = prompt + "\n\nIMPORTANT: respond with ONLY a valid JSON object."
+    if cfg.free_tier and _is_quota_exhausted(last_err):
+        raise LLMQuotaError(QUOTA_EXHAUSTED_MESSAGE) from last_err
     raise LLMError(f"judge() failed to produce valid JSON: {last_err}")
 
 

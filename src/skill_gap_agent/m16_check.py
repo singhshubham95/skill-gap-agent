@@ -25,6 +25,9 @@ Pins the M16 fixes (specs/05-ai-caller.md §Free-tier routing +
 6. check_extraction_timeout — the extraction touchpoint keeps its
    30-minute budget even when the run passes a caller config
    (provider/free_tier), never the 120s default.
+7. check_quota_reason — a 429 that survives free-mode retries surfaces
+   the spec's loud-degradation reason ('free quota exhausted — add your
+   own key or wait for the reset'); paid mode keeps diagnostic text.
 
 All LLM seams are stubbed at the llm._client boundary; the OpenRouter
 exchange is stubbed at server._exchange_openrouter_code; the keyring is
@@ -504,8 +507,8 @@ def check_model_fallback() -> None:
         try:
             llm_mod.chat("p", system="s", cfg=llm_mod.LLMConfig(free_tier=True))
             raise AssertionError("expected exhaustion")
-        except llm_mod.LLMError as e:
-            assert "5" in str(e), e
+        except llm_mod.LLMQuotaError as e:
+            assert str(e) == llm_mod.QUOTA_EXHAUSTED_MESSAGE, e
         assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, len(stub.calls)
         models = [c["model"] for c in stub.calls]
         assert models == llm_mod.FREE_MODELS[:2] + [llm_mod.FREE_MODELS[-1]] * 3, (
@@ -617,6 +620,46 @@ def check_extraction_timeout() -> None:
         resume_mod.judge = real_judge
 
 
+def check_quota_reason() -> None:
+    """AC4: a 429 that survives free-mode retries degrades loudly with the
+    spec's reason text — M15's banner (degraded_reasons -> error) shows
+    'free quota exhausted — add your own key or wait for the reset', not
+    raw SDK error text."""
+    real_sleep = llm_mod.time.sleep
+    llm_mod.time.sleep = lambda s: None
+    try:
+        stub = _patch_client([_FakeStatusError(429)] * 30)
+        try:
+            llm_mod.judge("p", "s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected quota failure")
+        except llm_mod.LLMQuotaError as e:
+            assert str(e) == llm_mod.QUOTA_EXHAUSTED_MESSAGE, str(e)
+        assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, len(stub.calls)
+        _unpatch_client()
+        stub = _patch_client([_FakeStatusError(429)] * 30)
+        try:
+            llm_mod.chat("p", system="s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected quota failure")
+        except llm_mod.LLMQuotaError as e:
+            assert str(e) == llm_mod.QUOTA_EXHAUSTED_MESSAGE, str(e)
+        _unpatch_client()
+        # Paid mode keeps the diagnostic text — the message is the
+        # free-mode trade ('add your own key'), not a generic rewrite.
+        stub = _patch_client([_FakeStatusError(429)] * 30)
+        try:
+            llm_mod.chat("p", system="s", cfg=llm_mod.LLMConfig())
+            raise AssertionError("expected failure")
+        except llm_mod.LLMError as e:
+            assert not isinstance(e, llm_mod.LLMQuotaError), str(e)
+            assert "retries" in str(e), str(e)
+        _unpatch_client()
+        print("quota reason OK: free-mode 429 exhaustion surfaces the "
+              "spec's loud-degradation message; paid mode keeps diagnostics")
+    finally:
+        llm_mod.time.sleep = real_sleep
+        _unpatch_client()
+
+
 def main() -> None:
     check_oauth_connect_flow()
     check_consent_gate()
@@ -626,9 +669,10 @@ def main() -> None:
     check_model_fallback()
     check_llm_model_status()
     check_extraction_timeout()
+    check_quota_reason()
     print("M16 CHECK PASS: OAuth connect, consent gate, retry classification, "
           "bounded attempts (free + paid), model fallback (chat + judge), "
-          "llm_model status, extraction timeout OK.")
+          "llm_model status, extraction timeout, quota reason OK.")
 
 
 if __name__ == "__main__":
