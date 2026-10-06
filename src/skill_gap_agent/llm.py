@@ -11,8 +11,10 @@ v1 primary: DeepSeek V4 Flash 0731 via OpenRouter (see PROVIDERS below).
 from __future__ import annotations
 
 import json
+import random
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .secrets import get_secret
@@ -45,10 +47,43 @@ class LLMConfig:
     model: str | None = None  # None -> provider default
     temperature: float = 0.2
     max_retries: int = 3
+    # M16 free-tier routing (specs/05-ai-caller.md §Free-tier routing):
+    # run-level opt-in flag; when true every call routes to the next
+    # FREE_MODELS entry instead of the provider default.
+    free_tier: bool = False
+    # M16 per-touchpoint timeout (seconds). None = the caller's default for
+    # its touchpoint (judge/synthesis/bridge/OSS 120s; extraction 1800s).
+    timeout: float | None = None
+
+
+# M16: ordered fallback list of OpenRouter `:free` model IDs. The free set
+# churns, so this is config, not a spec constant — edit here when models
+# appear/vanish (specs/05-ai-caller.md §Free-tier routing).
+FREE_MODELS: list[str] = [
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+]
+
+# M16 retry policy (specs/05-ai-caller.md §Retry & failure handling).
+RETRY_BASE_SECONDS = 2.0
+RETRY_FACTOR = 2.0
+RETRY_CAP_SECONDS = 60.0
+RETRY_ATTEMPTS_FREE = 5
+# Per-touchpoint request timeouts: judge/synthesis/bridge/OSS get 120s;
+# extraction keeps a 30-minute budget until the extraction-latency open
+# item resolves the speed side.
+DEFAULT_TIMEOUT_SECONDS = 120.0
+EXTRACTION_TIMEOUT_SECONDS = 1800.0
 
 
 class LLMError(RuntimeError):
     pass
+
+
+class LLMNonTransientError(LLMError):
+    """M16: an error retrying cannot fix (401/403 bad key, 400 malformed
+    request, 404 unknown model). Fails on the first attempt into M15's
+    loud-degradation path — retrying a bad key burns the run's budget."""
 
 
 # --- M15: LLM presence policy (specs/05-ai-caller.md §LLM presence policy) ---
@@ -107,30 +142,123 @@ def _client(cfg: LLMConfig):
             f"Missing API key: set {p['key_env']} via the OS keyring "
             f"(keyring.set_password('skill-gap-agent', '{p['key_env']}', ...))"
         )
-    return OpenAI(base_url=p["base_url"], api_key=key), p
+    timeout = cfg.timeout if cfg.timeout is not None else DEFAULT_TIMEOUT_SECONDS
+    return OpenAI(base_url=p["base_url"], api_key=key, timeout=timeout), p
+
+
+def _classify_error(e: Exception) -> tuple[bool, float | None]:
+    """M16 classification (specs/05-ai-caller.md §Retry & failure handling).
+
+    Returns (transient, retry_after). Transient: 429, 5xx, timeouts,
+    connection errors. Non-transient: 401/403 bad key, 400 malformed
+    request, 404 unknown model — fail immediately. `retry_after` is the
+    Retry-After header value in seconds when the response carries one.
+    """
+    status = getattr(e, "status_code", None)
+    if status is None:
+        # openai SDK APIStatusError carries .status_code; older shapes may
+        # only expose the message — classify from it.
+        msg = str(e)
+        m = re.search(r"\b(4\d\d|5\d\d)\b", msg)
+        status = int(m.group(1)) if m else None
+    if status is not None:
+        if status in (401, 403, 400, 404):
+            return False, None
+        return True, _retry_after(e)
+    text = str(e).lower()
+    if any(k in text for k in ("timeout", "timed out", "connection", "temporarily")):
+        return True, None
+    # Unknown errors are treated as transient: a flaky free endpoint is the
+    # common case, and a genuinely broken call still fails within budget.
+    return True, None
+
+
+def _retry_after(e: Exception) -> float | None:
+    """Retry-After header (seconds) from an SDK-wrapped HTTP error, if any."""
+    headers = getattr(e, "headers", None) or {}
+    try:
+        value = headers.get("retry-after") or headers.get("Retry-After")
+    except Exception:  # noqa: BLE001 — headers may be a plain dict or None
+        value = None
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_seconds(attempt: int, retry_after: float | None) -> float:
+    """Exponential backoff with full jitter, capped; Retry-After wins when
+    present (min(retry_after, cap)) — OpenRouter sends one on 429."""
+    if retry_after is not None:
+        return min(retry_after, RETRY_CAP_SECONDS)
+    raw = min(RETRY_BASE_SECONDS * (RETRY_FACTOR**attempt), RETRY_CAP_SECONDS)
+    return random.uniform(0, raw)
+
+
+def _free_model_for(cfg: LLMConfig, rotation: int) -> str:
+    """The :free model answering this attempt (one rotation through the list)."""
+    if cfg.model:
+        return cfg.model
+    return FREE_MODELS[min(rotation, len(FREE_MODELS) - 1)]
 
 
 def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
-    """Single completion -> raw text."""
+    """Single completion -> raw text.
+
+    M16 retry policy: transient failures (429/5xx/timeout/connection) retry
+    with jittered capped backoff honoring Retry-After; non-transient errors
+    (401/403/400/404) fail on the first attempt. In free mode the attempt
+    cap rises to 5 and model-unavailable/exhausted attempts rotate to the
+    next FREE_MODELS entry (one rotation) before the call fails.
+    """
     cfg = cfg or LLMConfig()
     client, p = _client(cfg)
-    model = cfg.model or p["model"]
     messages = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt}
     ]
+    max_retries = RETRY_ATTEMPTS_FREE if cfg.free_tier else cfg.max_retries
     last_err: Exception | None = None
-    for attempt in range(cfg.max_retries):
+    rotation = 0
+    for attempt in range(max_retries):
+        model = _free_model_for(cfg, rotation) if cfg.free_tier else (
+            cfg.model or p["model"]
+        )
         try:
-            resp = client.chat.completions.create(
+            resp = client.completions.create(
                 model=model,
                 messages=messages,
                 temperature=cfg.temperature,
             )
             return resp.choices[0].message.content or ""
-        except Exception as e:  # noqa: BLE001 — provider SDK raises many types
+        except Exception as e:
             last_err = e
-            time.sleep(2**attempt)
-    raise LLMError(f"LLM call failed after {cfg.max_retries} retries: {last_err}")
+            transient, retry_after = _classify_error(e)
+            if cfg.free_tier and _model_unavailable(e):
+                # M16 free-mode fallback: advance to the next FREE_MODELS
+                # entry (one rotation) instead of retrying the same model.
+                rotation += 1
+                if attempt < max_retries - 1:
+                    time.sleep(_backoff_seconds(attempt, retry_after))
+                continue
+            if not transient:
+                raise LLMNonTransientError(
+                    f"LLM call failed (non-transient, not retried): {e}"
+                ) from e
+            if attempt < max_retries - 1:
+                time.sleep(_backoff_seconds(attempt, retry_after))
+    raise LLMError(f"LLM call failed after {max_retries} retries: {last_err}")
+
+
+def _model_unavailable(e: Exception) -> bool:
+    """M16 free-mode fallback trigger: the model itself is unavailable
+    (404 unknown model) or the provider says so in the message."""
+    status = getattr(e, "status_code", None)
+    if status == 404:
+        return True
+    text = str(e).lower()
+    return "unavailable" in text or "not a valid model" in text
 
 
 def _extract_json(text: str) -> Any:
@@ -146,11 +274,21 @@ def _extract_json(text: str) -> Any:
 
 
 def judge(prompt: str, system: str, cfg: LLMConfig | None = None) -> dict[str, Any]:
-    """Structured call: prompt -> JSON object. Retries on parse failure."""
+    """Structured call: prompt -> JSON object.
+
+    M16 bounded nesting (specs/05-ai-caller.md §Retry & failure handling):
+    parse-retries re-invoke chat(), which has its own retry loop — the old
+    shape multiplied attempts up to max_retries². The API-attempt budget is
+    now shared: total attempts per logical judge() call are bounded by
+    max_retries (5 in free mode) regardless of parse-retry nesting.
+    """
     cfg = cfg or LLMConfig()
+    max_retries = RETRY_ATTEMPTS_FREE if cfg.free_tier else cfg.max_retries
     last_err: Exception | None = None
-    for attempt in range(cfg.max_retries):
-        raw = chat(prompt, system=system, cfg=cfg)
+    for attempt in range(max_retries):
+        # Each chat() call gets exactly one API attempt; the parse-retry
+        # loop owns the whole budget.
+        raw = chat(prompt, system=system, cfg=_single_attempt(cfg))
         try:
             result = _extract_json(raw)
             if isinstance(result, dict):
@@ -161,3 +299,14 @@ def judge(prompt: str, system: str, cfg: LLMConfig | None = None) -> dict[str, A
             # Nudge the model on retry
             prompt = prompt + "\n\nIMPORTANT: respond with ONLY a valid JSON object."
     raise LLMError(f"judge() failed to produce valid JSON: {last_err}")
+
+
+def _single_attempt(cfg: LLMConfig) -> LLMConfig:
+    """A copy of cfg whose chat() loop spends exactly one attempt."""
+    return replace(cfg, max_retries=1)
+
+
+def free_cfg(cfg: LLMConfig | None = None) -> LLMConfig:
+    """M16: a config for free-mode runs — free_tier on, extraction-budget
+    timeout preserved when the caller set one."""
+    return replace(cfg or LLMConfig(), free_tier=True)

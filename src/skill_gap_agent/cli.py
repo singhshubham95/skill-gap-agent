@@ -104,6 +104,7 @@ class AgentState(TypedDict, total=False):
     jd_files: dict
     provider: str  # M14: llm provider id (openrouter/glm/openai), default openrouter
     use_llm: bool  # M15: run-level LLM mode (false = Rule-based mode)
+    free_tier: bool  # M16: run-level free-mode flag (default off)
     # M15 append-only channels (specs/05-ai-caller.md §LLM presence policy):
     # unjudged targets (target + reason) and per-touchpoint degradation
     # records ({touchpoint, error}) accumulate across nodes and phases.
@@ -112,8 +113,12 @@ class AgentState(TypedDict, total=False):
 
 
 def _llm_cfg(state: AgentState) -> LLMConfig:
-    """LLM config for a run: provider comes from run state (M14)."""
-    return LLMConfig(provider=state.get("provider") or "openrouter")
+    """LLM config for a run: provider comes from run state (M14); free-tier
+    runs (M16) route to the FREE_MODELS list with the raised attempt cap."""
+    cfg = LLMConfig(provider=state.get("provider") or "openrouter")
+    if state.get("free_tier"):
+        cfg.free_tier = True
+    return cfg
 
 
 def ask_via_interrupt(prompt: str) -> str:
