@@ -20,9 +20,9 @@ follow its links rather than relying on details memorized here. Units of
 work are claimed as task work orders in `specs/tasks/`; `docs/` is the
 derived human tier (non-authoritative); `board/` is the shared coordination
 area (locks, issues, verification reports). The development workflow itself
-(planner → implementer → reviewer pipelines) is canonical in the sibling
-`agent-devkit` repo and installed here under `.agent-devkit/` and
-`scripts/`.
+(one end-to-end agent per functional requirement, many agents in parallel)
+is canonical in the sibling `agent-devkit-simplified` repo and installed
+here under `.agent-devkit/` and `scripts/`.
 
 ## Communication with the user
 
@@ -59,38 +59,36 @@ area (locks, issues, verification reports). The development workflow itself
 
 ## Multi-agent development workflow
 
-Development runs as **pipelines**: one per functional requirement,
-initiated by the human (agents never decide what to build). Within a
-pipeline: planner (design + task work order) → implementer (code + tests)
-→ reviewer (spec compliance), strictly sequential. Across pipelines:
-parallel, isolated by git worktrees (`plan/T-*` / `impl/T-*` branches) plus
-file locks on shared files. Roles, templates, and scripts are installed
-from the `agent-devkit` repo; per-role model/effort config lives in
-`.agent-devkit/config/model-chains.yaml`.
+One agent = one functional requirement, end to end (plan → implement →
+test → self-review → close) in a **single session** — there is no role
+split and no session chaining. Across requirements everything runs in
+parallel, isolated by git worktrees (`req/T-*` branches) plus file locks on
+shared files. The human initiates each requirement (agents never decide
+what to build). Roles, templates, and scripts are installed from the
+`agent-devkit-simplified` repo; model/effort config lives in
+`.agent-devkit/config/models.yaml`.
 
 - **Task work orders** (`specs/tasks/T-<id>.md`) are slim: spec-section
   links, out-of-scope boundary, files to touch, per-change acceptance
   criteria, tests, status. Never step-by-step recipes — the spec owns the
   HOW, the task owns the WHERE/WHAT-NOW.
 - **Lock board**: claim before editing shared files
-  (`python scripts/claim.py --role <role> --task T-<id> <paths...>`), and
-  always release (`python scripts/release.py --task T-<id>`) on every exit
-  path. Stale locks (>30 min) auto-reclaim, logged to
+  (`python scripts/claim.py --task T-<id> <paths...>`), and always release
+  (`python scripts/release.py --task T-<id>`) on every exit path. Stale
+  locks (>30 min) auto-reclaim, logged to
   `board/lock-events.log`; `board/BOARD.md` is the generated view.
-- **Write rules per role** (enforced deterministically by
-  `python scripts/path_guard.py` and the `agent-gates` CI workflow — the
-  branch prefixes `plan/`, `impl/`, `review/` are the role signal):
-  planner writes `specs/`, `docs/`, `board/`; implementer writes
-  everything except `specs/` and `docs/`; reviewer writes `board/` only.
-- **Session chaining**: each stage ends by spawning the next stage's
-  session with the task file path, the branch, and that role's model from
-  the devkit config. No central orchestrator.
-- **Issue channel**: implementer/reviewer never fix spec defects — they
-  write `board/issues/` (template in `.agent-devkit/templates/issue.md`)
-  and message the originating planner session (URI recorded in the task
-  file). The planner resolves the issue in the spec and messages back.
-- **Human docs** (`docs/`): derived, short, non-authoritative. The planner
-  writes the changelog line at the end of each pipeline.
+- **Scope enforcement** (deterministic, not prompt-based — enforced by
+  `python scripts/path_guard.py` and the `agent-gates` CI workflow): a
+  `req/T-*` branch may change only its task's "Files to touch", plus
+  `board/`, the task file, and `docs/changelog.md`. To widen scope, update
+  the task file first (and claim the new files). Human branches (no `req/`
+  prefix) are not bound.
+- **Issue channel**: blocked on shared state, or found a spec defect you
+  must not unilaterally change? Write `board/issues/` (template in
+  `.agent-devkit/templates/issue.md`), record what you did meanwhile, and
+  continue (non-blocking) or stop on that part (blocking).
+- **Human docs** (`docs/`): derived, short, non-authoritative. The agent
+  writes the changelog line at task close.
 
 ## Spec evolution rules
 

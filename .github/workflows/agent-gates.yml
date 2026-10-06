@@ -1,6 +1,7 @@
-# Path guard: enforce per-role write rules on every push/PR.
-# Rules live in scripts/path_guard.py (single source of truth).
-# Branch naming is the role signal: plan/*, impl/*, review/*.
+"""Path guard: enforce task scope rules on every push/PR.
+Rules live in scripts/path_guard.py (single source of truth).
+Branch naming is the unit-of-work signal: req/*.
+"""
 name: agent-gates
 
 on:
@@ -17,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Enforce role write rules
+      - name: Enforce task scope rules
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="origin/${{ github.base_ref }}"

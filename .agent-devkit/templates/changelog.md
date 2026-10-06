@@ -5,6 +5,6 @@
 
 Format: `- T-<id>: <what changed, one or two lines> (spec: <link>)`
 
-Lines are added by the planner at the end of each pipeline, after reviewer
-approval. Milestone history that predates this file stays in the milestones
-log — not duplicated here.
+Lines are added by the agent at the end of each task, after self-review and
+verification pass. Milestone history that predates this file stays in the
+milestones log — not duplicated here.

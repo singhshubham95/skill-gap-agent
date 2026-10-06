@@ -1,10 +1,12 @@
 # Task template — a work order, not a recipe
 
 <!--
-Rules (from the workflow design, see agent-devkit README):
+Rules (see agent-devkit-simplified README):
 - The component spec owns the HOW. Never restate design here — link to it.
 - This file owns the WHERE/WHAT-NOW: scope boundary, claimed files,
   per-change acceptance, tests, status.
+- "Files to touch" is machine-read by scripts/path_guard.py — it is the
+  deterministic scope boundary. List every path the diff may change.
 - Keep it slim: 10-15 lines of substance. If it grows, the spec is too thin
   or the task is too big — fix the right one.
 -->
@@ -12,8 +14,7 @@ Rules (from the workflow design, see agent-devkit README):
 # T-<id>: <short goal, one line>
 
 - **Status:** planned | in-progress | in-review | done | blocked
-- **Pipeline:** plan/T-<id> → impl/T-<id> → reviewer
-- **Planner session:** <session URI — where downstream stages route issues>
+- **Agent session:** <session URI — where other agents / the human reach you>
 - **Blocked by:** <none | T-xxx | board/issues/...>
 
 ## Spec sections this task applies (the HOW lives there)
@@ -23,7 +24,8 @@ Rules (from the workflow design, see agent-devkit README):
 
 ## Out of scope for this task
 
-- <explicit exclusions so the implementer cannot gold-plate or guess>
+- <explicit exclusions so parallel work is not disturbed and you cannot
+  gold-plate or guess>
 
 ## Files to touch (the lock board claims exactly these)
 
@@ -32,7 +34,7 @@ Rules (from the workflow design, see agent-devkit README):
 
 ## Acceptance criteria (checkable, per-change)
 
-1. <criterion the reviewer can verify against the diff and the tests>
+1. <criterion you can verify against the diff and the tests>
 2. <...>
 
 ## Tests to add / run
@@ -42,6 +44,8 @@ Rules (from the workflow design, see agent-devkit README):
 
 ## Completion protocol
 
-1. Implementer: run tests, fill results below, release locks.
-2. Reviewer: check the diff against the acceptance criteria above only.
-3. On approval, planner writes the changelog line (docs/changelog.md).
+1. Implement, run `python scripts/verify.py --task T-<id>` until green.
+2. Self-review the diff against the acceptance criteria above (checklist,
+   not taste).
+3. Write the changelog line (docs/changelog.md), mark this done, release
+   locks (`python scripts/release.py --task T-<id>`).

@@ -1,7 +1,11 @@
-"""Shared lock-board helpers for the agent-devkit (copied into each project).
+"""Shared lock-board helpers for agent-devkit-simplified (copied into each project).
 
 Lock model: board/locks/<sha1-of-normalized-path>/owner.json.
 `mkdir` is atomic on all filesystems, so it is the claim primitive.
+
+There is one role now (an end-to-end agent), so an owner is just:
+task + path + agent. The lock board is the collision-avoidance mechanism
+that lets many agents work in parallel without stepping on each other.
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ from pathlib import Path
 LOCKS_DIR = Path("board/locks")
 BOARD_MD = Path("board/BOARD.md")
 EVENTS_LOG = Path("board/lock-events.log")
-STALE_MINUTES = 30  # auto-reclaim; matches config/model-chains.yaml
+STALE_MINUTES = 30  # auto-reclaim; matches config/models.yaml
 
 
 def repo_root() -> Path:
@@ -81,17 +85,16 @@ def regenerate_board() -> None:
             age_min = (time.time() - float(owner.get("since", 0))) / 60
             stale = "STALE" if age_min > STALE_MINUTES else ""
             rows.append(
-                f"| {owner.get('role', '?')} | {owner.get('task', '?')} "
-                f"| {owner.get('path', '?')} | {owner.get('agent', '?')} "
-                f"| {age_min:.0f}m | {stale} |"
+                f"| {owner.get('task', '?')} | {owner.get('path', '?')} "
+                f"| {owner.get('agent', '?')} | {age_min:.0f}m | {stale} |"
             )
     lines = [
         "# Lock board (generated view — source of truth is board/locks/)",
         "",
         f"Updated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
-        "| Role | Task | Path | Agent | Age | Stale |",
-        "|---|---|---|---|---|---|",
+        "| Task | Path | Agent | Age | Stale |",
+        "|---|---|---|---|---|",
         *rows,
         "",
         "Stale locks (>30 min) are auto-reclaimed on the next claim attempt;",

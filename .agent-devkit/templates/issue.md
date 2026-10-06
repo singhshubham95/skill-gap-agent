@@ -1,26 +1,30 @@
 # I-<id>: <short title>
 
 - **Task:** T-<id>
-- **Raised by:** implementer | reviewer
-- **Spec file / section:** [NN-component.md](../../specs/NN-component.md) §Section
+- **Raised by:** <task id / agent session>
+- **Concerns:** <file, spec section, or shared state involved>
 - **Blocking:** yes | no
 - **Status:** open | resolved
 - **Raised:** <date>
 
-## What's wrong or missing
+## What's wrong, missing, or conflicting
 
-<Exactly what the spec leaves ambiguous, wrong, or incomplete. Quote it.>
+<Exactly what is ambiguous, wrong, or blocking — e.g. another task holds a
+lock you need, a shared spec section is wrong, a requirement is unclear.
+Quote or point at it.>
 
 ## Proposed resolution
 
-<One concrete option. The planner decides — do not edit the spec yourself.>
+<One concrete option. If this touches shared state another agent owns, the
+human or the owning task decides — do not unilaterally rewrite it.>
 
 ## Assumption taken while waiting (non-blocking only)
 
-<What the implementer did meanwhile, so the reviewer can check it.>
+<What you did meanwhile, so the review and other agents can check it.>
 
 ---
 
-## Resolution (planner fills)
+## Resolution
 
-<What was decided, and which spec section was updated to prevent recurrence.>
+<What was decided, and what changed (spec section, scope, or coordination)
+to prevent recurrence.>

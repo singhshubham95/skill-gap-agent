@@ -2,9 +2,9 @@
 
 Usage: python scripts/verify.py --task T-16 [--checks "ruff check .,pytest"]
 
-The test suite is the real gate of the pipeline: reviewers check spec
-compliance, this script checks mechanical correctness. Exit code is
-non-zero if any check fails.
+The test suite is the real gate: the agent reviews its own work against the
+spec, but this script checks mechanical correctness without bias. Exit code
+is non-zero if any check fails.
 """
 from __future__ import annotations
 

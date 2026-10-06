@@ -1,11 +1,14 @@
 """Claim file locks for a task. Atomic, deadlock-free, blocking-with-timeout.
 
-Usage: python scripts/claim.py --role planner --task T-16 path [path...]
+Usage: python scripts/claim.py --task T-16 path [path...]
 
 - Paths are claimed in sorted hash order (prevents deadlock between agents).
 - Re-claiming a path already owned by the SAME task is idempotent.
 - Locks older than --stale-min (default 30) are auto-reclaimed and logged.
 - On timeout or failure, anything acquired in this call is released.
+
+Claim every shared file (specs/, docs/, configs) BEFORE editing it, so that
+parallel agents working on other functional requirements never co-edit it.
 """
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ from locks_common import (
 )
 
 
-def claim_one(path: str, role: str, task: str, agent: str,
+def claim_one(path: str, task: str, agent: str,
               stale_min: int, timeout: float, poll: float = 5.0) -> bool:
     d = lock_dir(path)
     deadline = time.time() + timeout
@@ -34,14 +37,13 @@ def claim_one(path: str, role: str, task: str, agent: str,
             d.mkdir(parents=True, exist_ok=False)
         except FileExistsError:
             owner = read_owner(d) or {}
-            if owner.get("task") == task and owner.get("role") == role:
+            if owner.get("task") == task:
                 return True  # idempotent re-claim
             if is_stale(owner, stale_min):
                 log_event(f"RECLAIM stale lock on {path} "
-                          f"(was {owner.get('role')}/{owner.get('task')}) "
-                          f"-> {role}/{task}")
+                          f"(was {owner.get('task')}) -> {task}")
                 write_owner(d, {
-                    "role": role, "task": task, "path": normalize(path),
+                    "task": task, "path": normalize(path),
                     "agent": agent, "since": time.time(),
                 })
                 return True
@@ -50,16 +52,15 @@ def claim_one(path: str, role: str, task: str, agent: str,
             time.sleep(poll)
         else:
             write_owner(d, {
-                "role": role, "task": task, "path": normalize(path),
+                "task": task, "path": normalize(path),
                 "agent": agent, "since": time.time(),
             })
-            log_event(f"CLAIM {role}/{task} -> {path}")
+            log_event(f"CLAIM {task} -> {path}")
             return True
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--role", required=True)
     ap.add_argument("--task", required=True)
     ap.add_argument("--agent", default=default_agent())
     ap.add_argument("--stale-min", type=int, default=30)
@@ -70,8 +71,7 @@ def main() -> int:
 
     acquired: list[str] = []
     for path in sorted(args.paths, key=normalize):  # consistent order
-        if claim_one(path, args.role, args.task, args.agent,
-                     args.stale_min, args.timeout):
+        if claim_one(path, args.task, args.agent, args.stale_min, args.timeout):
             acquired.append(path)
         else:
             for p in acquired:  # release everything taken in this call
@@ -87,7 +87,7 @@ def main() -> int:
                   f"lock(s) from this call", file=sys.stderr)
             return 1
     regenerate_board()
-    print(f"claimed {len(acquired)} file(s) for {args.role}/{args.task}")
+    print(f"claimed {len(acquired)} file(s) for {args.task}")
     return 0
 
 

@@ -1,4 +1,4 @@
-"""Install the agent-devkit into a project.
+"""Install agent-devkit-simplified into a project.
 
 Usage: python init.py --target /path/to/project
 
@@ -6,7 +6,7 @@ Copies:
   scripts/*.py              -> <target>/scripts/
   workflows/agent-gates.yml -> <target>/.github/workflows/
   roles/, templates/, config/ -> <target>/.agent-devkit/
-and scaffolds board/locks/, board/issues/, docs/ if missing.
+and scaffolds board/locks/, board/issues/, docs/, specs/tasks/ if missing.
 
 Safe to re-run: it overwrites devkit files (review the diff if the devkit
 version changed; projects pin their devkit version in devkit.version).
@@ -50,11 +50,16 @@ def main() -> int:
                  target / "docs", target / "specs" / "tasks"):
         keep.mkdir(parents=True, exist_ok=True)
         (keep / ".gitkeep").touch()
+    # Seed the human-tier docs from templates if missing.
+    for doc in ("overview.md", "changelog.md"):
+        dst = target / "docs" / doc
+        if not dst.exists():
+            shutil.copy2(DEVKIT / "templates" / doc, dst)
     print(f"installed {n} devkit files into {target}")
     print("next steps:")
     print("  1. commit the new files")
     print("  2. record the devkit version: git -C", DEVKIT, "rev-parse HEAD")
-    print("  3. read .agent-devkit/roles/ before starting a pipeline")
+    print("  3. read .agent-devkit/roles/agent.md before starting a task")
     return 0
 
 

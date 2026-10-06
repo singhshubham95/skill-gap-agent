@@ -4,7 +4,8 @@ Usage:
   python scripts/release.py --task T-16              # release all of T-16
   python scripts/release.py --task T-16 path [path]  # release specific paths
 
-A task may only release its own locks. Always release on every exit path.
+A task may only release its own locks. Always release on every exit path —
+including failure — so a crashed agent never wedges a file for others.
 """
 from __future__ import annotations
 
