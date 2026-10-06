@@ -261,10 +261,11 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
         except Exception as e:
             last_err = e
             transient, retry_after = _classify_error(e)
-            if cfg.free_tier and (_model_unavailable(e) or not transient):
+            if cfg.free_tier and _model_unavailable(e):
                 # M16 free-mode fallback: advance to the next FREE_MODELS
-                # entry (one rotation) on model-unavailable. Non-transient
-                # errors still fail immediately below.
+                # entry (one rotation) on model-unavailable (the free set
+                # churns; a stale entry must not kill the call). Every other
+                # non-transient error falls through and fails immediately.
                 rotation += 1
                 if attempt < max_retries - 1:
                     time.sleep(_backoff_seconds(attempt, retry_after))
@@ -320,16 +321,36 @@ def judge(prompt: str, system: str, cfg: LLMConfig | None = None) -> dict[str, A
     cfg = cfg or LLMConfig()
     max_retries = RETRY_ATTEMPTS_FREE if cfg.free_tier else cfg.max_retries
     last_err: Exception | None = None
+    # V5 fix: the free-mode rotation lives here, not inside chat() — the
+    # nested single-attempt chat() calls of one logical judge() call must
+    # share it, or every attempt restarts at FREE_MODELS[0] and the
+    # fallback list never advances. It advances only on chat() failures
+    # (model-unavailable or exhausted transient attempts — the spec's
+    # fallback triggers), never on parse retries of a response that came
+    # back fine.
+    rotation = 0
     for attempt in range(max_retries):
         # Each chat() call gets exactly one API attempt (the explicit
         # max_retries=1 budget wins over the free-mode default); the
         # parse-retry loop owns the whole budget. A chat() failure (e.g. a
         # 429 that exhausted its single attempt) is a parse-retry-able
         # outcome like unparseable JSON — the loop continues within budget.
+        attempt_cfg = _single_attempt(cfg)
+        if cfg.free_tier:
+            attempt_cfg = replace(
+                attempt_cfg, model=_free_model_for(cfg, rotation))
         try:
-            raw = chat(prompt, system=system, cfg=_single_attempt(cfg))
+            raw = chat(prompt, system=system, cfg=attempt_cfg)
+        except LLMNonTransientError:
+            # Non-transient (bad key, malformed request) must fail on the
+            # first attempt in every mode — retrying burns the budget the
+            # loud-degradation layer above would use (spec: §Retry &
+            # failure handling "Classify before retrying").
+            raise
         except LLMError as e:
             last_err = e
+            if cfg.free_tier:
+                rotation += 1
             continue
         try:
             result = _extract_json(raw)
@@ -346,12 +367,6 @@ def judge(prompt: str, system: str, cfg: LLMConfig | None = None) -> dict[str, A
 def _single_attempt(cfg: LLMConfig) -> LLMConfig:
     """A copy of cfg whose chat() loop spends exactly one attempt."""
     return replace(cfg, max_retries=1)
-
-
-def free_cfg(cfg: LLMConfig | None = None) -> LLMConfig:
-    """M16: a config for free-mode runs — free_tier on, extraction-budget
-    timeout preserved when the caller set one."""
-    return replace(cfg or LLMConfig(), free_tier=True)
 
 
 def extraction_cfg(cfg: LLMConfig | None = None) -> LLMConfig:

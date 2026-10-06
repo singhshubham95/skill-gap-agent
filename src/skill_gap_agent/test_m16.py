@@ -9,6 +9,7 @@ boundary, OpenRouter exchange stubbed, keyring stubbed, localhost only).
 from skill_gap_agent.m16_check import (
     check_bounded_attempts,
     check_consent_gate,
+    check_extraction_timeout,
     check_free_bounded_attempts,
     check_llm_model_status,
     check_model_fallback,
@@ -43,3 +44,7 @@ def test_model_fallback() -> None:
 
 def test_llm_model_status() -> None:
     check_llm_model_status()
+
+
+def test_extraction_timeout() -> None:
+    check_extraction_timeout()

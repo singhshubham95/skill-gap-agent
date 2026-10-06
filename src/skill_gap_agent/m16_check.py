@@ -14,12 +14,17 @@ Pins the M16 fixes (specs/05-ai-caller.md §Free-tier routing +
    unchecked checkbox and a versioned consent flag.
 3. check_retry_classification — transient errors (429/5xx/timeout) retry
    within the attempt budget and honor Retry-After; non-transient errors
-   (401/400/404) fail on the first attempt.
+   (401/400/404) fail on the first attempt, in paid AND free mode.
 4. check_bounded_attempts — total API attempts per logical judge() call
    are bounded by max_retries even when every response is unparseable
    (the old judge×chat nesting multiplied attempts).
 5. check_model_fallback — free mode advances to the next FREE_MODELS
-   entry on model-unavailable, and the attempt cap rises to 5.
+   entry on model-unavailable or transient exhaustion — including through
+   judge()'s nested single-attempt calls (the production path) — and the
+   attempt cap rises to 5.
+6. check_extraction_timeout — the extraction touchpoint keeps its
+   30-minute budget even when the run passes a caller config
+   (provider/free_tier), never the 120s default.
 
 All LLM seams are stubbed at the llm._client boundary; the OpenRouter
 exchange is stubbed at server._exchange_openrouter_code; the keyring is
@@ -384,8 +389,34 @@ def check_retry_classification() -> None:
                 pass
             assert len(stub.calls) == 1, (status, len(stub.calls))
             _unpatch_client()
+
+        # Free mode: the fallback only triggers on model-unavailable — a
+        # non-transient 401 must still fail on the FIRST attempt.
+        stub = _patch_client([_FakeStatusError(401)])
+        sleeps.clear()
+        try:
+            llm_mod.chat("p", system="s",
+                         cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected non-transient failure in free mode")
+        except llm_mod.LLMNonTransientError:
+            pass
+        assert len(stub.calls) == 1, len(stub.calls)
+        assert not sleeps, sleeps
+        _unpatch_client()
+
+        # ... and judge()'s parse-retry loop must not retry it either.
+        stub = _patch_client([_FakeStatusError(401)])
+        sleeps.clear()
+        try:
+            llm_mod.judge("p", "s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected non-transient failure in free mode")
+        except llm_mod.LLMNonTransientError:
+            pass
+        assert len(stub.calls) == 1, len(stub.calls)
+        assert not sleeps, sleeps
+        _unpatch_client()
         print("retry classification OK: transient retries + Retry-After, "
-              "non-transient fails first attempt")
+              "non-transient fails first attempt (paid + free, chat + judge)")
     finally:
         llm_mod.time.sleep = real_sleep
 
@@ -494,6 +525,35 @@ def check_model_fallback() -> None:
         assert len(set(models)) > 1, f"5xx exhaustion must advance the model: {models}"
         _unpatch_client()
 
+        # judge()'s nested single-attempt chat() calls must SHARE the
+        # rotation: without that, every attempt restarts at FREE_MODELS[0]
+        # and the fallback never advances on the production path (every
+        # touchpoint calls judge(), not chat()).
+        stub = _patch_client([_FakeStatusError(404)] * 10)
+        try:
+            llm_mod.judge("p", "s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected judge failure")
+        except llm_mod.LLMError:
+            pass
+        assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, len(stub.calls)
+        models = [c["model"] for c in stub.calls]
+        assert models[0] == llm_mod.FREE_MODELS[0], models
+        assert len(set(models)) > 1, (
+            f"judge() fallback must advance the model: {models}")
+        _unpatch_client()
+
+        stub = _patch_client([_FakeStatusError(429)] * 10)
+        try:
+            llm_mod.judge("p", "s", cfg=llm_mod.LLMConfig(free_tier=True))
+            raise AssertionError("expected judge failure")
+        except llm_mod.LLMError:
+            pass
+        assert len(stub.calls) == llm_mod.RETRY_ATTEMPTS_FREE, len(stub.calls)
+        models = [c["model"] for c in stub.calls]
+        assert len(set(models)) > 1, (
+            f"429 exhaustion through judge() must advance the model: {models}")
+        _unpatch_client()
+
         # judge() in free mode is bounded by 5 total attempts too.
         stub = _patch_client([_ok_response("garbage")] * 10)
         try:
@@ -524,6 +584,39 @@ def check_llm_model_status() -> None:
         _unpatch_client()
 
 
+def check_extraction_timeout() -> None:
+    """V6 regression: the extraction touchpoint keeps its 30-minute budget
+    even when the run passes a caller config (provider/free_tier) — the old
+    wiring only applied it on the no-config path, so server/CLI extraction
+    ran with the 120s default and could never finish (~19 min per call)."""
+    from . import resume as resume_mod
+
+    captured: list = []
+    real_judge = resume_mod.judge
+
+    def fake_judge(prompt, system="", cfg=None):
+        captured.append(cfg)
+        return {"skills": {"misc": {"tools": ["git"]}}}
+
+    resume_mod.judge = fake_judge
+    try:
+        resume_mod.extract_skills_llm(
+            "resume text",
+            cfg=llm_mod.LLMConfig(provider="openrouter", free_tier=True),
+        )
+        resume_mod.extract_skills_llm("resume text")
+        assert len(captured) == 2, captured
+        assert [c.timeout for c in captured] == [
+            llm_mod.EXTRACTION_TIMEOUT_SECONDS] * 2, [
+                c.timeout for c in captured]
+        assert captured[0].free_tier is True, (
+            "caller config must be preserved (free_tier)")
+        print("extraction timeout OK: 30-minute budget on every path, "
+              "caller provider/free_tier preserved")
+    finally:
+        resume_mod.judge = real_judge
+
+
 def main() -> None:
     check_oauth_connect_flow()
     check_consent_gate()
@@ -532,8 +625,10 @@ def main() -> None:
     check_free_bounded_attempts()
     check_model_fallback()
     check_llm_model_status()
+    check_extraction_timeout()
     print("M16 CHECK PASS: OAuth connect, consent gate, retry classification, "
-          "bounded attempts (free + paid), model fallback, llm_model status OK.")
+          "bounded attempts (free + paid), model fallback (chat + judge), "
+          "llm_model status, extraction timeout OK.")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 # Verification report — T-M16
-Run: 2026-10-06 09:24:32
+Run: 2026-10-06 12:31:03
 
 ## PASS — `ruff check .`
 
@@ -13,17 +13,17 @@ All checks passed!
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
-rootdir: C:\Users\singh\Documents\personal\learning\projects\skill-gap-agent-worktrees\impl-T-M16
+rootdir: C:\Users\singh\Documents\personal\learning\projects\skill-gap-agent
 configfile: pyproject.toml
-plugins: anyio-4.15.1, langsmith-0.14.4
-collected 19 items
+plugins: anyio-4.15.1, langsmith-0.12.4
+collected 20 items
 
 src\skill_gap_agent\test_m13.py ...                                      [ 15%]
-src\skill_gap_agent\test_m14.py ....                                     [ 36%]
-src\skill_gap_agent\test_m15.py .....                                    [ 63%]
-src\skill_gap_agent\test_m16.py .......                                  [100%]
+src\skill_gap_agent\test_m14.py ....                                     [ 35%]
+src\skill_gap_agent\test_m15.py .....                                    [ 60%]
+src\skill_gap_agent\test_m16.py ........                                 [100%]
 
-============================= 19 passed in 9.10s ==============================
+============================= 20 passed in 9.32s ==============================
 
 ```
 
@@ -55,12 +55,13 @@ oauth connect OK: state-validated callback -> pending -> exchange {code_verifier
 [m11] &quot;POST /api/run HTTP/1.1&quot; 409 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 consent gate OK: 409 without ack, verbatim disclaimer, versioned flag
-retry classification OK: transient retries + Retry-After, non-transient fails first attempt
+retry classification OK: transient retries + Retry-After, non-transient fails first attempt (paid + free, chat + judge)
 bounded attempts OK: 3 API attempts for max_retries=3
 free bounded attempts OK: 5 API attempts per logical judge() call in free mode
 model fallback OK: :free rotation on 404 + 429/5xx exhaustion, 5-attempt free cap
 llm_model OK: last_model() reports the answering :free ID
-M16 CHECK PASS: OAuth connect, consent gate, retry classification, bounded attempts (free + paid), model fallback, llm_model status OK.
+extraction timeout OK: 30-minute budget on every path, caller provider/free_tier preserved
+M16 CHECK PASS: OAuth connect, consent gate, retry classification, bounded attempts (free + paid), model fallback (chat + judge), llm_model status, extraction timeout OK.
 
 ```
 
@@ -83,7 +84,6 @@ api/jds OK: 16 names match data/jds/
 [m11] &quot;POST /api/run HTTP/1.1&quot; 202 -
 [m11] &quot;POST /api/run HTTP/1.1&quot; 409 -
 api/run OK: 202 start + 409 single-run guard
-[m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
 [m11] &quot;GET /api/status HTTP/1.1&quot; 200 -
@@ -211,11 +211,11 @@ Graph saved: 13 nodes, 20 edges
 [m11] &quot;GET /plan.html HTTP/1.1&quot; 200 -
 llm labels OK: fresh 'LLM', cache-reuse 'LLM (cached)'
 LLM extraction unavailable (m15: simulated LLM outage); falling back to regex scan.
-Extraction artifact saved: C:\Users\singh\AppData\Local\Temp\m15-resume-9_gdvdwh\extracted_skills.json (source: regex)
+Extraction artifact saved: C:\Users\singh\AppData\Local\Temp\m15-resume-y433av83\extracted_skills.json (source: regex)
 Resume -> skills JSON: 4 phrases (source: regex)
-Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-9_gdvdwh\extracted_skills.json
+Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-y433av83\extracted_skills.json
 Resume -> skills JSON: 4 phrases (source: artifact)
-Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-9_gdvdwh\extracted_skills.json
+Reusing extraction artifact: C:\Users\singh\AppData\Local\Temp\m15-resume-y433av83\extracted_skills.json
 Resume -> skills JSON: 4 phrases (source: artifact)
 extraction provenance OK: sidecar line 2 labels cache hits
 M15 CHECK PASS: LLM presence policy — refusal, loud degradation, labels OK.
