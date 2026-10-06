@@ -43,4 +43,9 @@ task file + issue file paths and the planner role file.
 
 Rules: the spawn call sets the **model explicitly** (never inherits); every
 message that changes state also leaves a durable file record in `board/`
-(the message is the doorbell, the file is the record).
+(the message is the doorbell, the file is the record). **Branch naming is
+the CI role signal** (`plan/`, `impl/`, `review/` prefixes). Harnesses that
+auto-create their own worktree/branch (common) must be aligned before
+coding: rename onto the role branch
+(`git branch -m <auto-name> impl/T-<id>`) or merge/rename at the end so
+the final diff lands on the role branch.
