@@ -4,14 +4,15 @@ The top-down view of the Skill-Gap Agent: what the system is, its layers and
 components, where each lives in code, and how data flows through. This page
 is the **map and router** — high-level detail only. Per-stage mechanics live
 in S1–S7 (`04-reader.md` through `10-flow-runner.md`); non-stage components
-own their own files (`11-sweep.md`, `12-extension.md`, `13-intake.md`);
-the Stage Table and the component list below route to them. (Folded from
+own their own files (`11-sweep.md`, `12-extension.md`, `13-intake.md`,
+`14-observability.md`); the Stage Table and the component list below route
+to them. (Folded from
 `2-architecture.md`, 2026-09-27 — that file's stage stubs duplicated the
 S-files. The M9 design and graph schema that survived that merge have since
 moved to `13-intake.md` and `06-skill-map.md`, their owning files.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M14 built; M9
-deferred / re-scoped 2026-10-04** (order notes: M13's
+**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M16 built; M9
+deferred / re-scoped 2026-10-04; M17 designed** (order notes: M13's
 extension shell jumped ahead of M9 on user priority 2026-10-03 — the
 capture → analyze → plan flow works on the M8 resume path; M9's skill
 validation improves plan quality but is not a mechanical prerequisite for
@@ -106,6 +107,7 @@ flowchart TB
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
 | C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16) |
 | C3 intake + validation | Evidence-backed skill depth (non-conversational when it returns) | `intake.py`, `validate.py` (planned) | [13-intake.md](13-intake.md) | ⏸ Deferred / re-scoped (M9 — §Deferred #13) |
+| C4 observability + judge evaluation | LangSmith tracing + judge golden-set eval | `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | 🎯 Designed (M17) |
 
 ## Pipeline (stage order = data flow)
 
@@ -177,6 +179,10 @@ link. If you need the mechanics, open the linked file.
   self-report. The conversational half is deferred (§Deferred #13) — the
   extension panel is the locked interaction model; the validation goal
   returns non-conversational after the plan/gap-quality brainstorm.
+- **C4 observability + judge evaluation (M17, 🎯 Designed)** —
+  [14-observability.md](14-observability.md). Opt-in LangSmith tracing of
+  every run (what happened inside it) plus a golden-set evaluation of the
+  judge (is it right) — tooling around the pipeline, not a stage.
 
 ## Skill graph schema (summary — canonical reference in S3)
 
@@ -279,7 +285,7 @@ accurate (workflow rules live in
 - **Why these choices:** [02-decisions.md](02-decisions.md)
 - **Build order + progress + trade-offs + open questions:** [03-milestones.md](03-milestones.md) (roadmap — §§Deferred/Open hold the rest)
 - **Stage mechanics:** S1–S7 files (`04-reader.md` … `10-flow-runner.md`), routed via the Stage Table above
-- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup + M15 LLM mode), [13-intake.md](13-intake.md) (C3 intake + validation, Deferred / re-scoped)
+- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup + M15 LLM mode), [13-intake.md](13-intake.md) (C3 intake + validation, Deferred / re-scoped), [14-observability.md](14-observability.md) (C4 observability + judge evaluation, Designed M17)
 - **Skill graph schema:** S3 [06-skill-map.md](06-skill-map.md) §Schema
 - **Validation rubric:** S5 [08-gap-measurer.md](08-gap-measurer.md) §Validation rubric
 - **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal

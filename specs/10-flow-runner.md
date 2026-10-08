@@ -5,7 +5,8 @@ Step order and display. Owns no domain logic — calls S1→S6.
 **Status: Built** (M7 graph + M8 resume front-end + M11 local UI);
 M12 sweep harness and M13 extension shell are separate components
 ([11-sweep.md](11-sweep.md), [12-extension.md](12-extension.md)); M9
-intake Designed.
+intake Designed; M17 `--trace` flag
+([14-observability.md](14-observability.md)) Designed.
 
 ## Runners
 
@@ -32,6 +33,11 @@ intake Designed.
   The M10 OSS flags (`--no-oss`, `--no-llm-oss`) live on `m5_plan.py`; the
   `cli.py` graph honors the same options as state fields (`skip_oss`,
   `no_llm_oss` — settable via `server.py`'s run contract).
+- M17 (🎯 Designed): `--trace` on `cli.py` / `server.py` / `sweep.py` calls
+  `tracing.enable_tracing()` before the graph is built and merges
+  `tracing.run_config()` (run name, tags, model metadata) into the
+  `thread_id` config. Off by default. Design:
+  [14-observability.md](14-observability.md).
 - M10 node: `oss` runs after synthesis on the same top-n actionable gaps
   (cache-first; zero API calls on re-runs); `output` also emits
   `plan.html` (thin slice).
