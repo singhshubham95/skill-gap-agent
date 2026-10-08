@@ -566,10 +566,11 @@ golden-set eval, CI) — likewise not a pipeline stage.
       `synthesize_project`, `filter_issues_relevance`, `extract_skills_llm`,
       `bridge_vocabulary`; `--trace` flag on `cli.py` / `server.py` /
       `sweep.py`. Off by default; missing key = warning, never a failure.
-      Discovery while designing: `llm.py` imports `openai` but
-      `pyproject.toml` does not declare it (only a runtime ImportError
-      message) — declare `openai` as a dependency and `langsmith` as an
-      optional `trace` extra in the same change.
+      Discovery while designing: `llm.py` imported `openai` without a
+      `pyproject.toml` declaration (only a runtime ImportError message).
+      Fixed 2026-10-08, ahead of 17a: `openai` and `langchain-core` are
+      declared dependencies and `langsmith` is the optional `trace`
+      extra — 17a installs the extra and re-verifies the version floors.
     - **17b — Judge golden set + eval runner.** Committed
       `evals/judge_golden.jsonl` (≥30 rows first: target, candidates,
       human-agreed confidence band per candidate, seeded from the M6 hand

@@ -9,6 +9,8 @@ dependencies = [
     "keyring>=25.0",
     "langgraph>=1.0",
     "langgraph-checkpoint-sqlite>=3.0",
+    "langchain-core>=0.3",
+    "openai>=1.0",
     "pypdf>=4.0",
     "python-docx>=1.1",
 ]
@@ -17,6 +19,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
+]
+trace = [
+    "langsmith>=0.2",
 ]
 
 [project.scripts]
