@@ -1,0 +1,29 @@
+# agent-devkit-simplified model configuration.
+#
+# One model does the whole functional requirement end to end — plan, code,
+# test, review — in a single session. No session chaining, no role split.
+# Models are set at session creation; edit here to change the stack.
+#
+# Why one model: the planner/implementer/reviewer split existed to pair an
+# expensive planner with a cheap coder. Measured cost-per-task shows the
+# top model (Xiaomi MiMo-V2.6-Pro) is ALSO the cheapest — so there is no
+# cheap-coder to slot in, and splitting only adds handoff cost and context
+# loss. One session keeps full design context from spec through review.
+
+agent:
+  model: xiaomi/mimo-v2.6-pro
+  effort: high
+  fallback: deepseek/deepseek-v4.1-flash   # retry-only on outage
+
+retry:
+  base_seconds: 2
+  factor: 2
+  cap_seconds: 60
+  max_attempts: 3
+
+locks:
+  stale_minutes: 30           # auto-reclaim, logged to board/lock-events.log
+  claim_timeout_seconds: 3600 # a blocking claim never hangs forever
+
+branches:
+  task: "req/{task}"          # one branch per functional requirement

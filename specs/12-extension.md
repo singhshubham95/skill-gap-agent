@@ -228,7 +228,7 @@ home). This section is the panel surface only. Decision rows:
   [05-ai-caller.md](05-ai-caller.md) §Provenance vocabulary, and the
   plan header states the run's mode.
 
-## M16 — free LLM access (Designed)
+## M16 — free LLM access (✅ Built 2026-10-06)
 
 Mechanics — free-model routing, refusal rules, retry semantics — live in
 [05-ai-caller.md](05-ai-caller.md) §Free-tier routing + §Retry & failure
@@ -254,23 +254,28 @@ the per-user consent model. Flow:
    The user logs in or signs up — a free OpenRouter account needs no card —
    and authorizes.
 3. OpenRouter redirects the tab to the local server, which stores the
-   one-time `code` (in-memory, 10-minute TTL) and serves a tiny
-   "Connected — return to the side panel" page. Localhost callbacks on any
-   port are supported; `server.py` is already bound to `127.0.0.1:8000`.
-   The callback is a top-level browser navigation (no CORS involved), and
-   the panel's subsequent polls behave like every other extension →
-   server call under the existing security posture.
-4. The panel polls `GET /api/oauth/pending?state=…` (state must match),
-   then `POST /api/oauth/exchange {code, code_verifier}`. The server
-   exchanges at `POST https://openrouter.ai/api/v1/auth/keys`, receives a
-   **user-owned** key, and stores it in the OS keyring — the same
-   `OPENROUTER_API_KEY` slot as the M14 paste form; the key transits the
-   server's exchange handler only, never `chrome.storage` (extends the M14
-   keyring decision). The panel shows "Connected ✓" plus a "Manage key on
-   OpenRouter" link (key-hash deep link) so the user can inspect or revoke
-   the key at any time.
+   one-time `code` in memory keyed by `state` (10-minute TTL) and serves a
+   tiny "Connected — return to the side panel" page. **The `state` is
+   validated server-side at callback time**: a callback whose `state` is
+   missing or unknown is rejected and stores nothing. Localhost callbacks
+   on any port are supported; `server.py` is already bound to
+   `127.0.0.1:8000`. The callback is a top-level browser navigation (no
+   CORS involved), and the panel's subsequent polls behave like every other
+   extension → server call under the existing security posture.
+4. The panel polls `GET /api/oauth/pending?state=…` — it returns a pending
+   flag only (**never the code**; the code stays server-side, consistent
+   with the keyring-only secret rule) and only for a matching `state` —
+   then `POST /api/oauth/exchange {code_verifier, state}`. The server pairs
+   the `state` with its stored code and exchanges at `POST
+   https://openrouter.ai/api/v1/auth/keys`, receives a **user-owned** key,
+   and stores it in the OS keyring — the same `OPENROUTER_API_KEY` slot as
+   the M14 paste form; the key transits the server's exchange handler only,
+   never `chrome.storage` (extends the M14 keyring decision). The panel
+   shows "Connected ✓" plus a "Manage key on OpenRouter" link (key-hash
+   deep link) so the user can inspect or revoke the key at any time.
 5. Failure paths: denial or 10-minute expiry → panel message + retry;
-   state mismatch or exchange failure → rejected, nothing stored.
+   state mismatch (rejected at callback time or at exchange time) or
+   exchange failure → rejected, nothing stored.
 
 ### B. Free-mode consent gate
 
@@ -293,7 +298,8 @@ the per-user consent model. Flow:
   not UI-only.
 - **Free-mode run header**: "Free mode — model: <llm_model>" from
   `GET /api/status`. Quota exhaustion surfaces through the M15 banner
-  with the hint "add your own key or wait for the free quota to reset".
+  with the reason defined in
+  [05-ai-caller.md](05-ai-caller.md) §Free-tier routing.
 
 ## Explicit non-goals (M13)
 
@@ -329,7 +335,7 @@ stays this panel).
   retry policy, keyring reuse).
 - Milestones: [03-milestones.md](03-milestones.md) M13 (verification record
   + learnings), M14 (self-serve setup, Built), M16 (free LLM access,
-  Designed).
+  Built).
 - Deferred: [03-milestones.md](03-milestones.md) §Deferred #12 (in-page gap
   marking), #13 (conversational intake), #14 (native-messaging launcher).
 - Install / load-unpacked instructions: [../extension/README.md](../extension/README.md).

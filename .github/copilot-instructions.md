@@ -16,7 +16,13 @@ stay implementation-agnostic so it cannot silently drift.
 A spec-driven project: `specs/` (flat, numbered, read in order) is the
 source of truth for everything the system is and does — start at
 `specs/01-system-overview.md` for the component map and current state, and
-follow its links rather than relying on details memorized here.
+follow its links rather than relying on details memorized here. Units of
+work are claimed as task work orders in `specs/tasks/`; `docs/` is the
+derived human tier (non-authoritative); `board/` is the shared coordination
+area (locks, issues, verification reports). The development workflow itself
+(one end-to-end agent per functional requirement, many agents in parallel)
+is canonical in the sibling `agent-devkit-simplified` repo and installed
+here under `.agent-devkit/` and `scripts/`.
 
 ## Communication with the user
 
@@ -50,6 +56,39 @@ follow its links rather than relying on details memorized here.
   copy and link. **Cross-cutting scope does not create an exception:** a
   design that touches many stages still has exactly one home (the component
   file that owns it), and every other file links to it.
+
+## Multi-agent development workflow
+
+One agent = one functional requirement, end to end (plan → implement →
+test → self-review → close) in a **single session** — there is no role
+split and no session chaining. Across requirements everything runs in
+parallel, isolated by git worktrees (`req/T-*` branches) plus file locks on
+shared files. The human initiates each requirement (agents never decide
+what to build). Roles, templates, and scripts are installed from the
+`agent-devkit-simplified` repo; model/effort config lives in
+`.agent-devkit/config/models.yaml`.
+
+- **Task work orders** (`specs/tasks/T-<id>.md`) are slim: spec-section
+  links, out-of-scope boundary, files to touch, per-change acceptance
+  criteria, tests, status. Never step-by-step recipes — the spec owns the
+  HOW, the task owns the WHERE/WHAT-NOW.
+- **Lock board**: claim before editing shared files
+  (`python scripts/claim.py --task T-<id> <paths...>`), and always release
+  (`python scripts/release.py --task T-<id>`) on every exit path. Stale
+  locks (>30 min) auto-reclaim, logged to
+  `board/lock-events.log`; `board/BOARD.md` is the generated view.
+- **Scope enforcement** (deterministic, not prompt-based — enforced by
+  `python scripts/path_guard.py` and the `agent-gates` CI workflow): a
+  `req/T-*` branch may change only its task's "Files to touch", plus
+  `board/`, the task file, and `docs/changelog.md`. To widen scope, update
+  the task file first (and claim the new files). Human branches (no `req/`
+  prefix) are not bound.
+- **Issue channel**: blocked on shared state, or found a spec defect you
+  must not unilaterally change? Write `board/issues/` (template in
+  `.agent-devkit/templates/issue.md`), record what you did meanwhile, and
+  continue (non-blocking) or stop on that part (blocking).
+- **Human docs** (`docs/`): derived, short, non-authoritative. The agent
+  writes the changelog line at task close.
 
 ## Spec evolution rules
 
@@ -116,6 +155,8 @@ update that section in the same change (spec-first rule above).
 - The full pipeline runs end-to-end without errors — find the current entry
   point in the README quickstart (do not trust a memorized command).
 - Lint and tests clean (`ruff check .` and `pytest` while those are the
-  configured tools).
+  configured tools). For task work, run
+  `python scripts/verify.py --task T-<id>` and
+  `python scripts/path_guard.py` before declaring done.
 - If a milestone adds a user-visible flow, validate it interactively once
   and record the result in `specs/03-milestones.md` before marking it Built.

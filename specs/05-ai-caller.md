@@ -6,7 +6,8 @@ through here; node modules never touch provider SDKs.
 **Status: Built** (M3; M8 secrets change — see below). M15 LLM presence
 policy: **✅ Built 2026-10-05** (verification record in
 `03-milestones.md` M15). M16 free-tier routing + retry hardening:
-**Designed** (sections below).
+**✅ Built 2026-10-06** (sections below; verification record in
+`03-milestones.md` M16 — the interactive live pass is still open there).
 
 ## What it does
 
@@ -122,7 +123,7 @@ the record itself: an OSS cache entry with a relevance rationale renders
    deliberate OFF run) recorded in [03-milestones.md](03-milestones.md)
    M15.
 
-## Free-tier routing (M16 — Designed)
+## Free-tier routing (M16 — ✅ Built 2026-10-06)
 
 Opt-in zero-cost path for users with no LLM subscription. `free_tier` is a
 run-level flag (default **off**) that routes every call to OpenRouter
@@ -160,7 +161,7 @@ accompanies it — the gate must not be UI-only.
   when the fallback list rotates) join `llm_mode` / `degraded_reasons` on
   `GET /api/status`.
 
-## Retry & failure handling (M16 — Designed)
+## Retry & failure handling (M16 — ✅ Built 2026-10-06)
 
 Hardening of the `chat()`/`judge()` retry loops for flaky free endpoints;
 it applies to every provider. All of it sits **below** M15's degradation
@@ -176,11 +177,11 @@ exactly one outcome — success, or one failure with one reason.
   on 429): wait `min(retry_after, 60s)` instead of the computed value.
   Free mode raises the attempt cap from 3 to 5 — free endpoints flap
   under load.
-- **Bounded attempts — fix the nesting.** Today `judge()` parse-retries
-  re-invoke `chat()`, each with its own `max_retries`, multiplying attempts
-  up to `max_retries²` per logical call. After M16 the total API attempts
-  per logical `judge()` call are bounded by `max_retries` regardless of
-  parse-retry nesting.
+- **Bounded attempts — the nesting is bounded.** `judge()` parse-retries
+  re-invoke `chat()`, each with its own `max_retries`, which would
+  multiply attempts up to `max_retries²` per logical call; the total API
+  attempts per logical `judge()` call are bounded by `max_retries`
+  regardless of parse-retry nesting.
 - **Model fallback (free mode).** On attempts exhausted via 429/5xx, or
   on model-unavailable, advance to the next `FREE_MODELS` entry (one
   rotation through the list) before failing the call.
@@ -225,5 +226,5 @@ exactly one outcome — success, or one failure with one reason.
 
 - Decisions: `02-decisions.md` (provider rows, keyring-only secret rule,
   M15 presence-policy rows, M16 free-tier/retry rows).
-- Milestones: `03-milestones.md` M3, M8, M15 (Built), M16 (Designed).
+- Milestones: `03-milestones.md` M3, M8, M15, M16 (Built).
 - Deferred: `03-milestones.md` §Deferred #6 (local-model benchmark).

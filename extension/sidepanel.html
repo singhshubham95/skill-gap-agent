@@ -51,11 +51,28 @@
         <input type="checkbox" id="remember" checked> Remember on this machine
       </label>
       <button id="savekey">Save key</button>
+      <button id="connectfree" class="secondary">Connect free LLM</button>
       <p id="keystate" class="hint"></p>
       <p class="hint">The key goes straight to the local agent, which stores
       it in the OS credential vault (Windows Credential Manager / macOS
       Keychain) — never in the browser. Uncheck "remember" to keep it for
       this server session only.</p>
+      <label class="check">
+        <input type="checkbox" id="freetier"> Use free models (costs nothing)
+      </label>
+      <div id="freeconsent" hidden>
+        <p class="hint">Free models cost nothing, but the providers behind
+        them may log or use your inputs for training. Job descriptions are
+        public — <strong>your resume is not</strong>: it contains personal
+        information (name, contact details, work history) and will be sent
+        to these third-party providers. Your own key's paid endpoints
+        generally do not train on inputs. Consent is required before any
+        free-mode run.</p>
+        <label class="check">
+          <input type="checkbox" id="privacyack"> I understand and consent
+        </label>
+      </div>
+      <p id="freemode" class="hint" hidden></p>
     </div>
     <p id="rulehint" class="hint" hidden>Rule-based mode — no LLM calls.
     Gaps are ranked by JD demand alone and results say "Rule-based"; project

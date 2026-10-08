@@ -60,6 +60,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import llm as llm_mod
 from . import secrets
 from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
 
@@ -82,6 +83,9 @@ _run: dict = {
     # M15 LLM presence policy: the run's mode and any loud degradations.
     "llm_mode": None,
     "degraded_reasons": [],
+    # M16 free-tier status fields (specs/05-ai-caller.md §Free-tier routing).
+    "free_tier": False,
+    "llm_model": None,
 }
 # The paused two-phase run (phase "gaps" -> waiting for "plan"). The
 # SkillGraph lives in cli.py's process-bound runtime registry, so the resume
@@ -91,6 +95,13 @@ _paused: dict = {"app": None, "config": None}
 # M14: the uploaded resume a run should use when the body carries no
 # explicit skills_path. Never chrome.storage — this is server-side state.
 _resume: dict = {"path": None, "filename": None, "count": None, "source": None}
+
+# M16 OAuth connect (specs/12-extension.md §M16 A): the one-time code
+# OpenRouter redirects back with, kept in memory keyed by the panel's
+# state with a 10-minute TTL. No key material is ever stored here — only
+# the pending code, and it never leaves the server.
+OAUTH_CODE_TTL_SECONDS = 600
+_oauth: dict = {"codes": {}, "expected_states": set()}
 
 # Human-readable stage labels for the loading screen. Keys are the node
 # names cli.py reports via set_stage_listener(); values are plain words
@@ -226,6 +237,12 @@ def _sync_run_state(app, config: dict, status: str) -> dict:
                 _run["degraded_reasons"] = values["degraded_reasons"]
             if "use_llm" in values:
                 _run["llm_mode"] = "llm" if values.get("use_llm", True) else "rule-based"
+            # M16 status fields (specs/05-ai-caller.md §Free-tier routing):
+            # free_tier + llm_model (the :free ID currently answering calls —
+            # it moves when the fallback list rotates).
+            _run["free_tier"] = bool(values.get("free_tier", False))
+            if values.get("free_tier"):
+                _run["llm_model"] = llm_mod.last_model()
         return dict(_run)
 
 
@@ -239,6 +256,65 @@ def _describe_skills() -> dict:
                 "source": _resume["source"],
             }
     return {"filename": Path(DEFAULT_SKILLS).name, "count": None, "source": "default"}
+
+
+def _oauth_pending_code(state: str) -> str | None:
+    """The code stored for this state, or None if absent/expired (10-min
+    TTL). The code is keyed by the panel's state (specs/12-extension.md
+    §M16 A step 3) and never leaves the server."""
+    with _lock:
+        entry = _oauth["codes"].get(state)
+        if not entry:
+            return None
+        code, created = entry["code"], entry["created_at"]
+        if not code or created is None:
+            return None
+        if time.time() - created > OAUTH_CODE_TTL_SECONDS:
+            del _oauth["codes"][state]
+            return None
+        return code
+
+
+def _oauth_consume_code(state: str) -> str | None:
+    """Pop the one-time code for this state (used by the exchange)."""
+    with _lock:
+        entry = _oauth["codes"].pop(state, None)
+        if not entry:
+            return None
+        code, created = entry["code"], entry["created_at"]
+        if not code or created is None:
+            return None
+        if time.time() - created > OAUTH_CODE_TTL_SECONDS:
+            return None
+        return code
+
+
+def _exchange_openrouter_code(code: str, code_verifier: str) -> dict:
+    """Exchange the OAuth code for a user-owned key at OpenRouter.
+
+    Server-side only (specs/12-extension.md §M16 A): the key transits this
+    handler once and goes straight into the OS keyring — never echoed,
+    never chrome.storage. Returns the parsed JSON response.
+    """
+    import urllib.request
+
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/auth/keys",
+        data=json.dumps({"code": code, "code_verifier": code_verifier}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+OAUTH_CALLBACK_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<title>Skill-Gap Agent</title></head>
+<body style="font-family: system-ui; padding: 24px;">
+<h1>Connected — return to the side panel</h1>
+<p>OpenRouter sent the key to the local agent. You can close this tab and
+go back to the Skill-Gap Agent side panel.</p>
+</body></html>"""
 
 
 def _run_pipeline(options: dict) -> None:
@@ -265,6 +341,7 @@ def _run_pipeline(options: dict) -> None:
     skills_path = _resolve_skills(options)
     provider = _resolve_provider(options)
     use_llm = _resolve_use_llm(options)
+    free_tier = bool(options.get("free_tier", False))
     if use_llm:
         # Race-safe backstop for the POST-layer pre-flight (M15): never
         # start a run that would silently degrade the whole pipeline.
@@ -287,7 +364,7 @@ def _run_pipeline(options: dict) -> None:
                     use_llm=use_llm,
                     auto=True,
                     ask_fn=None,
-                    cfg=LLMConfig(provider=provider),
+                    cfg=LLMConfig(provider=provider, free_tier=free_tier),
                 )[0]
             )
         except Exception as e:  # noqa: BLE001 — surfaced via /api/status
@@ -318,6 +395,7 @@ def _run_pipeline(options: dict) -> None:
         "jd_files": jd_files,
         "provider": provider,
         "use_llm": use_llm,
+        "free_tier": free_tier,
     }
     checkpointer = None
     if two_phase:
@@ -473,6 +551,57 @@ class Handler(BaseHTTPRequestHandler):
                     for pid, info in PROVIDERS.items()
                 ]
             })
+        elif path == "/api/oauth/callback":
+            # M16 A step 3: OpenRouter redirects the tab here with the
+            # one-time code + the panel's state. The state is validated
+            # server-side: missing or unknown state -> reject, store
+            # nothing. The code is stored keyed by state with a 10-minute
+            # TTL and consumed by the panel's exchange call.
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if query.get("error"):
+                self._send(
+                    200,
+                    b"<h1>Connection not completed</h1><p>Return to the side "
+                    b"panel and try again.</p>",
+                    "text/html; charset=utf-8",
+                )
+                return
+            code = (query.get("code") or [""])[0]
+            state = (query.get("state") or [""])[0]
+            if not code or not state:
+                self._send(400, b"missing code or state", "text/plain")
+                return
+            # The state must have been minted by the panel (it is present
+            # in the pending-poll set) — a callback with an unknown state
+            # stores nothing.
+            with _lock:
+                known = state in _oauth["expected_states"]
+                if known:
+                    _oauth["codes"][state] = {
+                        "code": code, "created_at": time.time(),
+                    }
+            if not known:
+                self._send(
+                    400,
+                    "<h1>Connection not completed</h1><p>Unknown state — "
+                    "return to the side panel and try again.</p>".encode(),
+                    "text/html; charset=utf-8",
+                )
+                return
+            self._send(
+                200, OAUTH_CALLBACK_PAGE.encode("utf-8"), "text/html; charset=utf-8"
+            )
+        elif path == "/api/oauth/pending":
+            # M16 A step 4: the panel polls this with its state; a pending
+            # flag is returned only for a matching state — never the code
+            # itself (the code stays server-side).
+            state = (urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query
+            ).get("state") or [""])[0]
+            with _lock:
+                known = state in _oauth["expected_states"]
+            pending = known and _oauth_pending_code(state) is not None
+            self._json(200, {"pending": pending})
         elif path == "/api/gaps":
             gaps = OUTPUT_DIR / "gaps.json"
             if not gaps.exists():
@@ -524,6 +653,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/key":
             self._handle_key(int(self.headers.get("Content-Length", 0) or 0))
             return
+        if path == "/api/oauth/exchange":
+            self._handle_oauth_exchange(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/oauth/state":
+            self._handle_oauth_state(int(self.headers.get("Content-Length", 0) or 0))
+            return
         if path != "/api/run":
             self._send(404, b"not found", "text/plain")
             return
@@ -566,12 +701,24 @@ class Handler(BaseHTTPRequestHandler):
             except LLMError as e:
                 self._json(409, {"error": str(e)})
                 return
+        # M16 consent enforcement (specs/05-ai-caller.md §Free-tier
+        # routing): a free_tier run is refused unless privacy_ack rides in
+        # the body — the gate must not be UI-only.
+        if options.get("free_tier") and not options.get("privacy_ack"):
+            self._json(409, {
+                "error": "free_tier requires privacy_ack: true — free models "
+                "may log or train on inputs; consent is required before any "
+                "free-mode run (see the panel's consent checkbox).",
+            })
+            return
         with _lock:
             _run.update(
                 status="running", stage=None, phase=phase, started_at=time.time(),
                 finished_at=None, error=None,
                 llm_mode="llm" if _resolve_use_llm(options) else "rule-based",
                 degraded_reasons=[],
+                free_tier=bool(options.get("free_tier", False)),
+                llm_model=None,
             )
         worker = _resume_pipeline if phase == "plan" else _run_pipeline
         t = threading.Thread(target=worker, args=(options,), daemon=True)
@@ -665,6 +812,74 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": f"could not store key: {e}"})
             return
         self._json(200, {"ok": True, "key_set": True, "stored": stored})
+
+    def _handle_oauth_state(self, length: int) -> None:
+        """M16 A step 2/3: the panel registers its freshly minted state so
+        the server can validate the callback's state server-side. Only the
+        state value is registered — no secret material."""
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise TypeError("body must be a JSON object")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return
+        state = body.get("state")
+        if not isinstance(state, str) or not state or len(state) > 256:
+            self._json(400, {"error": "state must be a non-empty string (<=256 chars)"})
+            return
+        with _lock:
+            _oauth["expected_states"].add(state)
+        self._json(200, {"ok": True})
+
+    def _handle_oauth_exchange(self, length: int) -> None:
+        """M16 A step 4: exchange the server-held code (paired with the
+        panel's state) for a user-owned key and store it in the
+        OPENROUTER_API_KEY keyring slot (same slot as the M14 paste form).
+        The panel sends {code_verifier, state} — never the code. The key
+        transits this handler only — never echoed, never chrome.storage.
+        State mismatch or exchange failure -> nothing stored."""
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise TypeError("body must be a JSON object")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return
+        state = body.get("state")
+        code_verifier = body.get("code_verifier")
+        if not isinstance(state, str) or not state:
+            self._json(400, {"error": "state must be a non-empty string"})
+            return
+        if not isinstance(code_verifier, str) or not code_verifier:
+            self._json(400, {"error": "code_verifier must be a non-empty string"})
+            return
+        # State must match a callback the server actually stored (checked
+        # at exchange time, per §M16 A step 5).
+        code = _oauth_consume_code(state)
+        if code is None:
+            self._json(409, {
+                "error": "no pending OAuth code for this state (expired, "
+                "already used, or the callback never completed)",
+            })
+            return
+        try:
+            resp = _exchange_openrouter_code(code, code_verifier)
+        except Exception as e:  # noqa: BLE001 — surfaced as 502
+            self._json(502, {"error": f"key exchange failed: {e}"})
+            return
+        key = resp.get("key")
+        if not isinstance(key, str) or not key.strip():
+            self._json(502, {"error": "exchange response carried no key"})
+            return
+        try:
+            secrets.set_secret("OPENROUTER_API_KEY", key.strip())
+        except Exception as e:  # noqa: BLE001 — keyring backend missing etc.
+            self._json(500, {"error": f"could not store key: {e}"})
+            return
+        with _lock:
+            _oauth["expected_states"].discard(state)
+        self._json(200, {"ok": True, "key_set": True, "stored": "keyring"})
 
     def log_message(self, fmt: str, *args: object) -> None:
         safe = (fmt % args).encode("ascii", "replace").decode("ascii")

@@ -482,7 +482,8 @@ OAuth connect, retry hardening) — likewise not a pipeline stage.
         server after code changes" rule again saved the diagnosis.
 
 16. **Free-tier LLM access — connect button + free models + retry
-    hardening.** 📋 Designed 2026-10-05 (design home:
+    hardening.** ✅ Built 2026-10-06 (designed 2026-10-05; interactive
+    live pass pending — §Open below) (design home:
     [05-ai-caller.md](05-ai-caller.md) §Free-tier routing + §Retry &
     failure handling; panel surface:
     [12-extension.md](12-extension.md) §M16; decision rows in
@@ -502,6 +503,53 @@ OAuth connect, retry hardening) — likewise not a pipeline stage.
     timeouts incl. the extraction call); quota exhaustion surfaced via
     M15's banner + provenance machinery. Done criteria:
     [05-ai-caller.md](05-ai-caller.md) §Done criteria (M16).
+    - **Built 2026-10-06** (work order
+      [tasks/T-M16.md](tasks/T-M16.md)): panel Connect flow + consent
+      gate + free-mode run wiring (`extension/sidepanel.*`), OAuth
+      state/callback/exchange handlers and status fields (`server.py`),
+      free-model routing + retry policy + per-touchpoint timeouts
+      (`llm.py`, `resume.py`). The first implementation was rejected in
+      review (V1–V6 — `board/review-T-M16.md`; the wrong SDK resource
+      broke every LLM call while the green suite could not see it) and
+      reworked; a follow-up self-review closed three more gaps and
+      mapped the quota-exhaustion reason (learnings below).
+    - **Verified 2026-10-06:** `m16_check.py` + `test_m16.py` PASS (9
+      checks — OAuth connect incl. server-side state validation and the
+      one-time code, consent-gate 409, retry classification (paid +
+      free), bounded attempts (3 paid / 5 free per logical `judge()`
+      call), model fallback via `chat()` and `judge()` on 404 +
+      429/5xx, `llm_model` status, extraction 30-minute budget, quota
+      reason); `ruff check .` clean; `pytest` 22 passed; `node --check`
+      clean; `m10_check`–`m15_check` regressions PASS
+      (`board/verify-T-M16.md`). The new checks were verified red→green
+      against the pre-fix code.
+    - **Open (blocks full closure — §Open below):** done criterion 6,
+      the live interactive pass (real free OpenRouter account: connect,
+      one free-mode analyze + plan, one observed quota/429 message).
+    - **Learnings:**
+      - **Retry-loop state must live at the logical-call level.** The
+        `:free` rotation was kept inside `chat()`; `judge()` re-invokes
+        `chat()` per parse-retry with a one-attempt budget, so every
+        attempt restarted at `FREE_MODELS[0]` — the fallback list never
+        advanced on the production path (all touchpoints call `judge()`).
+        The rotation now lives in `judge()` and is passed down per
+        attempt.
+      - **A fallback trigger must not absorb its neighbors.** Free mode
+        rotated on "model-unavailable *or* non-transient", so a bad key
+        (401) retried the full budget instead of failing on the first
+        attempt. The triggers are exactly model-unavailable + transient
+        exhaustion.
+      - **Per-touchpoint timeouts must be applied at the touchpoint.**
+        The extraction 30-minute budget only existed on the no-config
+        path; the server/CLI pass a config (provider, free_tier), which
+        silently downgraded extraction to the 120s default — an ~19-min
+        call could never finish. `extraction_cfg()` now merges at the
+        call site.
+      - **A stub that accepts any call shape proves nothing about the
+        call shape.** The first `m16_check` fake accepted
+        `completions.create(**kwargs)`, so a wrong SDK resource passed
+        green while every real call failed. The stub now exposes only
+        `chat.completions` and asserts `model` + `messages`.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -590,6 +638,12 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   sweep results need to be reported as accuracy numbers.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
+- **M16 live interactive pass (AC6).** The automated suite is green (M16
+  verification record above) but done criterion 6 — one live pass with a
+  real free OpenRouter account: connect via the panel, one free-mode
+  analyze + plan, one observed quota/429 message — needs a human account
+  and has not run yet. Record the result in the M16 entry above, then
+  delete this item.
 - **Model pick (S2).** ~~Resolved at M3: DeepSeek V4 Flash 0731 via
   OpenRouter (see M3).~~ **Closed** — no longer an open item; the decision
   lives in [02-decisions.md](02-decisions.md) (M3 provider row) and the

@@ -32,7 +32,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from .llm import LABEL_LLM, LABEL_LLM_CACHED, LABEL_RULE, LLMConfig, judge
+from .llm import (
+    LABEL_LLM,
+    LABEL_LLM_CACHED,
+    LABEL_RULE,
+    LLMConfig,
+    extraction_cfg,
+    judge,
+)
 
 EXTRACTED_PATH = Path("output/extracted_skills.json")
 
@@ -145,7 +152,12 @@ def extract_skills_llm(resume_text: str, cfg: LLMConfig | None = None) -> dict:
     # pathological inputs blowing the context window.
     text = resume_text[:60_000]
     prompt = EXTRACT_PROMPT_TEMPLATE.format(resume=text)
-    result = judge(prompt, system=EXTRACT_SYSTEM_PROMPT, cfg=cfg or LLMConfig())
+    # M16: extraction keeps a 30-minute budget (the call takes ~19 min on
+    # the default model). The timeout is a property of the touchpoint, so
+    # extraction_cfg() is applied on top of any caller config (a caller cfg
+    # carries provider/free_tier — it must not silently downgrade the
+    # budget to the 120s default).
+    result = judge(prompt, system=EXTRACT_SYSTEM_PROMPT, cfg=extraction_cfg(cfg))
     skills = result.get("skills")
     if not isinstance(skills, dict) or not skills:
         raise ValueError("LLM extraction returned no skills object")

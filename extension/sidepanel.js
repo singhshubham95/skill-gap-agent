@@ -20,19 +20,34 @@ const STAGE_LABELS = {
   oss: "sourcing good-first-issues",
   output: "writing plan",
 };
+// M16 B: bump when the disclaimer copy changes — stored consent with an
+// older version is ignored and the checkbox re-prompts.
+const CONSENT_VERSION = 1;
+// M16 A: OpenRouter OAuth PKCE (specs/12-extension.md §M16 A).
+const OAUTH_AUTH_URL = "https://openrouter.ai/auth";
+const OAUTH_KEYS_PAGE = "https://openrouter.ai/settings/keys";
 
 const $ = (id) => document.getElementById(id);
 let server = DEFAULT_SERVER;
 let jds = [];
 let running = false;
+// M16 B: persisted consent flag {free_consent_at, consent_version} — a
+// flag and timestamp only, never data.
+let freeConsent = null;
+// M16 A: PKCE verifier + state live in memory only (never storage).
+let oauthPending = null;
 
 // ---- persistence (chrome.storage.local) -----------------------------------
 
 async function loadState() {
-  const stored = await chrome.storage.local.get(["capturedJds", "serverBase"]);
+  const stored = await chrome.storage.local.get([
+    "capturedJds", "serverBase", "freeConsent",
+  ]);
   jds = Array.isArray(stored.capturedJds) ? stored.capturedJds : [];
   server = stored.serverBase || DEFAULT_SERVER;
   $("serverBase").value = server;
+  // M16 B: consent is a flag + timestamp + version only, never data.
+  freeConsent = stored.freeConsent || null;
 }
 
 async function saveJds() {
@@ -54,6 +69,8 @@ function setBusy(busy) {
   $("clear").disabled = busy;
   if (busy) {
     $("plan").disabled = true;
+  } else {
+    updateRunGate();
   }
 }
 
@@ -160,6 +177,179 @@ async function saveKey() {
   } catch (e) {
     setStatus("Could not save key: " + e.message, true);
   }
+}
+
+// ---- M16 A: "Connect free LLM" (OAuth PKCE) -------------------------------
+
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function pkcePair() {
+  const raw = new Uint8Array(32);
+  crypto.getRandomValues(raw);
+  const verifier = base64url(raw);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return { verifier, challenge: base64url(new Uint8Array(digest)) };
+}
+
+async function connectFree() {
+  const btn = $("connectfree");
+  btn.disabled = true;
+  $("keystate").textContent = "Opening OpenRouter login…";
+  try {
+    const { verifier, challenge } = await pkcePair();
+    const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+    // Register the state with the server first: the callback's state is
+    // validated server-side (specs/12-extension.md §M16 A step 3).
+    const r = await fetch(server + "/api/oauth/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || "HTTP " + r.status);
+    }
+    oauthPending = { verifier, state };
+    const callback = encodeURIComponent(server + "/api/oauth/callback");
+    const url =
+      OAUTH_AUTH_URL +
+      "?callback_url=" + callback +
+      "&code_challenge=" + challenge +
+      "&code_challenge_method=S256" +
+      "&state=" + state +
+      "&key_label=skill-gap-agent";
+    await chrome.tabs.create({ url });
+    await pollOauth();
+  } catch (e) {
+    oauthPending = null;
+    $("keystate").textContent = "Connect failed: " + e.message;
+    setStatus("Could not start the OpenRouter connect flow.", true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pollOauth() {
+  // The user logs in / authorizes in the opened tab; poll the local
+  // server until the callback lands (or ~5 minutes pass).
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2000));
+    if (!oauthPending) return; // flow was cancelled/failed
+    let pending = false;
+    try {
+      const r = await fetch(server + "/api/oauth/pending?state=" + oauthPending.state);
+      const body = await r.json().catch(() => ({}));
+      pending = Boolean(body.pending);
+    } catch (e) {
+      $("keystate").textContent = "Waiting for the local agent…";
+      continue;
+    }
+    if (pending) {
+      await exchangeOauth();
+      return;
+    }
+  }
+  oauthPending = null;
+  $("keystate").textContent = "Connect timed out — try again.";
+}
+
+async function exchangeOauth() {
+  const { verifier, state } = oauthPending || {};
+  if (!verifier || !state) return;
+  try {
+    // The panel sends {code_verifier, state} only — the code stays
+    // server-side, paired with the state (specs/12-extension.md §M16 A).
+    const r = await fetch(server + "/api/oauth/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code_verifier: verifier, state }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
+    oauthPending = null;
+    $("keystate").textContent = "Connected ✓ (OS keyring)";
+    const link = document.createElement("a");
+    link.href = OAUTH_KEYS_PAGE;
+    link.textContent = "Manage key on OpenRouter";
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    $("keystate").appendChild(document.createElement("br"));
+    $("keystate").appendChild(link);
+    setStatus("Free LLM connected — key stored in the OS keyring.");
+    loadProviders();
+  } catch (e) {
+    oauthPending = null;
+    $("keystate").textContent = "Connect failed: " + e.message;
+    setStatus("Key exchange failed — nothing was stored.", true);
+  }
+}
+
+// ---- M16 B: free-mode consent gate ----------------------------------------
+
+function consentValid() {
+  return Boolean(
+    freeConsent &&
+    freeConsent.consent_version === CONSENT_VERSION &&
+    freeConsent.free_consent_at,
+  );
+}
+
+async function toggleFreeTier() {
+  const on = $("freetier").checked;
+  $("freeconsent").hidden = !on;
+  if (!on) {
+    $("privacyack").checked = false;
+    $("freemode").hidden = true;
+    return;
+  }
+  // Re-prompt when the stored consent predates the current copy version.
+  $("privacyack").checked = consentValid();
+  updateRunGate();
+  refreshFreeMode();
+}
+
+function updateRunGate() {
+  // The run button stays disabled while free mode is on but unconsented.
+  if ($("freetier").checked && !$("privacyack").checked) {
+    $("analyze").disabled = true;
+  } else if (!running) {
+    $("analyze").disabled = false;
+  }
+}
+
+async function onPrivacyAck() {
+  if ($("privacyack").checked) {
+    freeConsent = {
+      free_consent_at: new Date().toISOString(),
+      consent_version: CONSENT_VERSION,
+    };
+    await chrome.storage.local.set({ freeConsent });
+  }
+  updateRunGate();
+  refreshFreeMode();
+}
+
+async function refreshFreeMode() {
+  // Free-mode run header: "Free mode — model: <llm_model>" from /api/status.
+  const el = $("freemode");
+  if (!$("freetier").checked || !$("privacyack").checked) {
+    el.hidden = true;
+    return;
+  }
+  try {
+    const r = await fetch(server + "/api/status");
+    const s = await r.json();
+    el.textContent = s.llm_model
+      ? `Free mode — model: ${s.llm_model}`
+      : "Free mode — model chosen at run time from the free list.";
+  } catch (e) {
+    el.textContent = "Free mode — model chosen at run time from the free list.";
+  }
+  el.hidden = false;
 }
 
 // ---- 1. capture -----------------------------------------------------------
@@ -277,6 +467,11 @@ async function analyze() {
     provider: $("provider").value || "openrouter",
     use_llm: $("usellm").checked,
   };
+  // M16 B: the contract sends free_tier + privacy_ack only while consented.
+  if ($("usellm").checked && $("freetier").checked && $("privacyack").checked) {
+    body.free_tier = true;
+    body.privacy_ack = true;
+  }
   const started = await postRun(body);
   if (started) poll();
 }
@@ -438,8 +633,11 @@ $("reopen").addEventListener("click", () => {
 });
 $("resume").addEventListener("change", uploadResume);
 $("savekey").addEventListener("click", saveKey);
+$("connectfree").addEventListener("click", connectFree);
 $("provider").addEventListener("change", loadProviders);
 $("usellm").addEventListener("change", toggleLlm);
+$("freetier").addEventListener("change", toggleFreeTier);
+$("privacyack").addEventListener("change", onPrivacyAck);
 $("clear").addEventListener("click", async () => {
   jds = [];
   await saveJds();
@@ -455,6 +653,7 @@ $("serverBase").addEventListener("change", async (e) => {
 loadState().then(() => {
   renderJds();
   toggleLlm();
+  toggleFreeTier();
   checkConnection();
   loadProviders();
   refreshSkills();
