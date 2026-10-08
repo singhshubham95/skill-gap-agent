@@ -8,6 +8,8 @@ policy: **✅ Built 2026-10-05** (verification record in
 `03-milestones.md` M15). M16 free-tier routing + retry hardening:
 **✅ Built 2026-10-06** (sections below; verification record in
 `03-milestones.md` M16 — the interactive live pass is still open there).
+M17 tracing hook: **🎯 Designed** (hook section below; design home
+[14-observability.md](14-observability.md)).
 
 ## What it does
 
@@ -214,6 +216,17 @@ exactly one outcome — success, or one failure with one reason.
    one free-mode analyze + plan; one observed quota/429 message) recorded
    in [03-milestones.md](03-milestones.md) M16.
 
+## Tracing hook (M17) — 🎯 Designed, no code yet
+
+- `_client()` will return `tracing.wrap_client(OpenAI(...))`: when tracing
+  is on, every `chat.completions.create` becomes a LangSmith child run
+  (prompt, response, tokens, latency); when off, the client is returned
+  unchanged. `judge()` / `chat()` signatures do not change.
+- `LANGSMITH_API_KEY` resolves through `secrets.get_secret()` like every
+  other key (env → keyring). Tracing is opt-in and never raises.
+- Design: [14-observability.md](14-observability.md); decisions in
+  `02-decisions.md` (M17 rows); milestone `03-milestones.md` M17 (17a).
+
 ## Known limits
 
 - Extraction call latency ~19 min on DeepSeek V4 Flash (one-time per
@@ -225,6 +238,6 @@ exactly one outcome — success, or one failure with one reason.
 ## History (links, not copies)
 
 - Decisions: `02-decisions.md` (provider rows, keyring-only secret rule,
-  M15 presence-policy rows, M16 free-tier/retry rows).
-- Milestones: `03-milestones.md` M3, M8, M15, M16 (Built).
+  M15 presence-policy rows, M16 free-tier/retry rows, M17 tracing rows).
+- Milestones: `03-milestones.md` M3, M8, M15, M16 (Built); M17 (Designed).
 - Deferred: `03-milestones.md` §Deferred #6 (local-model benchmark).
