@@ -28,6 +28,9 @@ const STAGE_LABELS = {
 // M16 B: bump when the disclaimer copy changes — stored consent with an
 // older version is ignored and the checkbox re-prompts.
 const CONSENT_VERSION = 1;
+// M21 (specs/12-extension.md §Data disclosure): bump when the data
+// disclosure copy changes — same re-prompt rule as M16's consent.
+const DISCLOSURE_CONSENT_VERSION = 1;
 // M16 A: OpenRouter OAuth PKCE (specs/12-extension.md §M16 A).
 const OAUTH_AUTH_URL = "https://openrouter.ai/auth";
 const OAUTH_KEYS_PAGE = "https://openrouter.ai/settings/keys";
@@ -45,6 +48,8 @@ let running = false;
 // M16 B: persisted consent flag {free_consent_at, consent_version} — a
 // flag and timestamp only, never data.
 let freeConsent = null;
+// M21: first-use data-disclosure consent — same shape as freeConsent.
+let disclosureConsent = null;
 // M16 A: PKCE verifier + state live in memory only (never storage).
 let oauthPending = null;
 
@@ -80,6 +85,7 @@ function normalizeServer(raw) {
 async function loadState() {
   const stored = await chrome.storage.local.get([
     "capturedJds", "serverBase", "freeConsent", "themePref",
+    "disclosureConsent",
   ]);
   jds = Array.isArray(stored.capturedJds) ? stored.capturedJds : [];
   // M20: a stored value that violates the transport rule falls back to the
@@ -88,6 +94,10 @@ async function loadState() {
   $("serverBase").value = server;
   // M16 B: consent is a flag + timestamp + version only, never data.
   freeConsent = stored.freeConsent || null;
+  // M21: disclosure consent — the checkbox reflects the stored flag and is
+  // never pre-checked for a fresh profile.
+  disclosureConsent = stored.disclosureConsent || null;
+  $("disclosureack").checked = disclosureConsentValid();
   // M19: a preference flag only; "auto" is the system theme.
   themePref = ["light", "dark"].includes(stored.themePref)
     ? stored.themePref
@@ -170,6 +180,12 @@ async function refreshSkills() {
 async function uploadResume() {
   const file = $("resume").files && $("resume").files[0];
   if (!file) return;
+  // M21: the disclosure must be confirmed before the first upload — the
+  // server enforces the same gate via X-Disclosure-Ack.
+  if (!disclosureAcked()) {
+    setStatus("Please confirm the data disclosure above first.", true);
+    return;
+  }
   $("resumeinfo").textContent =
     "Uploading resume and extracting skills (first time can take minutes)…";
   try {
@@ -178,6 +194,7 @@ async function uploadResume() {
       headers: {
         "Content-Type": "application/octet-stream",
         "X-Filename": encodeURIComponent(file.name),
+        "X-Disclosure-Ack": "1",
       },
       body: file,
     });
@@ -416,6 +433,31 @@ function consentValid() {
   );
 }
 
+// ---- M21: first-use data-disclosure consent (specs/12-extension.md
+// §Data disclosure) — gates upload + analyze; never pre-checked. ---------
+
+function disclosureConsentValid() {
+  return Boolean(
+    disclosureConsent &&
+    disclosureConsent.consent_version === DISCLOSURE_CONSENT_VERSION &&
+    disclosureConsent.disclosure_consent_at,
+  );
+}
+
+function disclosureAcked() {
+  return disclosureConsentValid() || $("disclosureack").checked;
+}
+
+async function onDisclosureAck() {
+  if ($("disclosureack").checked) {
+    disclosureConsent = {
+      disclosure_consent_at: new Date().toISOString(),
+      consent_version: DISCLOSURE_CONSENT_VERSION,
+    };
+    await chrome.storage.local.set({ disclosureConsent });
+  }
+}
+
 function selectedMode() {
   // No key => rule-based is the only possible mode (M18 no-key state).
   if ($("modechips").hidden) return "rule";
@@ -594,6 +636,16 @@ function showDegraded(s) {
 async function analyze() {
   if (!jds.length) {
     setStatus("Capture at least one job description first.", true);
+    return;
+  }
+  // M21: analysis sends resume/JD text to the LLM provider — the
+  // disclosure must be confirmed first (click "Change" next to your
+  // resume to show it again).
+  if (!disclosureAcked()) {
+    setStatus(
+      "Please confirm the data disclosure first — click Change next to your resume to show it.",
+      true,
+    );
     return;
   }
   setBusy(true);
@@ -812,6 +864,7 @@ for (const radio of document.querySelectorAll('input[name="mode"]')) {
   radio.addEventListener("change", onModeChange);
 }
 $("privacyack").addEventListener("change", onPrivacyAck);
+$("disclosureack").addEventListener("change", onDisclosureAck);
 $("clear").addEventListener("click", async () => {
   jds = [];
   await saveJds();

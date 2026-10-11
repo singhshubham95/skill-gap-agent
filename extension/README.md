@@ -48,10 +48,13 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
    - (if it was already loaded) click the reload icon after pulling changes
 
 3. **Open the panel** (toolbar icon) and configure it:
-   - **Setup › Your resume** — upload a PDF/DOCX/TXT. It stays on your
-     machine (`output/uploads/`); the panel shows the extracted skill
-     count. First upload of a new resume can take minutes (LLM
-     extraction); the same file is instant afterwards.
+   - **Setup › Your resume** — upload a PDF/DOCX/TXT. The file is kept
+     locally under `output/uploads/`; the extracted text is sent over
+     HTTPS to the AI provider you select for skill extraction (see the
+     panel's data disclosure, which must be confirmed before the first
+     upload) — it is never sent to the extension's developer. The panel
+     shows the extracted skill count. First upload of a new resume can
+     take minutes (LLM extraction); the same file is instant afterwards.
    - **Analyze gaps › key state** — the panel verifies a saved key with a
      free key-info call and shows `Key ✓ verified` (or "couldn't verify —
      runs will retry"; validation never blocks a run). **Create free LLM

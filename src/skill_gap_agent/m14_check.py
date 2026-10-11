@@ -131,6 +131,9 @@ def _upload(base: str, name: str, data: bytes) -> tuple[int, dict]:
         {
             "Content-Type": "application/octet-stream",
             "X-Filename": urllib.parse.quote(name),
+            # M21: disclosure consent gate (specs/12-extension.md
+            # §Data disclosure) — the harness presents it like the panel.
+            "X-Disclosure-Ack": "1",
         },
     )
     return code, json.loads(body.decode("utf-8") or "{}")

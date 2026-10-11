@@ -20,15 +20,24 @@
     <button id="resumechange" class="linkish" type="button">Change</button>
     <button id="resumewhy" class="linkish" type="button">why?</button>
   </p>
-  <p id="resumeprivacy" class="hint" hidden>It stays on your machine — the
-  local agent keeps it under <code>output/uploads/</code> and extracts the
-  skills list from it.</p>
+  <p id="resumeprivacy" class="hint" hidden>The file stays on this machine
+  under <code>output/uploads/</code>; the extracted text is sent over HTTPS
+  to the AI provider selected below for skill analysis — never to the
+  extension's developer.</p>
 
   <section id="setupresume">
     <h2>Setup — your resume</h2>
     <p class="hint">Upload the resume to analyze against (PDF, DOCX or
-    TXT). It stays on your machine — the local agent keeps it under
-    <code>output/uploads/</code> and extracts the skills list from it.</p>
+    TXT). The file is kept locally under <code>output/uploads/</code>; the
+    extracted text is sent over HTTPS to the AI provider you select below
+    (OpenRouter → DeepSeek, Z.ai GLM or OpenAI — some processing outside
+    your country) for skill extraction and analysis. It is never sent to
+    the extension's developer. GitHub Search receives skill-gap terms
+    only, never resume text.</p>
+    <label class="check">
+      <input type="checkbox" id="disclosureack"> I understand my resume
+      and job descriptions are sent to the AI provider for analysis.
+    </label>
     <input type="file" id="resume" accept=".pdf,.docx,.txt">
     <p id="resumeinfo" class="hint"></p>
   </section>
@@ -87,6 +96,11 @@
       it in the OS credential vault (Windows Credential Manager / macOS
       Keychain) — never in the browser. Uncheck "remember" to keep it for
       this server session only.</p>
+      <p class="hint">Where your data goes: analysis sends your resume and
+      job-description text to this provider over HTTPS (OpenRouter forwards
+      to the underlying model — default DeepSeek; Z.ai GLM; OpenAI) — some
+      processing outside your country. GitHub Search receives skill-gap
+      terms only. Nothing goes to the extension's developer.</p>
     </div>
 
     <div id="freeconsent" hidden>

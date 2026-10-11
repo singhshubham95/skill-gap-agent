@@ -20,7 +20,10 @@ M14 self-serve setup (specs/12-extension.md §M14):
   POST /api/resume  -> upload a resume (raw file bytes; original name in
                        X-Filename), validate (10 MB cap, .pdf/.docx/.txt,
                        magic bytes), store under output/uploads/, run the
-                       M8 extraction immediately (blocks until done)
+                       M8 extraction immediately (blocks until done).
+                       M21: requires X-Disclosure-Ack: 1 (409 otherwise) —
+                       the panel's data-disclosure consent, enforced
+                       server-side (specs/12-extension.md §Data disclosure)
   GET  /api/providers -> [{id, model, key_set}] — key_set is a boolean;
                        key material is never returned by any endpoint
   GET  /api/key/status?provider=<id> -> M18 panel chip: {key_set, ok,
@@ -883,6 +886,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_resume(self, length: int) -> None:
         """M14 resume upload: raw bytes in, extraction runs immediately."""
+        # M21 (specs/12-extension.md §Data disclosure): the disclosure
+        # consent gate is not UI-only — no client uploads without it.
+        if self.headers.get("X-Disclosure-Ack") != "1":
+            self._json(409, {
+                "error": "disclosure consent required: confirm the panel's "
+                "data disclosure before uploading (X-Disclosure-Ack: 1).",
+            })
+            return
         if length <= 0:
             self._json(400, {"error": "empty upload"})
             return

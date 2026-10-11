@@ -34,11 +34,19 @@ def _req(
     req = urllib.request.Request(
         base + path, data=body, headers=headers or {}, method=method
     )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, resp.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        except OSError:
+            # Windows intermittently aborts loopback connections
+            # (WinError 10053) under multi-check runs — retry once; the
+            # probes are idempotent (rejections and GETs only).
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable")
 
 
 def _post_json(

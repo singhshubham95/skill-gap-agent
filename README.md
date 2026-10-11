@@ -39,7 +39,9 @@ No command-line flags: the side panel handles everything.
    folder. Click the toolbar icon — the side panel opens.
 
 4. **Configure in the panel:** upload your resume in **Setup** (PDF/DOCX/TXT
-   — kept locally in `output/uploads/`) and, under **Analyze gaps**, keep
+   — the file is kept locally in `output/uploads/`; the extracted text is
+   sent over HTTPS to the AI provider you select for analysis, never to
+   the extension's developer) and, under **Analyze gaps**, keep
    **Use LLM intelligence** on (default) and paste your API key there
    (stored in the OS keyring — Windows Credential Manager / macOS
    Keychain — never in the browser). LLM mode without a key refuses to

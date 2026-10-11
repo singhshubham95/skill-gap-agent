@@ -158,6 +158,53 @@ read the resume file on disk). Restore trigger for token pairing: the
 product starts handling other users' data or runs as a service — recorded in
 `03-milestones.md` §Deferred.
 
+## Data disclosure (M21)
+
+Goal (security finding S2/L5): every user-facing claim about where data
+goes must be **accurate**, and the destinations must be **named** before
+the user's first upload or analysis. A privacy policy cannot outrank an
+in-product claim that contradicts it — the copy is the contract.
+
+**Copy rules** (panel surfaces — this section is their one design home):
+
+1. At the upload surface (setup hint + the `resumeprivacy` hint): the
+   two-part truth, in these words' sense — the *file* is kept locally
+   under `output/uploads/`; the *extracted text* is sent over HTTPS to the
+   AI provider the user selects for skill extraction and analysis; it is
+   never sent to the extension's developer. The old "It stays on your
+   machine" phrasing is **banned** — it conflated file storage with data
+   processing (struck in the M14 decision row, superseded by M21).
+2. Named destinations + caveats (upload disclosure and near the provider
+   select): OpenRouter forwards to the underlying model (default DeepSeek
+   via OpenRouter); Z.ai GLM (`open.bigmodel.cn`) and OpenAI are the other
+   providers — some process data outside your country (DeepSeek/Z.ai:
+   China); free providers may log or use inputs for training (M16's
+   verbatim disclaimer covers this and stays unchanged); GitHub Search
+   receives skill-gap terms derived from the analysis, never resume text;
+   the developer receives nothing (no telemetry, no backend).
+3. The hosted privacy policy (T-M22) must mirror this destination list —
+   it is the same register, restated for the store. When M17 lands,
+   LangSmith (opt-in tracing) joins the list — see
+   [14-observability.md](14-observability.md); do not add it before the
+   code exists.
+
+**First-use consent (gate is not UI-only — the M16 lesson):** a
+`#disclosureack` checkbox at the upload surface, never pre-checked, backed
+by a versioned `disclosureConsent` flag in `chrome.storage.local`
+({disclosure_consent_at, consent_version}, bumped when the copy changes —
+same shape as M16's `freeConsent`). Upload **and** analyze refuse until it
+is checked; `POST /api/resume` additionally requires `X-Disclosure-Ack: 1`
+(409 otherwise), so no future client can upload without the disclosure
+having been presented. Runs (`/api/run`) keep their existing gates (M15
+pre-flight, M16 `privacy_ack`); adding a second ack there would churn
+every harness for no new exposure — the upload-time consent covers the
+first data flow.
+
+**Deferred (user decision 2026-10-11, restore triggers in
+`03-milestones.md` §Deferred):** PII minimization (strip names/contact
+details before LLM calls — skill extraction never needs them) and a manual
+no-cloud extraction toggle (the regex path already exists server-side).
+
 ## M14 — self-serve setup (✅ Built 2026-10-04)
 
 Goal: the end user never opens a terminal for setup — resume, LLM key and
