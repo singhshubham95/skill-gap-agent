@@ -1,0 +1,116 @@
+# CHROMEWEBSTORE.md — Chrome Web Store submission register
+
+Maintained as the extension changes (the store dashboard asks for every
+item here). Derived artifact — the design lives in
+[specs/12-extension.md](specs/12-extension.md) §Security posture +
+§Data disclosure; the legal prose lives in
+[docs/privacy-policy.md](docs/privacy-policy.md). **Status: prepared
+2026-10-11 (T-M22); not yet submitted.**
+
+## Single purpose
+
+Capture the LinkedIn job description the user is viewing (on demand) and
+generate a ranked skill-gap analysis and practice plan, using a local
+companion program running on the user's own computer.
+
+## Privacy policy URL
+
+`https://singhshubham95.github.io/skill-gap-agent/privacy-policy.html`
+(GitHub Pages from `/docs` — **enable in repo Settings → Pages → Deploy
+from a branch → `main` → `/docs`**, then confirm the URL live before
+submitting; the store listing links it).
+
+## Privacy practices declarations (dashboard)
+
+| Data type | Purpose | Linked to the user? | Transmitted? |
+|---|---|---|---|
+| Personally identifiable info (resume: name, contact details, work history) | Core functionality — skill extraction and gap analysis | No | Yes — to the LLM provider the user selects (HTTPS), never to the developer |
+| Web page content (job descriptions on the page being viewed) | Core functionality — gap analysis input | No | Yes — same as above |
+| Authentication info (user's own LLM API key) | Core functionality — calling the provider the user chose | No | Only to its own provider; stored in the OS keyring, never in the browser |
+| Website content / activity (GitHub search terms derived from gaps) | Core functionality — sourcing practice issues | No | Yes — to GitHub's public Search API (gap names only) |
+
+Affirmative Limited Use statement (also on the privacy policy site): our
+use of user data complies with the Chrome Web Store User Data Policy,
+including the Limited Use requirements. No sale, no ads, no data brokers,
+no human review of user data — the developer never receives user data
+(no telemetry, no backend).
+
+## Permission justifications (dashboard — one per manifest entry)
+
+| Manifest entry | Justification |
+|---|---|
+| `"permissions": ["sidePanel"]` | Opens the analysis panel (the product's only UI surface) from the toolbar action; the panel stays open while the user browses between job descriptions. |
+| `"permissions": ["storage"]` | Persists the user's captured job-description list and panel preferences locally (`chrome.storage.local`) so they survive browser restarts. No data is synced or transmitted by this permission. |
+| `"host_permissions": ["http://localhost/*", "http://127.0.0.1/*"]` | Talks only to the companion program the user runs on their own machine (`tools/start-server.bat`), on loopback. This is where all processing happens; no remote host is contacted by the extension itself. |
+| `"content_scripts": ["https://www.linkedin.com/jobs/*"]` | Reads the job description from the LinkedIn job page the user is currently viewing — strictly when the user clicks **Capture JD** in the panel. No background collection, no other LinkedIn pages, no data read without the user's explicit click. |
+| `background.service_worker` | Standard MV3 service worker; only opens the side panel on toolbar click. |
+| (network to LLM providers + GitHub happens in the **local companion**, not by extension permissions) | The extension itself makes no remote requests beyond loopback; the companion's HTTPS flows are disclosed in the privacy policy and in-product. |
+
+## Store listing copy (draft)
+
+**Name:** Skill-Gap Agent
+
+**Summary (132 chars max):** Capture the job descriptions you're viewing
+and get a ranked skill-gap analysis plus a hands-on practice plan —
+processed on your own computer.
+
+**Detailed description:**
+
+> Skill-Gap Agent turns the job descriptions you're browsing into a
+> concrete plan:
+>
+> 1. **Capture** — click Capture while viewing a LinkedIn job description;
+>    repeat for as many jobs as you like.
+> 2. **Analyze** — see which skills those jobs demand ranked against your
+>    own background (upload a resume or start from a skills list).
+> 3. **Plan** — get grounded practice projects and curated
+>    good-first-issues from real open-source repos.
+>
+> **Important — requires a free companion app:** the analysis runs from a
+> small program on your own computer (download from the project page;
+> one-time setup of a few minutes). The extension is the panel; the
+> companion does the work locally. No account, no server, no telemetry.
+>
+> **Your data:** everything stays on your computer except what must be
+> sent for AI analysis — to the AI provider you choose (bring your own
+> key, or use the free tier with a consent prompt), and skill-gap search
+> terms to GitHub. See the Privacy Policy for details. Free AI providers
+> may log or use inputs for training; the extension tells you before you
+> opt in.
+>
+> Analysis and plans are generated by AI and are advisory.
+>
+> Skill-Gap Agent is not affiliated with, endorsed by, or sponsored by
+> LinkedIn Corporation. LinkedIn is a trademark of its respective owner.
+
+**Category:** Productivity · **Language:** English
+
+## Reviewer test instructions
+
+1. Start the companion: double-click `tools/start-server.bat` in the
+   distributed project package (or `python -m skill_gap_agent.server`).
+   The console window that stays open *is* the service.
+2. Load the extension; click the toolbar icon — the side panel opens and
+   shows the local-agent connection status.
+3. Open any `linkedin.com/jobs/...` job page → **Capture JD** →
+   **Analyze gaps**. Rule-based mode (no AI key needed) produces labeled
+   non-AI results; LLM modes need the user's own key or the free-tier
+   consent flow.
+4. Without the companion running, the panel shows an offline state and
+   every remote feature is inert — expected behavior.
+
+## Pre-submit checklist (owner actions)
+
+- [ ] Merge this branch to `main`; enable GitHub Pages (Settings → Pages →
+      Deploy from a branch → `main` → `/docs`); confirm the privacy-policy
+      URL is live.
+- [ ] Trademark search on "Skill-Gap Agent"; rename the listing if it
+      collides.
+- [ ] Create the Chrome Web Store developer account (one-time fee + ID
+      verification).
+- [ ] Paste the declarations + justifications above into the dashboard;
+      upload icons (bundled in `extension/icons/`); link the privacy
+      policy URL.
+- [ ] Decide the distribution story for the companion app (signed
+      installer or source+instructions) — the listing's "Important"
+      paragraph must match what actually ships.

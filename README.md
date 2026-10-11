@@ -125,6 +125,15 @@ Design detail in
 [specs/12-extension.md](specs/12-extension.md); build order in
 [specs/03-milestones.md](specs/03-milestones.md).
 
+## Privacy & store readiness
+
+Data handling is described in [docs/privacy-policy.md](docs/privacy-policy.md)
+(what leaves the machine: the AI provider you choose + GitHub search terms;
+the developer receives nothing). Chrome Web Store submission material —
+permission justifications, declarations, listing copy — is maintained in
+[CHROMEWEBSTORE.md](CHROMEWEBSTORE.md); bundled dependency licenses in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ## For contributors
 
 The specs are the onboarding path — they document not just the design but the

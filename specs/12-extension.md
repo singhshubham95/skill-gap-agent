@@ -182,11 +182,15 @@ in-product claim that contradicts it — the copy is the contract.
    verbatim disclaimer covers this and stays unchanged); GitHub Search
    receives skill-gap terms derived from the analysis, never resume text;
    the developer receives nothing (no telemetry, no backend).
-3. The hosted privacy policy (T-M22) must mirror this destination list —
-   it is the same register, restated for the store. When M17 lands,
-   LangSmith (opt-in tracing) joins the list — see
+3. The hosted privacy policy
+   ([../docs/privacy-policy.md](../docs/privacy-policy.md), served from
+   GitHub Pages) mirrors this destination list — it is the same register,
+   restated for the store audience. When M17 lands, LangSmith (opt-in
+   tracing) joins **both** lists — see
    [14-observability.md](14-observability.md); do not add it before the
-   code exists.
+   code exists. The store-submission register (permission justifications,
+   dashboard declarations, listing copy) is the derived
+   [../CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md) — same mirror rule.
 
 **First-use consent (gate is not UI-only — the M16 lesson):** a
 `#disclosureack` checkbox at the upload surface, never pre-checked, backed
