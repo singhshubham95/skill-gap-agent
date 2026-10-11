@@ -12,6 +12,11 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M20: Public-release hardening — request-origin gate (web pages can no
+  longer call the local agent), Content-Type enforcement, `skills_path`
+  containment, https-only non-loopback `serverBase`; closes security
+  findings S1/L4 (spec:
+  [12-extension.md](../specs/12-extension.md) §Security posture)
 - T-M19: Light/dark theme — panel + plan follow the OS theme
   (`prefers-color-scheme`) with a minimal Auto/Light/Dark override button;
   plan follows via serve-time `?theme=` injection (plan.html stays

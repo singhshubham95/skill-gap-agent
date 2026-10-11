@@ -129,3 +129,15 @@ provider retention/training caveats (L5); AI-generated-content notice (L6).
 Acceptable: remaining exposure is mainly LinkedIn contract/takedown risk
 (inherent to the product's premise — manageable, not eliminable) and
 third-party LLM data handling (disclosed, user-chosen).
+
+## 7. Remediation status (updated 2026-10-11)
+
+| Finding | Status |
+|---|---|
+| S1 — unauthenticated local API | ✅ Fixed (T-M20): request-origin gate + Content-Type enforcement + `skills_path` containment. Session-token pairing deliberately deferred — same-user processes can read `output/` directly anyway (restore trigger: `specs/03-milestones.md` §Deferred #15). |
+| S2 — "stays on your machine" disclosure | ⚠️ Partial: M16 added the free-mode consent gate + third-party disclosure; the upload-screen copy and paid-mode disclosure remain (follow-up task). |
+| L1/L2 — privacy policy, declarations, store packaging | ⚠️ Open — follow-up work order. |
+| L3 — LinkedIn posture | ⚠️ Open — follow-up work order (product decision needed). |
+| L4 — plaintext `serverBase` | ✅ Fixed (T-M20): `http://` is loopback-only; other hosts require `https://`; invalid values never persist. |
+| L5/L6 — provider disclosure, PII minimization, AI transparency | ⚠️ Partial (M15 provenance labels, M16 free-mode disclosure); named-provider disclosure + minimization remain. |
+| L7 — licensing housekeeping | ⚠️ Open. |

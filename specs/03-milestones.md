@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M19; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M20; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -125,7 +125,9 @@ observability + judge evaluation tooling (opt-in LangSmith tracing,
 golden-set eval, CI) — likewise not a pipeline stage. M18 is panel
 simplification (presentation-only over the built extension surface) —
 likewise not a pipeline stage. M19 is light/dark theming (presentation
-only, panel + plan surfaces) — likewise not a pipeline stage.
+only, panel + plan surfaces) — likewise not a pipeline stage. M20 is
+request-origin hardening (public-release security over the built local
+API) — likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -675,6 +677,45 @@ only, panel + plan surfaces) — likewise not a pipeline stage.
       panel — the theme had to ride the iframe URL as a serve-time
       injection, which incidentally keeps `plan.html`'s no-JS invariant
       testable at the HTTP layer.
+20. **Request-origin gate + transport containment (public-release
+    hardening).** ✅ Built 2026-10-11 (design home:
+    [12-extension.md](12-extension.md) §Security posture; work order
+    [tasks/T-M20.md](tasks/T-M20.md)). From the public-release review
+    ([../SECURITY-REVIEW.md](../SECURITY-REVIEW.md) S1/L4): three
+    server-side barriers — request-origin gate (foreign / `null` `Origin`
+    refused 403 before any handler runs; headerless navigations, CLI and
+    harnesses unchanged), Content-Type enforcement (JSON endpoints accept
+    `application/json` only; `/api/resume` accepts
+    `application/octet-stream` only), `skills_path` containment (existing
+    `.json` under repo root ∪ OS temp dir, checked before any run starts)
+    — plus the panel's `serverBase` transport rule (`http://` is
+    loopback-only, other hosts require `https://`, invalid values never
+    persisted). Decision rows in [02-decisions.md](02-decisions.md)
+    (M20); the M13 row's "preflight is the barrier" claim is struck there
+    as superseded.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M20` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m20_check` (origin gate incl. `null` + self +
+      extension origins + headerless callers; text/plain POST and wrong
+      resume type refused 415 with no run started; outside-repo and
+      non-json `skills_path` refused 400; panel transport rule), and the
+      m10–m16 + m18 + m19 regressions (`board/verify-T-M20.md`).
+    - **Learnings:** (a) The M13 trust model rested on "JSON
+      `Content-Type` forces a failing preflight" — wrong: a JSON body sent
+      as `text/plain` is a "simple request" and never preflights. The
+      honest barrier is the request-origin header (which web pages cannot
+      omit or forge); Content-Type enforcement is the second lock, not
+      the first. (b) Same-user local processes bypass every
+      browser-context check by sending no `Origin` — and can read
+      `output/` directly anyway, so session-token pairing was judged UX
+      cost without boundary gain (deferred with restore trigger,
+      §Deferred #15). (c) The m13/m15 harness fixtures live in the OS
+      temp dir, so `skills_path` containment must allow that root or the
+      green suite breaks; the rule names both roots explicitly. (d) The
+      verify harness resolves bare `python`/`ruff`/`pytest` from the
+      ambient PATH — run it with `.venv\Scripts` on PATH, or every check
+      fails at "not recognized" (a false red that looks like mass
+      regression).
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -697,6 +738,7 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
 | 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
 | 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
+| 15 | **Session-token pairing for the local agent API** (per-session bearer token minted at server start, required on every request) | M20's request-origin gate + Content-Type enforcement + `skills_path` containment only | Same-user processes send no `Origin` and can read `output/` directly anyway — tokens add pairing friction without raising that boundary. Restore trigger: the product starts handling other users' data or running as a service (multi-user machines become a supported target). |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
