@@ -663,8 +663,9 @@ only, panel + plan surfaces) — likewise not a pipeline stage.
       `node --check`, `m19_check` (plan stylesheet palettes + JS-free
       guard + `?theme=` injection incl. rejected values + disk untouched;
       panel wiring + persistence), and the m10–m16 + m18 regressions
-      (`board/verify-T-M19.md`). A visual look at both themes is the
-      human's step (§Open).
+      (`board/verify-T-M19.md`). **Live look ✅ 2026-10-11:** human
+      confirmed Auto/Light/Dark switching on the panel and the plan —
+      works as expected.
     - **Learnings:** (a) Windows intermittently aborts loopback
       connections (`WinError 10053`) under long multi-check runs — m14's
       request helper died on a mid-response abort despite the server
@@ -699,11 +700,6 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
-- **M19 live look (done criterion 5).** The automated suite is green
-  (2026-10-11); one visual pass is the human's step: toggle
-  Auto/Light/Dark in the panel and confirm both the panel and the plan
-  render with readable contrast in each (plus the OS-theme default).
-  Record the result in the M19 entry above, then delete this item.
 - **Extraction latency (S1/S2).** The M8 resume-extraction LLM call (one
   call, full resume text, hierarchical JSON out) took ~19 minutes via
   DeepSeek V4 Flash on OpenRouter (2026-09-23), vs. ~3–10s for

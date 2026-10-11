@@ -15,7 +15,7 @@ session). Milestone history M1–M15 predates this file and lives in
 - T-M19: Light/dark theme — panel + plan follow the OS theme
   (`prefers-color-scheme`) with a minimal Auto/Light/Dark override button;
   plan follows via serve-time `?theme=` injection (plan.html stays
-  JS-free); visual pass pending (spec:
+  JS-free); visual pass confirmed 2026-10-11 (spec:
   [12-extension.md](../specs/12-extension.md) §M19)
 - T-M18: Panel simplification — state-driven side panel (key check →
   free/paid/rule mode chips or "Create free LLM key"; paste form behind
