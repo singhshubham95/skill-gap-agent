@@ -87,6 +87,8 @@ global.document = {
   createElement: (tag) => new El(tag),
   querySelector: (sel) => (sel.includes("mode") ? checkedMode : null),
   querySelectorAll: (sel) => (sel.includes("mode") ? modeRadios : []),
+  // M19 theme applier touches this on load (specs/12-extension.md §M19).
+  documentElement: new El("html"),
 };
 global.chrome = {
   storage: { local: { get: async () => ({}), set: async () => {} } },

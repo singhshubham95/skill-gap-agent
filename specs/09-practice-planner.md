@@ -86,7 +86,8 @@ end-to-end holds.
 `plan.md` (ranked table + verdicts + JD traceability + projects +
 Good-First-Issues per gap, M10) and `plan.html` (M10 thin slice: same
 data, clickable issue links — served by the M11 `server.py` local UI;
-later the extension side-panel body).
+later the extension side-panel body). Light/dark theming of `plan.html`
+follows the panel — see [12-extension.md](12-extension.md) §M19.
 
 ## History (links, not copies)
 

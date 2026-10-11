@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M18; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M19; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -124,7 +124,8 @@ OAuth connect, retry hardening) — likewise not a pipeline stage. M17 is
 observability + judge evaluation tooling (opt-in LangSmith tracing,
 golden-set eval, CI) — likewise not a pipeline stage. M18 is panel
 simplification (presentation-only over the built extension surface) —
-likewise not a pipeline stage.
+likewise not a pipeline stage. M19 is light/dark theming (presentation
+only, panel + plan surfaces) — likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -527,9 +528,11 @@ likewise not a pipeline stage.
       clean; `m10_check`–`m15_check` regressions PASS
       (`board/verify-T-M16.md`). The new checks were verified red→green
       against the pre-fix code.
-    - **Open (blocks full closure — §Open below):** done criterion 6,
-      the live interactive pass (real free OpenRouter account: connect,
-      one free-mode analyze + plan, one observed quota/429 message).
+    - **Live interactive pass (2026-10-11, criterion 6 ✅):** human
+      confirmed the end-to-end interactive flow on the M18 rebuilt panel
+      (free-tier connect flow included, per the Deferred #15 restore
+      trigger) and signed off all related specs/tasks done. Deferred #15
+      and the §Open item are closed with it.
     - **Learnings:**
       - **Retry-loop state must live at the logical-call level.** The
         `:free` rotation was kept inside `chat()`; `judge()` re-invokes
@@ -642,7 +645,35 @@ likewise not a pipeline stage.
       reusable for any future panel change. (c) Panel file rewrites must
       stay UTF-8 without BOM (PowerShell `Set-Content`/`>` mangles the
       em-dash copy); `.NET WriteAllText` with `UTF8Encoding($false)` is
-      the safe path.
+      the safe path. **Live interactive pass ✅ 2026-10-11:** human
+      confirmed the rebuilt panel end-to-end (incl. the free-tier connect
+      flow) and signed the task done.
+
+19. **Light/dark theme (system-driven + minimal override).** ✅ Built
+    2026-10-11 (design home: [12-extension.md](12-extension.md) §M19).
+    Presentation-only: panel + plan follow the OS theme via CSS
+    `prefers-color-scheme`; a header button cycles Auto/Light/Dark
+    (persisted as `themePref`); the plan follows the panel through
+    `GET /plan.html?theme=dark|light` → serve-time `data-theme` injection
+    (invalid values ignored; `plan.html` stays self-contained + JS-free
+    and gains its first stylesheet). Decision rows in
+    [02-decisions.md](02-decisions.md) (M19).
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M19` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m19_check` (plan stylesheet palettes + JS-free
+      guard + `?theme=` injection incl. rejected values + disk untouched;
+      panel wiring + persistence), and the m10–m16 + m18 regressions
+      (`board/verify-T-M19.md`). A visual look at both themes is the
+      human's step (§Open).
+    - **Learnings:** (a) Windows intermittently aborts loopback
+      connections (`WinError 10053`) under long multi-check runs — m14's
+      request helper died on a mid-response abort despite the server
+      having logged the 413; the harness now retries once on
+      connection-level `OSError` (idempotent POSTs only). (b) The
+      cross-origin, script-blocked plan iframe cannot be themed from the
+      panel — the theme had to ride the iframe URL as a serve-time
+      injection, which incidentally keeps `plan.html`'s no-JS invariant
+      testable at the HTTP layer.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -665,17 +696,14 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
 | 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
 | 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
-| 15 | **M16 live interactive pass (AC6)** — free-tier connect + free-mode analyze + quota observation | Automated suite green; human live pass with real free OpenRouter account pending | Test during M18 live interactive pass (panel simplification includes free-tier connect flow); restore if M18 pass doesn't cover free-tier connect + quota observation. |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
-- **M18 live interactive pass (done criterion 5).** The automated suite is
-  green (2026-10-11); one live pass on the rebuilt panel is the human's
-  step: no-key state → "Create free LLM key" → free-mode analyze with the
-  consent block → paid/rule chips → paste-form fallback. Per Deferred #15's
-  restore trigger, this pass should also observe a quota/429 message to
-  close M16's live criterion; record both in M16 + M18 above, then delete
-  this item and the Deferred #15 row.
+- **M19 live look (done criterion 5).** The automated suite is green
+  (2026-10-11); one visual pass is the human's step: toggle
+  Auto/Light/Dark in the panel and confirm both the panel and the plan
+  render with readable contrast in each (plus the OS-theme default).
+  Record the result in the M19 entry above, then delete this item.
 - **Extraction latency (S1/S2).** The M8 resume-extraction LLM call (one
   call, full resume text, hierarchical JSON out) took ~19 minutes via
   DeepSeek V4 Flash on OpenRouter (2026-09-23), vs. ~3–10s for

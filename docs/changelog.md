@@ -12,6 +12,11 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M19: Light/dark theme — panel + plan follow the OS theme
+  (`prefers-color-scheme`) with a minimal Auto/Light/Dark override button;
+  plan follows via serve-time `?theme=` injection (plan.html stays
+  JS-free); visual pass pending (spec:
+  [12-extension.md](../specs/12-extension.md) §M19)
 - T-M18: Panel simplification — state-driven side panel (key check →
   free/paid/rule mode chips or "Create free LLM key"; paste form behind
   "I already have a key"), key validation via the free key-info endpoint
@@ -21,5 +26,6 @@ session). Milestone history M1–M15 predates this file and lives in
 - T-M16: Free-tier LLM access — panel "Connect free LLM" (OpenRouter OAuth
   PKCE → OS keyring, no pasting), opt-in free-model mode behind a consent
   gate, retry hardening (classification, bounded attempts, `:free`
-  fallback, per-touchpoint timeouts); live interactive pass pending (spec:
+  fallback, per-touchpoint timeouts); live interactive pass closed
+  2026-10-11 via the M18 live pass (spec:
   [05-ai-caller.md](../specs/05-ai-caller.md) §Free-tier routing)

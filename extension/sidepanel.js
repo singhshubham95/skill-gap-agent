@@ -37,6 +37,9 @@ let server = DEFAULT_SERVER;
 // M18: where the current key lives (the paste form's provider dropdown
 // switches it); the free OAuth flow always lands on openrouter.
 let activeProvider = "openrouter";
+// M19 (specs/12-extension.md §M19): "auto" follows the OS theme via CSS
+// prefers-color-scheme; "light"/"dark" force it (panel + plan iframe).
+let themePref = "auto";
 let jds = [];
 let running = false;
 // M16 B: persisted consent flag {free_consent_at, consent_version} — a
@@ -49,17 +52,42 @@ let oauthPending = null;
 
 async function loadState() {
   const stored = await chrome.storage.local.get([
-    "capturedJds", "serverBase", "freeConsent",
+    "capturedJds", "serverBase", "freeConsent", "themePref",
   ]);
   jds = Array.isArray(stored.capturedJds) ? stored.capturedJds : [];
   server = stored.serverBase || DEFAULT_SERVER;
   $("serverBase").value = server;
   // M16 B: consent is a flag + timestamp + version only, never data.
   freeConsent = stored.freeConsent || null;
+  // M19: a preference flag only; "auto" is the system theme.
+  themePref = ["light", "dark"].includes(stored.themePref)
+    ? stored.themePref
+    : "auto";
 }
 
 async function saveJds() {
   await chrome.storage.local.set({ capturedJds: jds });
+}
+
+// ---- M19: theme (system by default, minimal override) ---------------------
+
+function applyTheme() {
+  // Auto removes the override and hands the choice back to the OS theme
+  // (CSS prefers-color-scheme); light/dark force it on both surfaces.
+  if (themePref === "auto") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", themePref);
+  }
+  $("themebtn").textContent =
+    "Theme: " + themePref[0].toUpperCase() + themePref.slice(1);
+  // The plan follows the panel (specs/12-extension.md §M19).
+  if (!$("planbox").hidden) loadPlan();
+}
+
+function planUrl() {
+  const q = themePref === "auto" ? "" : "?theme=" + themePref;
+  return server + "/plan.html" + q;
 }
 
 // ---- status line ----------------------------------------------------------
@@ -613,7 +641,7 @@ function loadPlan() {
   // Re-assigning the same src does not reload an iframe, so drop it first.
   const frame = $("planframe");
   frame.removeAttribute("src");
-  frame.src = server + "/plan.html";
+  frame.src = planUrl();
 }
 
 function showPlan() {
@@ -712,6 +740,12 @@ async function checkConnection() {
 
 // ---- wiring ---------------------------------------------------------------
 
+$("themebtn").addEventListener("click", async () => {
+  const order = ["auto", "light", "dark"];
+  themePref = order[(order.indexOf(themePref) + 1) % order.length];
+  await chrome.storage.local.set({ themePref });
+  applyTheme();
+});
 $("capture").addEventListener("click", captureJd);
 $("analyze").addEventListener("click", analyze);
 $("plan").addEventListener("click", generatePlan);
@@ -764,6 +798,7 @@ $("serverBase").addEventListener("change", async (e) => {
 
 loadState().then(() => {
   renderJds();
+  applyTheme();
   onModeChange();
   checkConnection();
   refreshKeyStatus();

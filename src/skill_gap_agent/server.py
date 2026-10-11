@@ -674,7 +674,19 @@ class Handler(BaseHTTPRequestHandler):
                     "text/html; charset=utf-8",
                 )
                 return
-            self._send(200, plan.read_bytes(), "text/html; charset=utf-8")
+            # M19 (specs/12-extension.md §M19): theme override from the
+            # panel's iframe URL — inject data-theme at serve time for
+            # exactly the two valid values; anything else is ignored and
+            # the on-disk file is never modified.
+            data = plan.read_bytes()
+            theme = (urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query
+            ).get("theme") or [""])[0]
+            if theme in ("light", "dark"):
+                data = data.replace(
+                    b"<html>", f"<html data-theme='{theme}'>".encode(), 1
+                )
+            self._send(200, data, "text/html; charset=utf-8")
         elif path.startswith("/jds/"):
             # JD viewer: exact-name match only (no path traversal — the
             # filename must equal a real file in data/jds/ or, for

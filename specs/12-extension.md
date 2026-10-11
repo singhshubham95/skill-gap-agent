@@ -401,6 +401,62 @@ plan.
    clean; one live interactive pass recorded in
    [03-milestones.md](03-milestones.md) M18.
 
+## M19 — light/dark theme (✅ Built 2026-10-11; §Done criteria below)
+
+The panel and the plan render in the OS theme by default, with one minimal
+override button for when the user wants a different look. Decision rows
+in [02-decisions.md](02-decisions.md) (M19); roadmap entry
+[03-milestones.md](03-milestones.md) M19. Presentation-only: no run
+contract, storage (beyond the one preference flag), or rendering-safety
+change (escaping, link targets, sandbox all untouched).
+
+### Theme source: system first, one button on top
+
+- **System path (default, JS-free):** both surfaces carry CSS
+  `@media (prefers-color-scheme: dark)` palettes — the browser reports the
+  OS theme and the stylesheet follows. `color-scheme: light dark` lets
+  form controls and scrollbars follow too.
+- **Override button** in the panel header (`Theme: Auto/Light/Dark`):
+  cycles Auto → Light → Dark. The choice persists in
+  `chrome.storage.local` as `themePref` (a preference flag only). Auto
+  removes the override and returns to the system path; Light/Dark set
+  `data-theme="light|dark"` on the panel root, whose selectors outrank the
+  media query.
+- The same two forced palettes exist in `plan.html`'s stylesheet, keyed on
+  `data-theme` — so the plan can be overridden by the same mechanism.
+
+### Plan follows the panel
+
+The plan iframe is cross-origin and script-blocked (M13 sandbox), so the
+panel cannot reach into it. Instead the panel appends
+`?theme=dark|light` to the iframe URL whenever the override is active
+(Auto = no parameter), and `GET /plan.html` injects
+`<html data-theme='…'>` at serve time for exactly those two values (any
+other value is ignored — no attribute, no injection surface). The file on
+disk is unchanged. **`plan.html` stays self-contained and JS-free** — the
+sandbox has no `allow-scripts`, so an in-page theme script could not run
+even if the no-JS decision allowed one.
+
+### plan.html gains its first stylesheet
+
+The M10 renderer emitted unstyled HTML. The theme work needs palettes, so
+`render_plan_html` now emits one inline `<style>`: light/dark CSS-variable
+palettes, readable typography, and the two `data-theme` override blocks.
+Content, escaping and `target='_blank'` links are byte-identical.
+
+### Done criteria (M19)
+
+1. Panel and plan follow the OS theme with no interaction.
+2. The header button cycles Auto/Light/Dark, persists across panel
+   restarts, and overrides the system theme on both surfaces.
+3. `GET /plan.html?theme=dark|light` injects the attribute; other values
+   are ignored; `plan.html` on disk gains no JS and stays self-contained.
+4. Both themes keep readable contrast on every panel element (inputs,
+   buttons, banner, chips, gap captions).
+5. `m19_check.py` + `test_m19.py` offline PASS; `ruff check .`, `pytest`,
+   `node --check` clean; m10–m18 regressions PASS (record in
+   [03-milestones.md](03-milestones.md) M19).
+
 ## Explicit non-goals (M13)
 
 In-page gap marking on the JD text
