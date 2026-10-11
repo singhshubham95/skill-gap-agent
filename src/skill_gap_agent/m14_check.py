@@ -98,11 +98,19 @@ def _request(
     base: str, path: str, data: bytes, headers: dict[str, str]
 ) -> tuple[int, bytes]:
     req = urllib.request.Request(base + path, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, resp.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        except OSError:
+            # Windows intermittently aborts loopback connections
+            # (WinError 10053) under multi-check runs — retry once; the
+            # harness POSTs are idempotent.
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable")
 
 
 def _post_json(base: str, path: str, payload: dict) -> tuple[int, dict]:

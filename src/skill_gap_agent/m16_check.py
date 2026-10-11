@@ -275,9 +275,11 @@ def check_oauth_connect_flow() -> None:
 
         # Panel surface: Connect button + PKCE wiring; no key in storage;
         # the panel sends {code_verifier, state} only — never a code.
+        # M18: the free-tier toggle became the "free" mode chip; the M16 B
+        # consent checkbox is unchanged (specs/12-extension.md §M18).
         html = (EXTENSION_DIR / "sidepanel.html").read_text(encoding="utf-8")
-        assert 'id="connectfree"' in html, "Connect free LLM button missing"
-        assert 'id="freetier"' in html and 'id="privacyack"' in html, html
+        assert 'id="connectfree"' in html, "Create free LLM key button missing"
+        assert 'id="modefree"' in html and 'id="privacyack"' in html, html
         js = (EXTENSION_DIR / "sidepanel.js").read_text(encoding="utf-8")
         assert "code_challenge" in js and "S256" in js, "PKCE wiring missing"
         assert "/api/oauth/pending" in js and "/api/oauth/exchange" in js, js
@@ -286,7 +288,7 @@ def check_oauth_connect_flow() -> None:
         assert re.search(r"code_verifier:\s*verifier", js), (
             "exchange body must carry code_verifier"
         )
-        assert not re.search(r"code:\s*(?!verifier)", js.split("exchangeOauth")[1][:600] if "exchangeOauth" in js else ""), (
+        assert not re.search(r"code:\s*(?!verifier)", js.split("finishOauth")[1][:600] if "finishOauth" in js else ""), (
             "exchange body must never carry the code"
         )
         assert not re.search(

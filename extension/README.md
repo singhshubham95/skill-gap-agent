@@ -1,4 +1,4 @@
-# Skill-Gap Agent — Chrome extension (M13 + M14)
+# Skill-Gap Agent — Chrome extension (M13 + M14 + M18)
 
 The end goal from [../specs/09-practice-planner.md](../specs/09-practice-planner.md)
 §End goal: open a JD in the browser, capture it, and get the skill gaps +
@@ -7,11 +7,13 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
 
 ## What it does
 
-0. **Setup** — upload your resume (PDF/DOCX/TXT) and, if you want LLM
-   analysis, keep **Use LLM intelligence** on and paste the LLM API key
-   right in the panel. No command-line flags, no env vars: the key goes to
-   the local agent, which keeps it in the OS keyring. Toggle off = a
-   clearly labeled **Rule-based** run (no LLM calls).
+0. **Setup** — upload your resume (PDF/DOCX/TXT). For LLM analysis the
+   panel checks whether a key is saved and shows one of two states: with a
+   key, pick **Free model**, **Paid model** or **Rule-based**; without one,
+   **Create free LLM key** (one click, no key to paste) or run
+   rule-based. No command-line flags, no env vars: keys go to the local
+   agent, which keeps them in the OS keyring. **I already have a key**
+   opens a paste form for other providers (GLM, OpenAI, OpenRouter).
 1. **Capture JD** — reads the LinkedIn job description on the active tab
    (same extraction as [../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js))
    and appends it to a list. Navigate to the next JD and capture again —
@@ -50,13 +52,17 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
      machine (`output/uploads/`); the panel shows the extracted skill
      count. First upload of a new resume can take minutes (LLM
      extraction); the same file is instant afterwards.
-   - **Analyze gaps › LLM key** — shown while **Use LLM intelligence** is
-     on. Paste the API key and click **Save key**. "Remember on this
-     machine" stores it in the OS credential vault (Windows Credential
-     Manager / macOS Keychain); uncheck it to keep the key for this server
-     session only. The key is never stored in the browser. With the
-     toggle on and no key saved, **Analyze gaps** refuses up front with
-     the same message — it will not quietly run without the LLM.
+   - **Analyze gaps › key state** — the panel verifies a saved key with a
+     free key-info call and shows `Key ✓ verified` (or "couldn't verify —
+     runs will retry"; validation never blocks a run). **Create free LLM
+     key** opens an OpenRouter login and stores the minted key in the OS
+     credential vault (Windows Credential Manager / macOS Keychain).
+     **I already have a key** reveals the paste form ("Remember on this
+     machine" = keyring; uncheck for this server session only). The key is
+     never stored in the browser. LLM modes with no key are refused up
+     front — the panel will not quietly run without the LLM. Picking
+     **Free model** reveals the consent block (free providers may log
+     inputs); runs without consent are refused server-side too.
 
 ## First capture
 
@@ -74,7 +80,7 @@ one-time reload — the content script is injected on page load.)
   only; the plan renders in a sandboxed iframe served by the local agent.
   Every link in the plan opens in a **new browser tab**, so a mis-click
   cannot navigate the panel away from the plan; if the plan view ever gets
-  lost anyway, **Reopen plan** brings it straight back — `plan.html` stays
-  on disk, no re-run needed.
+  lost anyway, a **Reopen plan** button appears automatically and brings
+  it straight back — `plan.html` stays on disk, no re-run needed.
 - Capture is LinkedIn-only for now (like the bookmarklet); generic JD pages
   are recorded future work.

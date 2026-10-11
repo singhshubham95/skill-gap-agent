@@ -165,6 +165,43 @@ def render_plan(
     return "\n".join(lines)
 
 
+# M19 (specs/12-extension.md §M19): plan.html's first stylesheet — one
+# self-contained block, no JS. CSS variables carry the light/dark
+# palettes: the system path follows prefers-color-scheme; data-theme is
+# injected at serve time (server.py GET /plan.html?theme=) when the panel
+# override is active. Keep the literal "<html>" tag — the serve-time
+# injection targets it.
+PLAN_STYLE = """
+<style>
+:root { color-scheme: light dark;
+  --bg: #ffffff; --fg: #1f2328; --muted: #57606a; --border: #d8dee4;
+  --accent: #1f6feb; --code: #f6f8fa; }
+body { background: var(--bg); color: var(--fg);
+  font: 15px/1.6 system-ui, sans-serif; max-width: 920px;
+  margin: 0 auto; padding: 24px; }
+h1 { font-size: 1.6em; border-bottom: 1px solid var(--border);
+  padding-bottom: .3em; }
+h2 { font-size: 1.25em; margin-top: 1.6em;
+  border-bottom: 1px solid var(--border); padding-bottom: .2em; }
+h3 { font-size: 1.05em; }
+a { color: var(--accent); }
+pre { background: var(--code); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px; overflow-x: auto; }
+ul { padding-left: 1.4em; }
+em { color: var(--muted); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) {
+  --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
+  --accent: #4493f8; --code: #161b22; } }
+[data-theme='dark'] {
+  --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
+  --accent: #4493f8; --code: #161b22; }
+[data-theme='light'] {
+  --bg: #ffffff; --fg: #1f2328; --muted: #57606a; --border: #d8dee4;
+  --accent: #1f6feb; --code: #f6f8fa; }
+</style>
+"""
+
+
 def render_plan_html(
     gaps: list[Gap],
     projects: list[SynthesizedProject],
@@ -190,7 +227,7 @@ def render_plan_html(
     mode_line, degraded = _mode_block(run_info)
     parts: list[str] = []
     parts.append("<!doctype html><html><head><meta charset='utf-8'>")
-    parts.append("<title>Skill-Gap Plan</title></head><body>")
+    parts.append(f"<title>Skill-Gap Plan</title>{PLAN_STYLE}</head><body>")
     parts.append("<h1>Skill-Gap Plan</h1>")
     parts.append(
         f"<p>Generated from {stats.get('canonical', '?')} canonical + "
