@@ -135,9 +135,10 @@ third-party LLM data handling (disclosed, user-chosen).
 | Finding | Status |
 |---|---|
 | S1 — unauthenticated local API | ✅ Fixed (T-M20): request-origin gate + Content-Type enforcement + `skills_path` containment. Session-token pairing deliberately deferred — same-user processes can read `output/` directly anyway (restore trigger: `specs/03-milestones.md` §Deferred #15). |
-| S2 — "stays on your machine" disclosure | ⚠️ Partial: M16 added the free-mode consent gate + third-party disclosure; the upload-screen copy and paid-mode disclosure remain (follow-up task). |
+| S2 — "stays on your machine" disclosure | ✅ Fixed (T-M21): accurate copy across panel + both READMEs, named destinations, and versioned first-use consent gating upload + analyze (server-enforced `X-Disclosure-Ack` on upload). Manual no-cloud extraction toggle deferred as an enhancement (§Deferred #16). |
 | L1/L2 — privacy policy, declarations, store packaging | ⚠️ Open — follow-up work order. |
 | L3 — LinkedIn posture | ⚠️ Open — follow-up work order (product decision needed). |
 | L4 — plaintext `serverBase` | ✅ Fixed (T-M20): `http://` is loopback-only; other hosts require `https://`; invalid values never persist. |
-| L5/L6 — provider disclosure, PII minimization, AI transparency | ⚠️ Partial (M15 provenance labels, M16 free-mode disclosure); named-provider disclosure + minimization remain. |
+| L5 — named-provider disclosure | ✅ Disclosure side fixed (T-M21): destinations + jurisdictions named in-product; PII minimization deferred (user decision, §Deferred #16). |
+| L6 — AI transparency | ⚠️ Partial (M15 provenance labels, M16 free-mode disclosure); a formal AI-generated-content notice for the store listing remains. |
 | L7 — licensing housekeeping | ⚠️ Open. |

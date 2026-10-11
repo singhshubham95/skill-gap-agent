@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M20; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M21; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -127,7 +127,9 @@ simplification (presentation-only over the built extension surface) —
 likewise not a pipeline stage. M19 is light/dark theming (presentation
 only, panel + plan surfaces) — likewise not a pipeline stage. M20 is
 request-origin hardening (public-release security over the built local
-API) — likewise not a pipeline stage.
+API) — likewise not a pipeline stage. M21 is data-disclosure honesty
+(public-release copy + consent over the built flow) — likewise not a
+pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -716,6 +718,41 @@ API) — likewise not a pipeline stage.
       ambient PATH — run it with `.venv\Scripts` on PATH, or every check
       fails at "not recognized" (a false red that looks like mass
       regression).
+21. **Honest data disclosure — copy, destinations, first-use consent.**
+    ✅ Built 2026-10-11 (design home:
+    [12-extension.md](12-extension.md) §Data disclosure; work order
+    [tasks/T-M21.md](tasks/T-M21.md)). From the public-release review
+    ([../SECURITY-REVIEW.md](../SECURITY-REVIEW.md) S2/L5): the "It stays
+    on your machine" claim is banned from every user-facing surface — the
+    accurate contract is that the *file* stays under `output/uploads/`
+    while the *extracted text* goes over HTTPS to the AI provider the user
+    selects, never to the developer; destinations are named with caveats
+    (OpenRouter → underlying model, default DeepSeek; Z.ai GLM; OpenAI —
+    some processing outside your country; GitHub Search receives skill-gap
+    terms only; M16's free-mode training disclaimer stays verbatim);
+    first-use consent = `#disclosureack` + versioned `disclosureConsent`
+    flag gating upload **and** analyze, with `POST /api/resume` requiring
+    `X-Disclosure-Ack: 1` (gate not UI-only — the M16 lesson applied to
+    the new touchpoint). PII minimization + manual no-cloud extraction
+    toggle deferred (user decision 2026-10-11, §Deferred #16). Decision
+    rows in [02-decisions.md](02-decisions.md) (M21); the M14 row's
+    "resume PII never leaves the machine" claim struck as superseded.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M21` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m21_check` (409 without the ack header + the gate
+      passing with it; banned-claim absence + named destinations + GitHub
+      note across all three surfaces; versioned consent wiring,
+      never-pre-checked checkbox, ack header), and the m10–m16 + m18–m20
+      regressions (`board/verify-T-M21.md`).
+    - **Learnings:** (a) The WinError 10053 loopback abort (M19 learning)
+      is not specific to `m14_check` — it struck both new check helpers
+      on the first full-suite run (both passed standalone). The
+      retry-once-on-`OSError` guard is the shared pattern for every
+      future `mN_check` HTTP helper; `m20_check`'s got patched alongside.
+      (b) Copy consistency is testable: the S2 bug class — a user-facing
+      claim that contradicts the actual data flow — is locked out by
+      plain file assertions. Treat claims about data flows like API
+      contracts: named, asserted, and versioned with the consent copy.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -739,6 +776,7 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
 | 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
 | 15 | **Session-token pairing for the local agent API** (per-session bearer token minted at server start, required on every request) | M20's request-origin gate + Content-Type enforcement + `skills_path` containment only | Same-user processes send no `Origin` and can read `output/` directly anyway — tokens add pairing friction without raising that boundary. Restore trigger: the product starts handling other users' data or running as a service (multi-user machines become a supported target). |
+| 16 | **PII minimization + manual no-cloud extraction toggle** (strip names/contact details before LLM calls; expose the regex extraction path as a deliberate panel option) | M21's disclosure-only contract: accurate copy + named destinations + first-use consent; the regex fallback still runs automatically when no key is set | User decision 2026-10-11 — T-M21 is disclosure-only. Restore triggers: store review pushes for data minimization, or users report discomfort sending contact details to providers (skill extraction never needs them). |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 

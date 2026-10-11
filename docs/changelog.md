@@ -12,6 +12,13 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M21: Honest data disclosure — banned the "stays on your machine" claim
+  (the file is local; the extracted text goes over HTTPS to the selected
+  AI provider, never to the developer), named destinations (OpenRouter →
+  DeepSeek, Z.ai GLM, OpenAI; GitHub gets skill-gap terms only), first-use
+  consent gating upload + analyze with a server-enforced
+  `X-Disclosure-Ack`; fixes S2 + the disclosure side of L5 (spec:
+  [12-extension.md](../specs/12-extension.md) §Data disclosure)
 - T-M20: Public-release hardening — request-origin gate (web pages can no
   longer call the local agent), Content-Type enforcement, `skills_path`
   containment, https-only non-loopback `serverBase`; closes security
