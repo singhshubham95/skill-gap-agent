@@ -35,14 +35,38 @@ anyway. The side panel is the platform's answer to exactly this workflow.
 A content script on `https://www.linkedin.com/jobs/*` ports the extraction
 logic of
 [../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js)
-(find the `[id^="JobDetails_AboutTheJob_"]` block, click its expand button,
-take `innerText` + `document.title` + `location.href`). The panel asks the
-active tab via `chrome.tabs.sendMessage`; the content script answers with
+(find the `[id^="JobDetails_AboutTheJob_"]` block, take `innerText` +
+`document.title` + `location.href`). The panel asks the active tab via
+`chrome.tabs.sendMessage`; the content script answers with
 `{title, url, text}`. The list lives in `chrome.storage.local`
 (`capturedJds`, deduped by URL, re-capture updates text). No `tabs` /
 `activeTab` permissions: the content script returns everything the panel
 needs. JD text is **untrusted web content** — the panel renders it with
 `textContent` only, never `innerHTML`.
+
+**Collapsed descriptions — assist, don't act (M23).** LinkedIn truncates
+long JDs behind a "…see more" control
+(`[data-testid="expandable-text-button"]`). The script **never clicks it**
+(or anything else on the page) — a synthetic click is state-changing
+automation and the strongest ToS signal in the product. Instead, when the
+block is still truncated at capture time, the script:
+
+1. scrolls the control to the center of the viewport
+   (`scrollIntoView({block: "center"})`) and focuses it (focus ring),
+2. paints a persistent Ctrl+F-style yellow highlight on it (inline style:
+   outline + warm background) with a `title` tooltip ("Click to expand the
+   job description, then press Capture again"),
+3. answers `{ok: false, error: …}` so the panel's status line tells the
+   user to expand and retry.
+
+Only the user's click on LinkedIn's own control expands the text; the
+next capture reads it normally. Capture-scoping guardrails (unchanged,
+now explicit): strictly single-page, strictly one user click per capture,
+no batch capture, no scroll harvesting, no reads outside
+`https://www.linkedin.com/jobs/*`. Residual LinkedIn ToS exposure from
+DOM extraction itself is inherent to the product's premise and recorded
+in [02-decisions.md](02-decisions.md) (M23 row) — the assist-not-act rule
+is what keeps the line defensible.
 
 ## Run contract (extension → local server)
 

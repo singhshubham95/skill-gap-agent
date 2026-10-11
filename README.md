@@ -49,7 +49,9 @@ No command-line flags: the side panel handles everything.
    (keyword matching, no LLM calls).
 
 5. **Use it:** open a LinkedIn JD → **Capture JD** (repeat per JD — the
-   list only grows) → **Analyze gaps** → **Generate plan**. Every gap row
+   list only grows; if LinkedIn truncates the description, the panel
+   highlights its "…see more" button — click it yourself and capture
+   again) → **Analyze gaps** → **Generate plan**. Every gap row
    and plan section states its source (`LLM` / `LLM (cached)` /
    `Rule-based`).
 

@@ -93,7 +93,9 @@ processed on your own computer.
 2. Load the extension; click the toolbar icon — the side panel opens and
    shows the local-agent connection status.
 3. Open any `linkedin.com/jobs/...` job page → **Capture JD** →
-   **Analyze gaps**. Rule-based mode (no AI key needed) produces labeled
+   **Analyze gaps**. If the description is truncated, the panel
+   highlights LinkedIn's "…see more" button in yellow — click it yourself
+   and capture again (the extension never clicks page controls). Rule-based mode (no AI key needed) produces labeled
    non-AI results; LLM modes need the user's own key or the free-tier
    consent flow.
 4. Without the companion running, the panel shows an offline state and

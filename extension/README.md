@@ -16,8 +16,11 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
    opens a paste form for other providers (GLM, OpenAI, OpenRouter).
 1. **Capture JD** — reads the LinkedIn job description on the active tab
    (same extraction as [../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js))
-   and appends it to a list. Navigate to the next JD and capture again —
-   the side panel stays open and the list only grows.
+   and appends it to a list. If LinkedIn truncates the description, the
+   panel highlights its "…see more" button — click it yourself and capture
+   again (the extension never clicks anything on the page). Navigate to
+   the next JD and capture again — the side panel stays open and the list
+   only grows.
 2. **Analyze gaps** — sends the collected JDs to the local agent
    (`server.py`) and shows the ranked gap table. First run takes minutes
    (LLM judge); re-analysis reuses cached judgments. Every row states its
@@ -70,8 +73,11 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
 ## First capture
 
 Open a LinkedIn job description (`linkedin.com/jobs/...`) and click
-**Capture JD**. (Tabs opened *before* the extension was installed need a
-one-time reload — the content script is injected on page load.)
+**Capture JD**. If the description is truncated, the panel scrolls
+LinkedIn's "…see more" button into view and highlights it in yellow —
+click it yourself, then capture again. (Tabs opened *before* the extension
+was installed need a one-time reload — the content script is injected on
+page load.)
 
 ## Notes
 
