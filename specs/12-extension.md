@@ -301,6 +301,106 @@ the per-user consent model. Flow:
   with the reason defined in
   [05-ai-caller.md](05-ai-caller.md) §Free-tier routing.
 
+## M18 — panel simplification (✅ Built 2026-10-11; §Done criteria below)
+
+The built panel (M13–M16) exposes every server knob in one flat scroll:
+LLM toggle, provider dropdown, key form, remember checkbox, free-tier
+toggle, consent block, top-N input, server URL. The actual happy path is
+three clicks — Capture → Analyze → Plan. M18 is a **presentation-only**
+milestone: the default view shrinks to the happy path and everything else
+lives behind one disclosure. The run contract, keyring storage, consent
+gate, and provenance labels are unchanged (their homes: §Run contract, M14
+§B, M16 §B, [05-ai-caller.md](05-ai-caller.md) §Provenance vocabulary).
+Decision rows in [02-decisions.md](02-decisions.md) (M18); roadmap entry
+[03-milestones.md](03-milestones.md) M18. This section supersedes the
+*panel surface* descriptions of M14 §B, M15 and M16 §B — their semantics
+stay as written.
+
+### Overall shape
+
+Single scroll (a guided stepper was considered and rejected — hiding the
+JD list behind Back/Next costs context). Every non-essential control moves
+into one collapsed **Settings** block: server URL, top-N default, key
+management ("change key"), re-upload resume. The panel body becomes:
+connection state (silent when fine) → resume line → capture → analyze →
+plan.
+
+### Component-by-component
+
+0. **Header / connection.** The "checking local agent…" line shows only
+   when there is a problem ("Local agent not running — double-click
+   `tools/start-server.bat`"), never when connected. Silence = healthy.
+1. **Resume.** No resume → the current M14 §A upload section (with hint).
+   After upload → one line `Resume: <file> (<n> skills) · Change`; the
+   privacy reassurance copy moves behind a small "why?" disclosure. Upload
+   validation, extraction-path display and SHA-256 cache behavior (M14 §A)
+   unchanged.
+2. **Capture.** Counter merges into the button label ("Capture JD (3)");
+   list renders compact one-line titles; "Clear list" stays a quiet link,
+   only when the list is non-empty.
+3. **Analyze — state-driven mode selection.** On panel open and after any
+   key change the panel reads `GET /api/providers` → `key_set` and renders
+   one of two states:
+   - **Key exists** — a state chip (`Key ✓ verified` / `checking…` /
+     `couldn't verify — runs will retry`) plus exactly three mode chips:
+     **Free model** ("costs nothing; provider may log inputs" →
+     `free_tier: true`, reveals the M16 §B consent block),
+     **Paid model** ("uses your key's credits" → `free_tier: false`),
+     **Rule-based** ("instant, no AI" → `use_llm: false`).
+   - **No key** — a **Create free LLM key** button (the existing M16 §A
+     OAuth flow) plus a quiet "or run rule-based (no AI)" link. The button
+     disappears once the key is created, saved to the keyring, and
+     validated.
+   - **Key validation** = `GET https://openrouter.ai/api/v1/key` with the
+     stored key (auth-only, free, near-instant) — **not** a billable model
+     call. Run once on panel open and after key changes, result cached;
+     a status indicator only, never a hard gate (the M15 pre-flight 409
+     remains the safety net; a key can pass validation and be revoked an
+     hour later). Offline or unverifiable → neutral message, never
+     blocking.
+   - **"I already have a key"** quiet link reveals the current M14 §B
+     paste form (provider dropdown, key, remember, save) — the fallback
+     for OpenRouter-paid / GLM / OpenAI owners. Hidden by default; the
+     free-OAuth button is not the only path in.
+   - "Top gaps" moves to Settings. The M15 degradation banner and
+     per-item provenance labels are unchanged.
+4. **Gap table.** Columns shrink to `# | Skill gap | Score`; `JDs ·
+   Verdict · Source` merge into one small caption line under the skill
+   name (e.g. "demanded by 3 JDs · Weak · Rule-based"). Same information,
+   provenance preserved per item.
+5. **Plan.** Section unchanged (sandboxed iframe + M13 link fix);
+   "Reopen plan" appears automatically only when the iframe fails to load
+   instead of sitting in the layout permanently.
+
+### Surface changes to earlier sections (once built)
+
+- M14 §B paste form: default-hidden behind "I already have a key".
+- M15 LLM toggle: replaced by the three mode chips
+  ([05-ai-caller.md](05-ai-caller.md) §LLM presence policy semantics
+  unchanged).
+- M16 §B free-tier toggle: folded into the mode chips (consent block and
+  verbatim disclaimer unchanged).
+- Settings gains top-N default, key management, re-upload resume.
+
+### Done criteria (M18)
+
+1. Default view (key saved, some JDs captured) shows only: silent
+   connection, resume line, capture control, three mode chips + Analyze +
+   results, plan. No provider dropdown, key field, remember/save buttons,
+   free-tier toggle, rulehint or top-N input in the body.
+2. No-key state shows "Create free LLM key" + a rule-based path; the paste
+   form is reachable via one link in both states.
+3. Key validation uses the key-info endpoint only (no billable call, no
+   key material ever returned); the panel never blocks on validation.
+4. All existing behavior preserved: run-contract fields, M15 pre-flight
+   refusal + provenance labels, M16 consent gate + server-side
+   `privacy_ack` check, M14 SHA-256 resume cache, sandboxed iframe.
+5. `m18_check.py` offline PASS (state rendering keyed off `key_set`,
+   validation stub, mode → run-contract field mapping) +
+   `test_m18.py` wrappers; `ruff check .`, `pytest`, `node --check`
+   clean; one live interactive pass recorded in
+   [03-milestones.md](03-milestones.md) M18.
+
 ## Explicit non-goals (M13)
 
 In-page gap marking on the JD text
@@ -332,10 +432,12 @@ stays this panel).
   entry, provider plumbing, bat launcher; M15 rows — presence-policy
   home, pre-flight refusal, rule-based mode, provenance labels; M16
   rows — OAuth connect, shared-key rejection, free-mode consent gate,
-  retry policy, keyring reuse).
+  retry policy, keyring reuse; M18 rows — state-driven panel, key-info
+  validation, paste-form fallback kept, provenance-preserving table
+  merge).
 - Milestones: [03-milestones.md](03-milestones.md) M13 (verification record
   + learnings), M14 (self-serve setup, Built), M16 (free LLM access,
-  Built).
+  Built), M18 (panel simplification, Designed — §M18 above).
 - Deferred: [03-milestones.md](03-milestones.md) §Deferred #12 (in-page gap
   marking), #13 (conversational intake), #14 (native-messaging launcher).
 - Install / load-unpacked instructions: [../extension/README.md](../extension/README.md).

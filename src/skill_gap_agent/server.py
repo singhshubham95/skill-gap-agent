@@ -23,6 +23,11 @@ M14 self-serve setup (specs/12-extension.md §M14):
                        M8 extraction immediately (blocks until done)
   GET  /api/providers -> [{id, model, key_set}] — key_set is a boolean;
                        key material is never returned by any endpoint
+  GET  /api/key/status?provider=<id> -> M18 panel chip: {key_set, ok,
+                       detail, checked_at}. ok is true/false/null
+                       (verified / rejected / couldn't verify) from the
+                       provider's auth-only key-info endpoint — no
+                       billable call, no key material, TTL-cached.
   POST /api/key     -> {provider, api_key, remember} — store the key in
                        the OS keyring ("remember") or the process env
                        ("session only"). Never echoes the key.
@@ -102,6 +107,11 @@ _resume: dict = {"path": None, "filename": None, "count": None, "source": None}
 # the pending code, and it never leaves the server.
 OAUTH_CODE_TTL_SECONDS = 600
 _oauth: dict = {"codes": {}, "expected_states": set()}
+
+# M18 key validation (specs/12-extension.md §M18): per-provider status
+# cache so the panel's key chip never triggers a provider call per render.
+KEY_STATUS_TTL_SECONDS = 120
+_key_status_cache: dict[str, dict] = {}
 
 # Human-readable stage labels for the loading screen. Keys are the node
 # names cli.py reports via set_stage_listener(); values are plain words
@@ -256,6 +266,43 @@ def _describe_skills() -> dict:
                 "source": _resume["source"],
             }
     return {"filename": Path(DEFAULT_SKILLS).name, "count": None, "source": "default"}
+
+
+def _key_status(provider: str) -> dict:
+    """M18: key presence + validation status for the panel's state chip.
+
+    Validation is llm.validate_api_key — the provider's key-info endpoint
+    (auth-only, no billable call) — checked at most once per TTL window
+    and cached per provider. The payload is booleans + short status text
+    only: never key material. ok: None means "couldn't verify", which
+    never blocks a run (specs/12-extension.md §M18)."""
+    key_set = llm_mod.key_present(provider)
+    now = time.time()
+    with _lock:
+        cached = _key_status_cache.get(provider)
+    if key_set and cached and now - cached.get("checked_at", 0) < KEY_STATUS_TTL_SECONDS:
+        return dict(cached)
+    if not key_set:
+        with _lock:
+            _key_status_cache.pop(provider, None)
+        return {"key_set": False, "ok": None, "detail": "no key stored",
+                "checked_at": now}
+    v = llm_mod.validate_api_key(provider)
+    result = {
+        "key_set": True,
+        "ok": v.get("ok"),
+        "detail": str(v.get("detail") or ""),
+        "checked_at": now,
+    }
+    with _lock:
+        _key_status_cache[provider] = dict(result)
+    return result
+
+
+def _invalidate_key_status(provider: str) -> None:
+    """Drop the cached validation after a key change (save or OAuth)."""
+    with _lock:
+        _key_status_cache.pop(provider, None)
 
 
 def _oauth_pending_code(state: str) -> str | None:
@@ -551,6 +598,16 @@ class Handler(BaseHTTPRequestHandler):
                     for pid, info in PROVIDERS.items()
                 ]
             })
+        elif path == "/api/key/status":
+            # M18: key presence + validation chip for the panel. Booleans
+            # and short status text only — never key material.
+            provider = (urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query
+            ).get("provider") or ["openrouter"])[0]
+            if provider not in PROVIDERS:
+                self._json(400, {"error": f"unknown provider: {provider!r}"})
+                return
+            self._json(200, _key_status(provider))
         elif path == "/api/oauth/callback":
             # M16 A step 3: OpenRouter redirects the tab here with the
             # one-time code + the panel's state. The state is validated
@@ -811,6 +868,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001 — keyring backend missing etc.
             self._json(500, {"error": f"could not store key: {e}"})
             return
+        _invalidate_key_status(provider)  # M18: re-validate the new key
         self._json(200, {"ok": True, "key_set": True, "stored": stored})
 
     def _handle_oauth_state(self, length: int) -> None:
@@ -879,6 +937,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         with _lock:
             _oauth["expected_states"].discard(state)
+        _invalidate_key_status("openrouter")  # M18: re-validate the new key
         self._json(200, {"ok": True, "key_set": True, "stored": "keyring"})
 
     def log_message(self, fmt: str, *args: object) -> None:

@@ -265,16 +265,23 @@ def check_vocabulary_and_panel() -> None:
         llm_mod.get_secret = real_get
 
     panel = (EXTENSION_DIR / "sidepanel.html").read_text(encoding="utf-8")
-    assert re.search(r'id="usellm"[^>]*checked', panel), "LLM toggle missing"
+    # M18 (specs/12-extension.md §M18 surface changes) replaced the LLM
+    # toggle and the table's Source column with the free/paid/rule mode
+    # chips and the merged provenance caption; M15 semantics (use_llm in
+    # the run body, per-item provenance labels) must survive unchanged.
+    assert 'id="modefree"' in panel and 'id="modepaid"' in panel, "mode chips missing"
+    assert 'id="moderule"' in panel, "rule-based chip missing"
     assert 'id="degraded"' in panel, "degraded banner missing"
     assert 'id="llmarea"' in panel, "key area missing"
     assert 'id="apikey" type="password"' in panel, "key field must be type=password"
     assert 'id="provider"' in panel and 'id="remember"' in panel
-    assert "<th>Source</th>" in panel, "gap table needs the Source column"
 
     js = (EXTENSION_DIR / "sidepanel.js").read_text(encoding="utf-8")
-    assert re.search(r"use_llm:\s*\$\(\"usellm\"\)\.checked", js), (
-        "run body must carry use_llm from the toggle"
+    assert "buildRunBody" in js and re.search(r"use_llm:", js), (
+        "run body must carry use_llm (M18 mode mapping)"
+    )
+    assert "demanded by" in js and "g.provenance" in js, (
+        "gap rows must keep the per-item provenance label (M18 caption merge)"
     )
     assert "showDegraded" in js, "degraded banner not wired"
     assert '"/api/run"' in js
@@ -282,7 +289,8 @@ def check_vocabulary_and_panel() -> None:
     assert not re.search(
         r"chrome\.storage\.local\.set\([^)]*key", js, re.IGNORECASE | re.DOTALL
     ), "key material must never go into chrome.storage"
-    print("vocabulary + panel OK: labels, toggle, banner, Source column, no key in storage")
+    print("vocabulary + panel OK: labels, mode chips, banner, provenance "
+          "caption, no key in storage")
 
 
 def check_pre_flight_refusal() -> None:

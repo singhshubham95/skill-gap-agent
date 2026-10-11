@@ -64,6 +64,56 @@ section {
   margin-left: 6px;
 }
 
+/* M18 (specs/12-extension.md §M18) panel pieces */
+.keystate {
+  margin: 4px 0 8px;
+  color: #57606a;
+  font-size: 12px;
+}
+
+.keystate.ok {
+  color: #1a7f37;
+}
+
+.keystate.warn {
+  color: #9a6700;
+}
+
+button.linkish {
+  background: none;
+  border: 0;
+  color: #1f6feb;
+  padding: 2px 4px;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+button.linkish:disabled {
+  background: none;
+  color: #8c959f;
+}
+
+label.chip {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid #d8dee4;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  cursor: pointer;
+}
+
+label.chip small {
+  color: #57606a;
+}
+
+.caption {
+  color: #57606a;
+  font-size: 11px;
+}
+
 button {
   background: #1f6feb;
   color: #fff;

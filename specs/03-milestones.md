@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M17; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M18; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -122,7 +122,9 @@ is an LLM-usage policy across existing stages, likewise not pipeline
 stages. M16 is LLM access + reliability plumbing (free-tier routing,
 OAuth connect, retry hardening) — likewise not a pipeline stage. M17 is
 observability + judge evaluation tooling (opt-in LangSmith tracing,
-golden-set eval, CI) — likewise not a pipeline stage.
+golden-set eval, CI) — likewise not a pipeline stage. M18 is panel
+simplification (presentation-only over the built extension surface) —
+likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -595,6 +597,53 @@ golden-set eval, CI) — likewise not a pipeline stage.
     - **Explicit non-goals:** self-hosted LangSmith/Langfuse, LLM-as-judge
       grading of `plan.md`, tracing extension JS, production alerting.
 
+18. **Panel simplification (progressive disclosure).** ✅ Built 2026-10-11
+    (design home: [12-extension.md](12-extension.md) §M18). Presentation-only
+    over the built extension — run contract, keyring storage, consent gate
+    and provenance labels unchanged. The side panel's default view shrinks
+    to the happy path (resume line → capture → mode chips → analyze → plan);
+    the Analyze section renders **state-driven** (key-existence check →
+    key-info validation → three mode chips; no key ⇒ create-free-key +
+    rule-based path), and everything else (server URL, top-N, key
+    management, paste form) moves behind disclosure. Decision rows in
+    [02-decisions.md](02-decisions.md) (M18). Slices:
+    - **18a — shell trims:** connection line shows only on problems,
+      resume collapses to one line after upload, counter merges into the
+      Capture button, Settings becomes the home for non-essential controls.
+    - **18b — state-driven Analyze section:** `key_set` state rendering,
+      key-info validation as a status chip, free/paid/rule-based mode chips
+      mapping to `free_tier`/`use_llm`, M16 consent block on free only,
+      hidden "I already have a key" paste form.
+    - **18c — results + plan:** gap-table caption merge (provenance
+      preserved), auto-shown "Reopen plan" on iframe failure.
+    - **Done criteria:** [12-extension.md](12-extension.md) §M18 Done
+      criteria (`m18_check.py` offline PASS + `test_m18.py`; `ruff check .`,
+      `pytest`, `node --check` clean; one live interactive pass recorded
+      here).
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M18` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check extension/sidepanel.js`, `m18_check` (key-status
+      endpoint with stubbed validation, node probe over the real
+      `sidepanel.js`, panel-surface asserts) and the m10–m16 regression
+      checks (`board/verify-T-M18.md`); `path_guard.py` clean. M15/M16's
+      panel-surface asserts (`usellm` toggle, `<th>Source</th>`,
+      `freetier` checkbox) were re-expressed against the §M18 surface in
+      the same change — their semantic asserts (pre-flight 409, verbatim
+      disclaimer, consent versioning, run-body fields) are untouched and
+      green. Done criterion 5's live interactive pass is the human's step
+      (tracked in §Open).
+    - **Learnings:** (a) m16's "exchange body never carries the code"
+      guard silently passed after the panel renamed `exchangeOauth` —
+      identifier-keyed test guards rot on rename; kept alive by
+      re-pointing the split at the new `finishOauth` name. (b) The node
+      probe (require the real `sidepanel.js` against a stub DOM, exercise
+      `buildRunBody`/`renderKeyState` through a probe hook) verified the
+      mode → run-contract mapping with no browser — the pattern is
+      reusable for any future panel change. (c) Panel file rewrites must
+      stay UTF-8 without BOM (PowerShell `Set-Content`/`>` mangles the
+      em-dash copy); `.NET WriteAllText` with `UTF8Encoding($false)` is
+      the safe path.
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -616,9 +665,17 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
 | 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
 | 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
+| 15 | **M16 live interactive pass (AC6)** — free-tier connect + free-mode analyze + quota observation | Automated suite green; human live pass with real free OpenRouter account pending | Test during M18 live interactive pass (panel simplification includes free-tier connect flow); restore if M18 pass doesn't cover free-tier connect + quota observation. |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
+- **M18 live interactive pass (done criterion 5).** The automated suite is
+  green (2026-10-11); one live pass on the rebuilt panel is the human's
+  step: no-key state → "Create free LLM key" → free-mode analyze with the
+  consent block → paid/rule chips → paste-form fallback. Per Deferred #15's
+  restore trigger, this pass should also observe a quota/429 message to
+  close M16's live criterion; record both in M16 + M18 above, then delete
+  this item and the Deferred #15 row.
 - **Extraction latency (S1/S2).** The M8 resume-extraction LLM call (one
   call, full resume text, hierarchical JSON out) took ~19 minutes via
   DeepSeek V4 Flash on OpenRouter (2026-09-23), vs. ~3–10s for
@@ -686,12 +743,6 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   skill pairs); plan-level ground truth stays open.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
-- **M16 live interactive pass (AC6).** The automated suite is green (M16
-  verification record above) but done criterion 6 — one live pass with a
-  real free OpenRouter account: connect via the panel, one free-mode
-  analyze + plan, one observed quota/429 message — needs a human account
-  and has not run yet. Record the result in the M16 entry above, then
-  delete this item.
 - **Model pick (S2).** ~~Resolved at M3: DeepSeek V4 Flash 0731 via
   OpenRouter (see M3).~~ **Closed** — no longer an open item; the decision
   lives in [02-decisions.md](02-decisions.md) (M3 provider row) and the

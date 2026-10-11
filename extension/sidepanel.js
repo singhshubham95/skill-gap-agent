@@ -8,6 +8,11 @@
 // memory to the local server only — it is NEVER written to
 // chrome.storage (plaintext in the Chrome profile) or anywhere else in
 // the extension.
+// M18: state-driven panel (specs/12-extension.md §M18). The Analyze
+// section renders from key state: a stored key shows three mode chips
+// (free / paid / rule-based); no key shows "Create free LLM key" + a
+// rule-based path. Key validation is a status chip only — it never
+// blocks a run; the server-side M15 pre-flight refusal is the hard gate.
 
 const DEFAULT_SERVER = "http://127.0.0.1:8000";
 const STAGE_LABELS = {
@@ -29,6 +34,9 @@ const OAUTH_KEYS_PAGE = "https://openrouter.ai/settings/keys";
 
 const $ = (id) => document.getElementById(id);
 let server = DEFAULT_SERVER;
+// M18: where the current key lives (the paste form's provider dropdown
+// switches it); the free OAuth flow always lands on openrouter.
+let activeProvider = "openrouter";
 let jds = [];
 let running = false;
 // M16 B: persisted consent flag {free_consent_at, consent_version} — a
@@ -74,18 +82,22 @@ function setBusy(busy) {
   }
 }
 
-// ---- 0. setup: resume upload + LLM key ------------------------------------
+// ---- resume (M18: one line once uploaded) --------------------------------
 
 function showSkills(info) {
-  if (!info || !info.filename) {
+  const hasResume = Boolean(info && info.filename && info.source !== "default");
+  $("setupresume").hidden = hasResume;
+  $("resumeline").hidden = !hasResume;
+  $("resumeprivacy").hidden = true;
+  if (hasResume) {
+    const count = info.count == null ? "" : ` — ${info.count} skills`;
+    $("resumetext").textContent = "Resume: " + info.filename + count;
     $("resumeinfo").textContent = "";
-    return;
+  } else if (info && info.filename) {
+    $("resumeinfo").textContent = "Default skills file: " + info.filename;
+  } else {
+    $("resumeinfo").textContent = "";
   }
-  const count = info.count == null ? "" : ` — ${info.count} skills`;
-  const src = info.source === "default" ? "" : ` (${info.source})`;
-  $("resumeinfo").textContent =
-    (info.source === "default" ? "Default skills file: " : "Resume ready: ") +
-    info.filename + count + src;
 }
 
 async function refreshSkills() {
@@ -94,14 +106,15 @@ async function refreshSkills() {
     const s = await r.json();
     showSkills(s.skills);
   } catch (e) {
-    /* offline — the connection badge already says so */
+    /* offline — the connection line already says so */
   }
 }
 
 async function uploadResume() {
   const file = $("resume").files && $("resume").files[0];
   if (!file) return;
-  setStatus("Uploading resume and extracting skills (first time can take minutes)…");
+  $("resumeinfo").textContent =
+    "Uploading resume and extracting skills (first time can take minutes)…";
   try {
     const r = await fetch(server + "/api/resume", {
       method: "POST",
@@ -120,18 +133,61 @@ async function uploadResume() {
       Boolean(body.warning),
     );
   } catch (e) {
+    $("resumeinfo").textContent = "";
     setStatus("Resume upload failed: " + e.message, true);
   }
 }
 
-function showKeyState(providers) {
-  const p = providers.find((x) => x.id === $("provider").value);
-  $("keystate").textContent = p
-    ? p.key_set
-      ? `Key configured ✓ for ${p.id}.`
-      : `No key stored for ${p.id} yet.`
-    : "";
+// ---- M18: key state chip + state-driven rendering -------------------------
+
+function setChip(text, cls) {
+  const el = $("keystate");
+  el.textContent = text;
+  el.className = "keystate" + (cls ? " " + cls : "");
 }
+
+function renderKeyState(keySet) {
+  // The one state switch (specs/12-extension.md §M18): key => mode chips;
+  // no key => create-free-key button + rule-based path.
+  $("nokey").hidden = keySet;
+  $("modechips").hidden = !keySet;
+  if (!keySet) {
+    $("freeconsent").hidden = true;
+    $("freemode").hidden = true;
+  }
+  updateRunGate();
+}
+
+async function refreshKeyStatus() {
+  setChip("checking key…");
+  try {
+    const r = await fetch(server + "/api/providers");
+    const body = await r.json().catch(() => ({}));
+    const p = (body.providers || []).find((x) => x.id === activeProvider);
+    const keySet = Boolean(p && p.key_set);
+    renderKeyState(keySet);
+    if (!keySet) {
+      setChip("No key yet — create a free key or run rule-based.");
+      return;
+    }
+    const v = await fetch(
+      server + "/api/key/status?provider=" + encodeURIComponent(activeProvider),
+    );
+    const s = await v.json().catch(() => ({}));
+    // Validation is a status indicator only — never a run gate (M18).
+    if (s.ok === true) {
+      setChip("Key ✓ verified (" + activeProvider + ")", "ok");
+    } else if (s.ok === false) {
+      setChip("Key rejected — check the key (" + activeProvider + ")", "warn");
+    } else {
+      setChip("couldn't verify — runs will retry (" + activeProvider + ")", "warn");
+    }
+  } catch (e) {
+    setChip("Local agent offline — key status unknown.", "warn");
+  }
+}
+
+// ---- paste form ("I already have a key") ---------------------------------
 
 async function loadProviders() {
   try {
@@ -145,9 +201,8 @@ async function loadProviders() {
       opt.textContent = `${p.id} (${p.model})`;
       sel.appendChild(opt);
     }
-    showKeyState(body.providers || []);
   } catch (e) {
-    $("keystate").textContent = "Local agent offline — key status unknown.";
+    /* offline — the connection line already says so */
   }
 }
 
@@ -157,12 +212,13 @@ async function saveKey() {
     setStatus("Paste the API key first.", true);
     return;
   }
+  const provider = $("provider").value || "openrouter";
   try {
     const r = await fetch(server + "/api/key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        provider: $("provider").value,
+        provider,
         api_key: apiKey,
         remember: $("remember").checked,
       }),
@@ -170,16 +226,18 @@ async function saveKey() {
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
     $("apikey").value = "";
-    $("keystate").textContent =
-      "Key saved (" +
-      (body.stored === "keyring" ? "OS keyring" : "this session only") + ").";
-    setStatus("API key saved.");
+    activeProvider = provider;
+    setStatus(
+      "API key saved (" +
+        (body.stored === "keyring" ? "OS keyring" : "this session only") + ").",
+    );
+    await refreshKeyStatus();
   } catch (e) {
     setStatus("Could not save key: " + e.message, true);
   }
 }
 
-// ---- M16 A: "Connect free LLM" (OAuth PKCE) -------------------------------
+// ---- M16 A: "Create free LLM key" (OAuth PKCE) ----------------------------
 
 function base64url(bytes) {
   return btoa(String.fromCharCode(...bytes))
@@ -197,7 +255,7 @@ async function pkcePair() {
 async function connectFree() {
   const btn = $("connectfree");
   btn.disabled = true;
-  $("keystate").textContent = "Opening OpenRouter login…";
+  setChip("Opening OpenRouter login…");
   try {
     const { verifier, challenge } = await pkcePair();
     const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -225,7 +283,7 @@ async function connectFree() {
     await pollOauth();
   } catch (e) {
     oauthPending = null;
-    $("keystate").textContent = "Connect failed: " + e.message;
+    setChip("Connect failed: " + e.message, "warn");
     setStatus("Could not start the OpenRouter connect flow.", true);
   } finally {
     btn.disabled = false;
@@ -245,24 +303,24 @@ async function pollOauth() {
       const body = await r.json().catch(() => ({}));
       pending = Boolean(body.pending);
     } catch (e) {
-      $("keystate").textContent = "Waiting for the local agent…";
+      setChip("Waiting for the local agent…");
       continue;
     }
     if (pending) {
-      await exchangeOauth();
+      await finishOauth();
       return;
     }
   }
   oauthPending = null;
-  $("keystate").textContent = "Connect timed out — try again.";
+  setChip("Connect timed out — try again.", "warn");
 }
 
-async function exchangeOauth() {
+async function finishOauth() {
   const { verifier, state } = oauthPending || {};
   if (!verifier || !state) return;
   try {
-    // The panel sends {code_verifier, state} only — the code stays
-    // server-side, paired with the state (specs/12-extension.md §M16 A).
+    // The panel sends {code_verifier, state} only — the server-held
+    // token pairs with the state (specs/12-extension.md §M16 A).
     const r = await fetch(server + "/api/oauth/exchange", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -271,7 +329,12 @@ async function exchangeOauth() {
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
     oauthPending = null;
-    $("keystate").textContent = "Connected ✓ (OS keyring)";
+    activeProvider = "openrouter";
+    setStatus("Free LLM connected — key stored in the OS keyring.");
+    await refreshKeyStatus();
+    // A freshly minted free key defaults to the free mode chip (M18).
+    $("modefree").checked = true;
+    onModeChange();
     const link = document.createElement("a");
     link.href = OAUTH_KEYS_PAGE;
     link.textContent = "Manage key on OpenRouter";
@@ -279,16 +342,14 @@ async function exchangeOauth() {
     link.rel = "noreferrer";
     $("keystate").appendChild(document.createElement("br"));
     $("keystate").appendChild(link);
-    setStatus("Free LLM connected — key stored in the OS keyring.");
-    loadProviders();
   } catch (e) {
     oauthPending = null;
-    $("keystate").textContent = "Connect failed: " + e.message;
+    setChip("Connect failed: " + e.message, "warn");
     setStatus("Key exchange failed — nothing was stored.", true);
   }
 }
 
-// ---- M16 B: free-mode consent gate ----------------------------------------
+// ---- M16 B: free-mode consent gate (M18: revealed by the free chip) -------
 
 function consentValid() {
   return Boolean(
@@ -298,27 +359,32 @@ function consentValid() {
   );
 }
 
-async function toggleFreeTier() {
-  const on = $("freetier").checked;
-  $("freeconsent").hidden = !on;
-  if (!on) {
-    $("privacyack").checked = false;
-    $("freemode").hidden = true;
-    return;
-  }
-  // Re-prompt when the stored consent predates the current copy version.
-  $("privacyack").checked = consentValid();
-  updateRunGate();
-  refreshFreeMode();
+function selectedMode() {
+  // No key => rule-based is the only possible mode (M18 no-key state).
+  if ($("modechips").hidden) return "rule";
+  const el = document.querySelector('input[name="mode"]:checked');
+  return (el && el.value) || "paid";
 }
 
 function updateRunGate() {
-  // The run button stays disabled while free mode is on but unconsented.
-  if ($("freetier").checked && !$("privacyack").checked) {
-    $("analyze").disabled = true;
-  } else if (!running) {
-    $("analyze").disabled = false;
+  // Free mode without consent cannot run (M16 B consent gate).
+  const freeUnconsented = selectedMode() === "free" && !$("privacyack").checked;
+  $("analyze").disabled = running || freeUnconsented;
+}
+
+function onModeChange() {
+  const free = selectedMode() === "free";
+  $("freeconsent").hidden = !free;
+  if (free) {
+    // Re-prompt when the stored consent predates the current copy version.
+    $("privacyack").checked = consentValid();
+    $("freemode").hidden = !$("privacyack").checked;
+    if ($("privacyack").checked) refreshFreeMode();
+  } else {
+    $("privacyack").checked = false;
+    $("freemode").hidden = true;
   }
+  updateRunGate();
 }
 
 async function onPrivacyAck() {
@@ -328,15 +394,17 @@ async function onPrivacyAck() {
       consent_version: CONSENT_VERSION,
     };
     await chrome.storage.local.set({ freeConsent });
+    refreshFreeMode();
+  } else {
+    $("freemode").hidden = true;
   }
   updateRunGate();
-  refreshFreeMode();
 }
 
 async function refreshFreeMode() {
   // Free-mode run header: "Free mode — model: <llm_model>" from /api/status.
   const el = $("freemode");
-  if (!$("freetier").checked || !$("privacyack").checked) {
+  if (selectedMode() !== "free" || !$("privacyack").checked) {
     el.hidden = true;
     return;
   }
@@ -366,7 +434,7 @@ function renderJds() {
     li.appendChild(label);
 
     const remove = document.createElement("button");
-    remove.textContent = "×";
+    remove.textContent = "\u00d7";
     remove.className = "remove";
     remove.setAttribute("aria-label", "remove " + (jd.title || "JD"));
     remove.addEventListener("click", async () => {
@@ -378,7 +446,8 @@ function renderJds() {
 
     list.appendChild(li);
   }
-  $("jdcount").textContent = jds.length ? `(${jds.length})` : "";
+  // M18: the counter lives on the button ("Capture JD (3)").
+  $("capture").textContent = jds.length ? `Capture JD (${jds.length})` : "Capture JD";
   $("clear").hidden = jds.length === 0;
 }
 
@@ -417,13 +486,28 @@ async function captureJd() {
   setStatus(`Captured: ${jd.title} — ${jds.length} in list.`);
 }
 
-// ---- 2. analyze gaps (M15: LLM toggle + degradation banner) --------------
+// ---- 2. analyze gaps ------------------------------------------------------
 
-function toggleLlm() {
-  const on = $("usellm").checked;
-  $("llmarea").hidden = !on;
-  $("rulehint").hidden = on;
-  if (on) loadProviders();
+function buildRunBody() {
+  // M18 mode -> run-contract mapping (specs/12-extension.md §M18):
+  // free  => use_llm + free_tier (+ privacy_ack, only while consented);
+  // paid  => use_llm;
+  // rule  => use_llm: false (implies no_llm_oss server-side).
+  const mode = selectedMode();
+  const body = {
+    phase: "gaps",
+    jds: jds.map((x) => ({ title: x.title, url: x.url, text: x.text })),
+    top_n: parseInt(($("topn") && $("topn").value) || "5", 10),
+    reuse_judged: true,
+    provider: activeProvider,
+    use_llm: mode !== "rule",
+  };
+  // M16 B: the contract sends free_tier + privacy_ack only while consented.
+  if (mode === "free" && $("privacyack").checked) {
+    body.free_tier = true;
+    body.privacy_ack = true;
+  }
+  return body;
 }
 
 function showDegraded(s) {
@@ -437,7 +521,7 @@ function showDegraded(s) {
   box.replaceChildren();
   const head = document.createElement("strong");
   head.textContent =
-    "⚠ Parts of this result were generated without the LLM — " +
+    "\u26a0 Parts of this result were generated without the LLM — " +
     "re-run after fixing the key:";
   box.appendChild(head);
   const ul = document.createElement("ul");
@@ -459,20 +543,7 @@ async function analyze() {
   $("gapbox").hidden = true;
   $("planbox").hidden = true;
   setStatus("Starting analysis…");
-  const body = {
-    phase: "gaps",
-    jds: jds.map((x) => ({ title: x.title, url: x.url, text: x.text })),
-    top_n: parseInt($("topn").value || "5", 10),
-    reuse_judged: true,
-    provider: $("provider").value || "openrouter",
-    use_llm: $("usellm").checked,
-  };
-  // M16 B: the contract sends free_tier + privacy_ack only while consented.
-  if ($("usellm").checked && $("freetier").checked && $("privacyack").checked) {
-    body.free_tier = true;
-    body.privacy_ack = true;
-  }
-  const started = await postRun(body);
+  const started = await postRun(buildRunBody());
   if (started) poll();
 }
 
@@ -492,19 +563,31 @@ async function showGaps() {
   let rank = 0;
   for (const g of gaps) {
     const tr = document.createElement("tr");
-    const cells = [
-      String(++rank),
-      g.target || "",
-      String(g.gap_score ?? ""),
-      String(g.weight ?? ""),
-      g.verdict || "",
-      g.provenance || "",
-    ];
-    for (const text of cells) {
-      const td = document.createElement("td");
-      td.textContent = text;
-      tr.appendChild(td);
-    }
+
+    const tdRank = document.createElement("td");
+    tdRank.textContent = String(++rank);
+
+    // M18: JDs · Verdict · Source merge into one caption line — the
+    // per-item provenance label stays (specs/12-extension.md §M18).
+    const tdSkill = document.createElement("td");
+    const name = document.createElement("div");
+    name.textContent = g.target || "";
+    const caption = document.createElement("div");
+    caption.className = "caption";
+    const parts = [];
+    if (g.weight != null) parts.push(`demanded by ${g.weight} JDs`);
+    if (g.verdict) parts.push(g.verdict);
+    if (g.provenance) parts.push(g.provenance);
+    caption.textContent = parts.join(" \u00b7 ");
+    tdSkill.appendChild(name);
+    tdSkill.appendChild(caption);
+
+    const tdScore = document.createElement("td");
+    tdScore.textContent = String(g.gap_score ?? "");
+
+    tr.appendChild(tdRank);
+    tr.appendChild(tdSkill);
+    tr.appendChild(tdScore);
     tbody.appendChild(tr);
   }
   const topTransfer = gaps.find((g) => g.top_transfer_skill);
@@ -537,6 +620,7 @@ function showPlan() {
   loadPlan();
   $("planbox").hidden = false;
   $("plan").disabled = false;
+  $("reopen").hidden = true; // M18: shown only if the iframe fails
   setStatus("Plan ready below.");
 }
 
@@ -557,9 +641,9 @@ async function postRun(body) {
       // M15: a keyless LLM run is refused up front — surface the fix
       // where it happens (the key form), not just in the status line.
       if (/API key/i.test(msg)) {
-        $("usellm").checked = true;
-        toggleLlm();
-        $("keystate").textContent = msg;
+        $("llmarea").hidden = false;
+        loadProviders();
+        setChip(msg, "warn");
       }
       return false;
     }
@@ -569,7 +653,8 @@ async function postRun(body) {
     setBusy(false);
     setStatus(
       "Local agent not reachable (" + e.message +
-        "). Start it: python -m skill_gap_agent.server",
+        "). Start it: double-click tools/start-server.bat " +
+        "(or run: python -m skill_gap_agent.server).",
       true,
     );
     return false;
@@ -610,15 +695,18 @@ async function poll() {
 }
 
 async function checkConnection() {
+  const el = $("conn");
   try {
     const r = await fetch(server + "/api/status");
     if (!r.ok) throw new Error("HTTP " + r.status);
-    $("conn").textContent = "local agent: connected";
-    $("conn").classList.remove("offline");
+    // M18: silent when healthy — the line appears only on problems.
+    el.hidden = true;
   } catch (e) {
-    $("conn").textContent =
-      "local agent: offline — run python -m skill_gap_agent.server";
-    $("conn").classList.add("offline");
+    el.textContent =
+      "Local agent not running — double-click tools/start-server.bat " +
+      "(or run: python -m skill_gap_agent.server)";
+    el.classList.add("offline");
+    el.hidden = false;
   }
 }
 
@@ -631,12 +719,35 @@ $("reopen").addEventListener("click", () => {
   loadPlan();
   setStatus("Plan reopened.");
 });
+$("planframe").addEventListener("error", () => {
+  // M18: "Reopen plan" appears only when the iframe fails to load.
+  $("reopen").hidden = false;
+});
 $("resume").addEventListener("change", uploadResume);
+$("resumechange").addEventListener("click", () => {
+  $("setupresume").hidden = false;
+  $("resumeline").hidden = true;
+});
+$("resumewhy").addEventListener("click", () => {
+  $("resumeprivacy").hidden = !$("resumeprivacy").hidden;
+});
 $("savekey").addEventListener("click", saveKey);
 $("connectfree").addEventListener("click", connectFree);
-$("provider").addEventListener("change", loadProviders);
-$("usellm").addEventListener("change", toggleLlm);
-$("freetier").addEventListener("change", toggleFreeTier);
+$("morerule").addEventListener("click", () => {
+  // No-key rule-based path (M18): rule-based is the mode without a key.
+  setStatus(
+    'Rule-based mode — no LLM calls. Gaps are ranked by JD demand and ' +
+    'results say "Rule-based"; project synthesis is skipped.',
+  );
+});
+$("havekeylink").addEventListener("click", () => {
+  const open = $("llmarea").hidden;
+  $("llmarea").hidden = !open;
+  if (open) loadProviders();
+});
+for (const radio of document.querySelectorAll('input[name="mode"]')) {
+  radio.addEventListener("change", onModeChange);
+}
 $("privacyack").addEventListener("change", onPrivacyAck);
 $("clear").addEventListener("click", async () => {
   jds = [];
@@ -648,13 +759,20 @@ $("serverBase").addEventListener("change", async (e) => {
   server = e.target.value.replace(/\/+$/, "") || DEFAULT_SERVER;
   await chrome.storage.local.set({ serverBase: server });
   checkConnection();
+  refreshKeyStatus();
 });
 
 loadState().then(() => {
   renderJds();
-  toggleLlm();
-  toggleFreeTier();
+  onModeChange();
   checkConnection();
-  loadProviders();
+  refreshKeyStatus();
   refreshSkills();
 });
+
+// Probe hook (specs/12-extension.md §M18 done criterion 5): the m18_check
+// node probe exercises the pure mapping/state functions through this
+// surface; nothing else reads it.
+if (typeof globalThis !== "undefined") {
+  globalThis.__skillgap_probe = { buildRunBody, selectedMode, renderKeyState };
+}

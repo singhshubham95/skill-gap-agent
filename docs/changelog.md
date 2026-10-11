@@ -12,6 +12,12 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M18: Panel simplification — state-driven side panel (key check →
+  free/paid/rule mode chips or "Create free LLM key"; paste form behind
+  "I already have a key"), key validation via the free key-info endpoint
+  (status chip only), collapsed Settings, merged gap-table provenance
+  captions; live interactive pass pending (spec:
+  [12-extension.md](../specs/12-extension.md) §M18)
 - T-M16: Free-tier LLM access — panel "Connect free LLM" (OpenRouter OAuth
   PKCE → OS keyring, no pasting), opt-in free-model mode behind a consent
   gate, retry hardening (classification, bounded attempts, `:free`

@@ -141,6 +141,54 @@ def require_api_key(provider: str) -> None:
         )
 
 
+def validate_api_key(provider: str) -> dict[str, bool | str | None]:
+    """M18 key check: verify a stored key WITHOUT a billable model call.
+
+    Uses the provider's auth-only key-info endpoint (OpenRouter
+    GET /api/v1/key; OpenAI GET /v1/models — both authenticate and cost
+    nothing). Returns {ok: True|False|None, detail}: ok False means the
+    provider rejected the key (401/403), ok None means "couldn't verify"
+    (network down, provider without an endpoint) — which must never block
+    a run; the M15 pre-flight refusal remains the hard gate. Never returns
+    key material (specs/12-extension.md §M18).
+    """
+    p = PROVIDERS.get(provider)
+    if p is None:
+        raise LLMError(f"Unknown provider: {provider}")
+    key = get_secret(p["key_env"])
+    if not key or key == "your-key-here":
+        return {"ok": None, "detail": "no key stored"}
+    urls = {
+        "openrouter": "https://openrouter.ai/api/v1/key",
+        "openai": "https://api.openai.com/v1/models",
+    }
+    url = urls.get(provider)
+    if url is None:
+        return {"ok": None, "detail": f"no validation endpoint for {provider}"}
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        url, headers={"Authorization": f"Bearer {key}"}, method="GET"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return {"ok": False, "detail": f"key rejected (HTTP {e.code})"}
+        return {"ok": None, "detail": f"couldn't verify (HTTP {e.code})"}
+    except Exception:  # noqa: BLE001 — verification is best-effort only
+        return {"ok": None, "detail": "couldn't verify (network)"}
+    label = ""
+    if provider == "openrouter":
+        info = data.get("data") if isinstance(data, dict) else None
+        if isinstance(info, dict):
+            label = str(info.get("label") or "")
+    detail = "key verified" + (f" — {label}" if label else "")
+    return {"ok": True, "detail": detail}
+
+
 def _client(cfg: LLMConfig):
     try:
         from openai import OpenAI
