@@ -129,3 +129,16 @@ provider retention/training caveats (L5); AI-generated-content notice (L6).
 Acceptable: remaining exposure is mainly LinkedIn contract/takedown risk
 (inherent to the product's premise — manageable, not eliminable) and
 third-party LLM data handling (disclosed, user-chosen).
+
+## 7. Remediation status (updated 2026-10-11)
+
+| Finding | Status |
+|---|---|
+| S1 — unauthenticated local API | ✅ Fixed (T-M20): request-origin gate + Content-Type enforcement + `skills_path` containment. Session-token pairing deliberately deferred — same-user processes can read `output/` directly anyway (restore trigger: `specs/03-milestones.md` §Deferred #15). |
+| S2 — "stays on your machine" disclosure | ✅ Fixed (T-M21): accurate copy across panel + both READMEs, named destinations, and versioned first-use consent gating upload + analyze (server-enforced `X-Disclosure-Ack` on upload). Manual no-cloud extraction toggle deferred as an enhancement (§Deferred #16). |
+| L1/L2 — privacy policy, declarations, store packaging | ✅ Prepared (T-M22): hosted policy (`docs/privacy-policy.md` + Pages landing) with the Limited Use statement, `CHROMEWEBSTORE.md` register (justifications + declarations + listing copy), icons + manifest wiring. Owner actions remain (Pages toggle, trademark search, dashboard submission) — checklist in `CHROMEWEBSTORE.md`. |
+| L3 — LinkedIn posture | ✅ Mitigated (T-M23): the synthetic auto-click is removed — assist-not-act (scroll + focus + yellow highlight; the user clicks LinkedIn's own control); capture guardrails explicit. Residual risk: DOM extraction itself (inherent to the product's premise; accepted and documented in the M23 decision rows). The listing disclaimer is in place. |
+| L4 — plaintext `serverBase` | ✅ Fixed (T-M20): `http://` is loopback-only; other hosts require `https://`; invalid values never persist. |
+| L5 — named-provider disclosure | ✅ Disclosure side fixed (T-M21): destinations + jurisdictions named in-product; PII minimization deferred (user decision, §Deferred #16). |
+| L6 — AI transparency | ✅ Fixed (T-M22): AI-generated-content notice in the listing copy + policy; in-product provenance labels since M15. |
+| L7 — licensing housekeeping | ✅ Fixed (T-M22): `THIRD-PARTY-NOTICES.md`; trademark search on the owner checklist. |

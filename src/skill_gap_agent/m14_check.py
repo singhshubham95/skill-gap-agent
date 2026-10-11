@@ -131,6 +131,14 @@ def _upload(base: str, name: str, data: bytes) -> tuple[int, dict]:
         {
             "Content-Type": "application/octet-stream",
             "X-Filename": urllib.parse.quote(name),
+            # M21: disclosure consent gate (specs/12-extension.md
+            # §Data disclosure) — the harness presents it like the panel.
+            "X-Disclosure-Ack": "1",
+            # M24 (specs/12-extension.md §M24): extraction is mode-scoped
+            # now — this harness's offline flow is the rule-mode class
+            # (local regex, deterministic, no LLM call either way). The
+            # llm-class cache rules are covered by m24_check.
+            "X-Extraction-Mode": "rule",
         },
     )
     return code, json.loads(body.decode("utf-8") or "{}")
@@ -170,7 +178,8 @@ def check_resume_endpoint() -> None:
         with _Preserve():
             code, body = _upload(base, "resume a.txt", RESUME_A.encode("utf-8"))
             assert code == 200, (code, body)
-            assert body["source"] == "regex", body  # offline -> regex fallback
+            # M24: rule mode extracts locally (regex) — no LLM involved.
+            assert body["source"] == "regex", body
             assert body["skills"] and body["skills"] > 0, body
             sha_a = hashlib.sha256(RESUME_A.encode("utf-8")).hexdigest()
             sidecar = OUTPUT_DIR / "extracted_skills.sha256"
@@ -179,7 +188,8 @@ def check_resume_endpoint() -> None:
             assert sidecar.read_text(encoding="utf-8").splitlines()[0] == sha_a
             artifact_a = (OUTPUT_DIR / "extracted_skills.json").read_bytes()
 
-            # Same resume again -> cache hit (artifact path, no re-extract).
+            # Same resume + same mode class -> cache hit (M24: reuse is
+            # mode-scoped; artifacts never cross rule/llm classes).
             code, body = _upload(base, "resume a.txt", RESUME_A.encode("utf-8"))
             assert code == 200 and body["source"] == "artifact", (code, body)
 

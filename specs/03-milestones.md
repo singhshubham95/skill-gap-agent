@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M19; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M24; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -125,7 +125,15 @@ observability + judge evaluation tooling (opt-in LangSmith tracing,
 golden-set eval, CI) — likewise not a pipeline stage. M18 is panel
 simplification (presentation-only over the built extension surface) —
 likewise not a pipeline stage. M19 is light/dark theming (presentation
-only, panel + plan surfaces) — likewise not a pipeline stage.
+only, panel + plan surfaces) — likewise not a pipeline stage. M20 is
+request-origin hardening (public-release security over the built local
+API) — likewise not a pipeline stage. M21 is data-disclosure honesty
+(public-release copy + consent over the built flow) — likewise not a
+pipeline stage. M22 is store packaging (privacy policy, submission
+register, icons) — likewise not a pipeline stage. M23 is the LinkedIn
+capture posture (assist-not-act) — likewise not a pipeline stage. M24 is
+extraction-contract + setup ordering (mode governs ingestion) — likewise
+not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -675,6 +683,185 @@ only, panel + plan surfaces) — likewise not a pipeline stage.
       panel — the theme had to ride the iframe URL as a serve-time
       injection, which incidentally keeps `plan.html`'s no-JS invariant
       testable at the HTTP layer.
+20. **Request-origin gate + transport containment (public-release
+    hardening).** ✅ Built 2026-10-11 (design home:
+    [12-extension.md](12-extension.md) §Security posture; work order
+    [tasks/T-M20.md](tasks/T-M20.md)). From the public-release review
+    ([../SECURITY-REVIEW.md](../SECURITY-REVIEW.md) S1/L4): three
+    server-side barriers — request-origin gate (foreign / `null` `Origin`
+    refused 403 before any handler runs; headerless navigations, CLI and
+    harnesses unchanged), Content-Type enforcement (JSON endpoints accept
+    `application/json` only; `/api/resume` accepts
+    `application/octet-stream` only), `skills_path` containment (existing
+    `.json` under repo root ∪ OS temp dir, checked before any run starts)
+    — plus the panel's `serverBase` transport rule (`http://` is
+    loopback-only, other hosts require `https://`, invalid values never
+    persisted). Decision rows in [02-decisions.md](02-decisions.md)
+    (M20); the M13 row's "preflight is the barrier" claim is struck there
+    as superseded.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M20` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m20_check` (origin gate incl. `null` + self +
+      extension origins + headerless callers; text/plain POST and wrong
+      resume type refused 415 with no run started; outside-repo and
+      non-json `skills_path` refused 400; panel transport rule), and the
+      m10–m16 + m18 + m19 regressions (`board/verify-T-M20.md`).
+    - **Learnings:** (a) The M13 trust model rested on "JSON
+      `Content-Type` forces a failing preflight" — wrong: a JSON body sent
+      as `text/plain` is a "simple request" and never preflights. The
+      honest barrier is the request-origin header (which web pages cannot
+      omit or forge); Content-Type enforcement is the second lock, not
+      the first. (b) Same-user local processes bypass every
+      browser-context check by sending no `Origin` — and can read
+      `output/` directly anyway, so session-token pairing was judged UX
+      cost without boundary gain (deferred with restore trigger,
+      §Deferred #15). (c) The m13/m15 harness fixtures live in the OS
+      temp dir, so `skills_path` containment must allow that root or the
+      green suite breaks; the rule names both roots explicitly. (d) The
+      verify harness resolves bare `python`/`ruff`/`pytest` from the
+      ambient PATH — run it with `.venv\Scripts` on PATH, or every check
+      fails at "not recognized" (a false red that looks like mass
+      regression).
+21. **Honest data disclosure — copy, destinations, first-use consent.**
+    ✅ Built 2026-10-11 (design home:
+    [12-extension.md](12-extension.md) §Data disclosure; work order
+    [tasks/T-M21.md](tasks/T-M21.md)). From the public-release review
+    ([../SECURITY-REVIEW.md](../SECURITY-REVIEW.md) S2/L5): the "It stays
+    on your machine" claim is banned from every user-facing surface — the
+    accurate contract is that the *file* stays under `output/uploads/`
+    while the *extracted text* goes over HTTPS to the AI provider the user
+    selects, never to the developer; destinations are named with caveats
+    (OpenRouter → underlying model, default DeepSeek; Z.ai GLM; OpenAI —
+    some processing outside your country; GitHub Search receives skill-gap
+    terms only; M16's free-mode training disclaimer stays verbatim);
+    first-use consent = `#disclosureack` + versioned `disclosureConsent`
+    flag gating upload **and** analyze, with `POST /api/resume` requiring
+    `X-Disclosure-Ack: 1` (gate not UI-only — the M16 lesson applied to
+    the new touchpoint). PII minimization + manual no-cloud extraction
+    toggle deferred (user decision 2026-10-11, §Deferred #16). Decision
+    rows in [02-decisions.md](02-decisions.md) (M21); the M14 row's
+    "resume PII never leaves the machine" claim struck as superseded.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M21` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m21_check` (409 without the ack header + the gate
+      passing with it; banned-claim absence + named destinations + GitHub
+      note across all three surfaces; versioned consent wiring,
+      never-pre-checked checkbox, ack header), and the m10–m16 + m18–m20
+      regressions (`board/verify-T-M21.md`).
+    - **Learnings:** (a) The WinError 10053 loopback abort (M19 learning)
+      is not specific to `m14_check` — it struck both new check helpers
+      on the first full-suite run (both passed standalone). The
+      retry-once-on-`OSError` guard is the shared pattern for every
+      future `mN_check` HTTP helper; `m20_check`'s got patched alongside.
+      (b) Copy consistency is testable: the S2 bug class — a user-facing
+      claim that contradicts the actual data flow — is locked out by
+      plain file assertions. Treat claims about data flows like API
+      contracts: named, asserted, and versioned with the consent copy.
+22. **Store packaging — privacy policy, submission register, icons.**
+    ✅ Built 2026-10-11 (work order
+    [tasks/T-M22.md](tasks/T-M22.md); the policy mirrors
+    [12-extension.md](12-extension.md) §Data disclosure — that register is
+    the design home). Public-release blockers L1/L2/L6/L7: a hosted
+    privacy policy ([../docs/privacy-policy.md](../docs/privacy-policy.md)
+    on GitHub Pages from `/docs`) carrying the Chrome Web Store **Limited
+    Use** statement and the named-destination register (OpenRouter →
+    DeepSeek, Z.ai GLM, OpenAI; GitHub terms; China processing disclosed)
+    plus a Pages landing ([../docs/index.md](../docs/index.md)); a derived
+    store-submission register
+    ([../CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md): single purpose,
+    per-permission justifications for every manifest entry, data-use
+    declarations, listing copy with the companion-app requirement +
+    "Not affiliated with LinkedIn" + AI-generated-content notice, reviewer
+    instructions, pre-submit checklist); generated placeholder icons
+    (`tools/generate_icons.py`, stdlib-only; `extension/icons/`);
+    [../THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md). Decision rows
+    in [02-decisions.md](02-decisions.md) (M22). Owner actions remain
+    (Pages toggle, trademark search, dashboard submission) — the
+    checklist in CHROMEWEBSTORE.md is the register for those.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M22` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m22_check` (icons valid + manifest wired; policy
+      completeness incl. the Limited Use sentence + destinations + China
+      disclosure; justifications cover every manifest
+      permission/host/content-script match; disclaimers present; no stale
+      references across the five registers), and the m10–m16 + m18–m21
+      regressions (`board/verify-T-M22.md`).
+    - **Learnings:** (a) Sentence-level assertions over hand-wrapped
+      Markdown are brittle — the first red run failed on line-break
+      artifacts and one case mismatch, not on content; the checks now
+      normalize whitespace (and `> ` markers) before asserting. (b) The
+      CWS data-use form's categories ("personally identifiable info",
+      "web page content", "authentication info") map awkwardly onto a
+      product whose extension transmits *nothing* — the companion does.
+      The register keeps that distinction explicit for the reviewer
+      instead of over-claiming on the form.
+23. **LinkedIn capture posture — assist, don't act.** ✅ Built 2026-10-11
+    (design home: [12-extension.md](12-extension.md) §Capture; work order
+    [tasks/T-M23.md](tasks/T-M23.md)). Security finding L3: the content
+    script's synthetic `btn.click()` on LinkedIn's "…see more" control —
+    the strongest "automated access" signal in the product — is gone. On
+    capture of a truncated description the script now **assists instead**:
+    scrolls the control to center, focuses it, paints a persistent
+    Ctrl+F-style yellow highlight + tooltip, and returns a guiding error
+    ("click the highlighted button, then Capture again"); only the user's
+    click expands the text. Expanded descriptions capture exactly as
+    before. Capture guardrails made explicit (single page, one click, no
+    batch/scroll harvesting); the residual ToS risk of DOM extraction is
+    accepted and documented (decision rows, `SECURITY-REVIEW.md`). User
+    decision 2026-10-11: focus + highlight over a synthetic click — the
+    "assist, don't act" line.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M23` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check` (both JS files), `m23_check` (no `.click(` remains;
+      assist wiring + tooltip present; guiding error + panel surfacing +
+      docs mention the expand step; extraction selectors/response shape/
+      message contract unchanged), and the m10–m16 + m18–m22 regressions
+      (`board/verify-T-M23.md`).
+    - **Learnings:** (a) The ToS line is drawn at *state change*, not at
+      touching the page: scrolling/focusing/highlighting are what the
+      user could do themselves and read as presentation aids, while one
+      `.click()` made the extension an actor on LinkedIn's UI. The tests
+      assert the rule structurally (`.click(` is banned in `content.js`)
+      so it cannot regress silently. (b) The UX cost is one extra click
+      per *truncated* JD, paid only when LinkedIn truncates — the guiding
+      error + auto-highlight carry the user through it.
+
+24. **Mode governs ingestion + setup order.** ✅ Built 2026-10-11
+    (design home: [12-extension.md](12-extension.md) §M24). The M18 mode
+    chips (free/paid/rule) now govern **every** AI touchpoint — resume
+    extraction included (rule = local regex; paid/free = LLM via the
+    active provider); the panel's Setup order is AI access → mode +
+    free consent → resume, so key/mode/consent are settled before the
+    first data flow. `POST /api/resume` gains `X-Extraction-Mode` /
+    `X-Provider` / `X-Privacy-Ack` (free extraction refused without
+    consent — gate not UI-only), and the extraction cache is mode-scoped
+    (sidecar line 3; classes never cross; regex-fallback artifacts are
+    retried for llm requests; legacy sidecars read as `llm`). Supersedes
+    the deferred no-cloud extraction toggle (Deferred #16, partial) and
+    amends the §Data disclosure copy ("selected above";
+    `DISCLOSURE_CONSENT_VERSION` → 2). Decision rows in
+    [02-decisions.md](02-decisions.md) (M24). Origin: user analysis
+    2026-10-11 (resume ingestion is an LLM call → its configuration must
+    precede it).
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M24` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m24_check` (upload contract incl. free-ack 409 +
+      provider-cfg + defaults; mode-scoped cache incl. fallback retry +
+      legacy sidecars; panel order + copy contract + wiring), and the
+      m10–m23 regressions (`board/verify-T-M24.md`). m14/m15's
+      cache-semantics asserts were re-expressed against §M24 (their label
+      and hash-check contracts are untouched and green). One live pass is
+      the human's step (§Open).
+    - **Learnings:** (a) The M14-era cache keyed only on resume hash —
+        the first upload froze extraction quality forever (a no-key regex
+        artifact satisfied every later request even after a key was
+        saved). Mode-scoping the sidecar fixes it without any cache
+        invalidation hooks. (b) A test that stubs a *fallback* silently
+        passes against the wrong contract: m15's "cache hit of a regex
+        artifact" step and m24's own fallback scenario both needed the
+        artifact *removed* or the request *mode-switched* before the
+        intended path could even trigger — when a harness can't reach its
+        assertion's premise, the premise is what's wrong.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -697,9 +884,18 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
 | 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
 | 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
+| 15 | **Session-token pairing for the local agent API** (per-session bearer token minted at server start, required on every request) | M20's request-origin gate + Content-Type enforcement + `skills_path` containment only | Same-user processes send no `Origin` and can read `output/` directly anyway — tokens add pairing friction without raising that boundary. Restore trigger: the product starts handling other users' data or running as a service (multi-user machines become a supported target). |
+| 16 | **PII minimization** ~~+ manual no-cloud extraction toggle~~ (strip names/contact details before LLM calls) | M21's disclosure-only contract: accurate copy + named destinations + first-use consent; the regex fallback still runs automatically when no key is set | User decision 2026-10-11 — T-M21 is disclosure-only. ~~The no-cloud toggle is superseded by M24 (2026-10-11): Rule-based mode now governs extraction — the restore trigger is met.~~ Restore triggers (PII half): store review pushes for data minimization, or users report discomfort sending contact details to providers (skill extraction never needs them). |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
+- **M24 live pass (done criterion 5).** The automated suite is green
+  (2026-10-11); one live pass is the human's step: reload the extension,
+  walk the new Setup order (AI access → mode → resume), confirm a
+  Rule-based upload extracts locally (fast, "nothing leaves this
+  machine") and that switching to Paid re-extracts with the LLM (the
+  mode-aware cache upgrades a rule artifact instead of reusing it).
+  Record the result in the M24 entry above, then delete this item.
 - **Extraction latency (S1/S2).** The M8 resume-extraction LLM call (one
   call, full resume text, hierarchical JSON out) took ~19 minutes via
   DeepSeek V4 Flash on OpenRouter (2026-09-23), vs. ~3–10s for

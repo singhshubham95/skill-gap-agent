@@ -35,14 +35,38 @@ anyway. The side panel is the platform's answer to exactly this workflow.
 A content script on `https://www.linkedin.com/jobs/*` ports the extraction
 logic of
 [../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js)
-(find the `[id^="JobDetails_AboutTheJob_"]` block, click its expand button,
-take `innerText` + `document.title` + `location.href`). The panel asks the
-active tab via `chrome.tabs.sendMessage`; the content script answers with
+(find the `[id^="JobDetails_AboutTheJob_"]` block, take `innerText` +
+`document.title` + `location.href`). The panel asks the active tab via
+`chrome.tabs.sendMessage`; the content script answers with
 `{title, url, text}`. The list lives in `chrome.storage.local`
 (`capturedJds`, deduped by URL, re-capture updates text). No `tabs` /
 `activeTab` permissions: the content script returns everything the panel
 needs. JD text is **untrusted web content** — the panel renders it with
 `textContent` only, never `innerHTML`.
+
+**Collapsed descriptions — assist, don't act (M23).** LinkedIn truncates
+long JDs behind a "…see more" control
+(`[data-testid="expandable-text-button"]`). The script **never clicks it**
+(or anything else on the page) — a synthetic click is state-changing
+automation and the strongest ToS signal in the product. Instead, when the
+block is still truncated at capture time, the script:
+
+1. scrolls the control to the center of the viewport
+   (`scrollIntoView({block: "center"})`) and focuses it (focus ring),
+2. paints a persistent Ctrl+F-style yellow highlight on it (inline style:
+   outline + warm background) with a `title` tooltip ("Click to expand the
+   job description, then press Capture again"),
+3. answers `{ok: false, error: …}` so the panel's status line tells the
+   user to expand and retry.
+
+Only the user's click on LinkedIn's own control expands the text; the
+next capture reads it normally. Capture-scoping guardrails (unchanged,
+now explicit): strictly single-page, strictly one user click per capture,
+no batch capture, no scroll harvesting, no reads outside
+`https://www.linkedin.com/jobs/*`. Residual LinkedIn ToS exposure from
+DOM extraction itself is inherent to the product's premise and recorded
+in [02-decisions.md](02-decisions.md) (M23 row) — the assist-not-act rule
+is what keeps the line defensible.
 
 ## Run contract (extension → local server)
 
@@ -59,7 +83,10 @@ with M16 — §M16 below).
 
 Single-run guard unchanged (409 while `running`). `skills_path` defaults to
 `data/skillsdataset.json` (server `--skills` flag); a resume file works too
-(M8 extraction runs before the graph).
+(M8 extraction runs before the graph). Request expectations (origin gate,
+Content-Type, `skills_path` containment) are in §Security posture — every
+caller above satisfies them (the panel sends `application/json` /
+`application/octet-stream` with its `chrome-extension://` origin).
 
 ## Why one graph with a pause, not two runs
 
@@ -101,13 +128,113 @@ matches only), so extension-run links work too.
 
 ## Security posture
 
-Server binds `127.0.0.1` only. **No CORS headers on purpose**: the extension
-calls with `host_permissions` for `http://localhost:8000/*` +
-`http://127.0.0.1:8000/*` (which bypass CORS entirely), while absent
-`Access-Control-Allow-*` + no `OPTIONS` handler means hostile web pages can
-neither read resume-derived gaps nor trigger runs (JSON `Content-Type`
-forces a preflight, which fails). Trust model: any local process can reach
-the server — same as M11, acceptable for a personal tool.
+Threat model (M20, from the public-release review —
+[../SECURITY-REVIEW.md](../SECURITY-REVIEW.md) S1/L4): the user browses
+hostile web pages on the same machine where the local agent holds their
+resume-derived data and LLM keys. Primary attacker = **a web page using the
+browser as a confused deputy** against `127.0.0.1`; secondary = stray local
+processes on a shared machine. The realistic chain to kill: CSRF a run →
+overwrite the stored LLM key → ingest an arbitrary local file via
+`skills_path` → exfiltrate it through the attacker's key as LLM prompt text.
+
+Three barriers, in order (server side):
+
+1. **Request-origin gate — the primary barrier.** Any request that carries
+   an `Origin` header must present the extension's origin
+   (`chrome-extension://…`) or the server's own origin
+   (`http://127.0.0.1:<port>` / `http://localhost:<port>` — the M11 index
+   page's fetches); anything else — web pages, `Origin: null` — is refused
+   **403 before any handler runs**. Requests with **no** `Origin` (browser
+   navigations: the plan iframe, the JD viewer, the OAuth callback
+   redirect; and non-browser clients: CLI and the `mN_check` harnesses)
+   pass the gate unchanged. Web pages cannot omit or forge `Origin`, so
+   every fetch/XHR/form attack is turned away at the door.
+2. **Content-Type enforcement.** JSON endpoints (`/api/run`, `/api/key`,
+   `/api/oauth/state`, `/api/oauth/exchange`) accept only
+   `application/json`; `POST /api/resume` only `application/octet-stream`;
+   anything else 415s. A cross-origin fetch with these content types
+   triggers a CORS preflight, which fails (no `OPTIONS` handler, no
+   `Access-Control-Allow-*`), so even a hypothetical origin-gate bypass
+   could not smuggle a browser "simple request". *This corrects the M13
+   claim (decision row superseded 2026-10-11) that preflight alone was the
+   barrier: a JSON body sent as `text/plain` is a simple request and needs
+   no preflight — the origin gate is what actually stops it.*
+3. **`skills_path` containment (defense in depth).** An explicit run-body
+   `skills_path` must be an existing `.json` under the repo root or the OS
+   temp dir (check fixtures live there); anything else 400s before a run
+   starts. `_resolve_skills` precedence is unchanged; `cli.py` keeps
+   unrestricted paths (terminal-side).
+
+Unchanged properties: the server binds `127.0.0.1` and sends **no CORS
+headers**, so cross-origin reads stay impossible even for requests the gate
+allows (navigations may *display* data to the user; a foreign page can never
+*read* it).
+
+**Transport (M20, L4):** the panel's `serverBase` accepts `http://` only for
+`localhost`/`127.0.0.1` (the default); any other host must be `https://`.
+Resume text, JDs and API keys must never transit plaintext to a non-loopback
+host; invalid values fall back to the default and are never persisted.
+
+**Accepted residual risk:** a process running **as the same OS user** sends
+no `Origin`, passes the gate, and can read `output/` directly anyway — a
+session token would not change that boundary (any local process can already
+read the resume file on disk). Restore trigger for token pairing: the
+product starts handling other users' data or runs as a service — recorded in
+`03-milestones.md` §Deferred.
+
+## Data disclosure (M21)
+
+Goal (security finding S2/L5): every user-facing claim about where data
+goes must be **accurate**, and the destinations must be **named** before
+the user's first upload or analysis. A privacy policy cannot outrank an
+in-product claim that contradicts it — the copy is the contract.
+
+**Copy rules** (panel surfaces — this section is their one design home):
+
+1. At the upload surface (setup hint + the `resumeprivacy` hint): the
+   two-part truth, in these words' sense — the *file* is kept locally
+   under `output/uploads/`; the *extracted text* is sent over HTTPS to the
+   AI provider the user selects for skill extraction and analysis; it is
+   never sent to the extension's developer. The old "It stays on your
+   machine" phrasing is **banned** — it conflated file storage with data
+   processing (struck in the M14 decision row, superseded by M21).
+2. Named destinations + caveats (upload disclosure and near the provider
+   select): OpenRouter forwards to the underlying model (default DeepSeek
+   via OpenRouter); Z.ai GLM (`open.bigmodel.cn`) and OpenAI are the other
+   providers — some process data outside your country (DeepSeek/Z.ai:
+   China); free providers may log or use inputs for training (M16's
+   verbatim disclaimer covers this and stays unchanged); GitHub Search
+   receives skill-gap terms derived from the analysis, never resume text;
+   the developer receives nothing (no telemetry, no backend).
+3. The hosted privacy policy
+   ([../docs/privacy-policy.md](../docs/privacy-policy.md), served from
+   GitHub Pages) mirrors this destination list — it is the same register,
+   restated for the store audience. When M17 lands, LangSmith (opt-in
+   tracing) joins **both** lists — see
+   [14-observability.md](14-observability.md); do not add it before the
+   code exists. The store-submission register (permission justifications,
+   dashboard declarations, listing copy) is the derived
+   [../CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md) — same mirror rule.
+
+**First-use consent (gate is not UI-only — the M16 lesson):** a
+`#disclosureack` checkbox at the upload surface, never pre-checked, backed
+by a versioned `disclosureConsent` flag in `chrome.storage.local`
+({disclosure_consent_at, consent_version}, bumped when the copy changes —
+same shape as M16's `freeConsent`). Upload **and** analyze refuse until it
+is checked; `POST /api/resume` additionally requires `X-Disclosure-Ack: 1`
+(409 otherwise), so no future client can upload without the disclosure
+having been presented. Runs (`/api/run`) keep their existing gates (M15
+pre-flight, M16 `privacy_ack`); adding a second ack there would churn
+every harness for no new exposure — the upload-time consent covers the
+first data flow.
+
+**Deferred (user decision 2026-10-11, restore triggers in
+`03-milestones.md` §Deferred):** PII minimization (strip names/contact
+details before LLM calls — skill extraction never needs them). ~~and a
+manual no-cloud extraction toggle~~ (superseded by the M24 row —
+Rule-based mode is the no-cloud path). The disclosure copy is amended by
+M24 (§M24): the destination is "selected above" and the copy states that
+extraction follows the selected mode.
 
 ## M14 — self-serve setup (✅ Built 2026-10-04)
 
@@ -456,6 +583,104 @@ Content, escaping and `target='_blank'` links are byte-identical.
 5. `m19_check.py` + `test_m19.py` offline PASS; `ruff check .`, `pytest`,
    `node --check` clean; m10–m18 regressions PASS (record in
    [03-milestones.md](03-milestones.md) M19).
+
+## M24 — mode governs ingestion; setup order (✅ Built 2026-10-11)
+
+The M18 mode chips promised "Rule-based — instant, no AI" and "Free model
+— costs nothing", but resume ingestion hardcoded `use_llm=True` with the
+paid default config: a Rule-based user's resume still went to the LLM at
+upload, and a Free-mode user paid for extraction. M24 makes the mode
+govern **every** AI touchpoint on user data — extraction included — and
+reorders the panel so key, mode and their consents are settled **before**
+the first data flow. Security-review context: this closes the gap between
+the §Data disclosure copy contract and actual behavior (copy is the
+contract). Decision rows in [02-decisions.md](02-decisions.md) (M24);
+roadmap entry [03-milestones.md](03-milestones.md) M24.
+
+### Semantics: one mode, all touchpoints
+
+`free | paid | rule` now governs resume extraction exactly as it governs
+the run ([05-ai-caller.md](05-ai-caller.md) §LLM presence policy
+unchanged for runs):
+
+| Mode | Extraction at upload |
+|---|---|
+| `rule` | `extract_skills_regex` — local, nothing leaves the machine |
+| `paid` | `extract_skills_llm` via the **active provider's** endpoint (fixes the old default-config gap: GLM/OpenAI selections now honored) |
+| `free` | free-tier models (M16 routing) |
+
+Rule-based extraction remains the labeled fallback when an LLM call
+fails (M15 provenance vocabulary unchanged).
+
+### Setup order (panel)
+
+1. **AI access** — key chip (`Key ✓ verified` / rejected / no key),
+   "Create free LLM key", "I already have a key" + paste form.
+2. **Mode + consent** — the three chips and, on Free, the M16 verbatim
+   consent block. Hidden entirely in the no-key state (rule is the only
+   mode there).
+3. **Your resume** — §Data disclosure copy (amended wording: destination
+   "selected **above**" + extraction-follows-mode note), the `#disclosureack`
+   gate, upload.
+
+Then the unchanged loop: collect → analyze (a one-line mode summary
+points back at the setting) → plan.
+
+### `POST /api/resume` contract (M24)
+
+New headers (all validated; defaults preserve the pre-M24 behavior):
+
+- `X-Extraction-Mode: rule | paid | free` (default `paid`) — selects
+  `use_llm` + `free_tier` for the extraction call.
+- `X-Provider: openrouter | glm | openai` (default `openrouter`) —
+  extraction cfg uses it.
+- `X-Privacy-Ack: 1` — **required for `free`** (409 otherwise): the M16
+  consent gate applies to free-mode ingestion exactly as to free-mode
+  runs (the gate is not UI-only — M16 lesson).
+- `X-Disclosure-Ack: 1` unchanged (M21).
+
+### Mode-aware extraction cache
+
+The SHA-256 sidecar gains a third line: the **requested mode** class
+(`llm` / `rule`). Reuse rules:
+
+- rule requests reuse `rule`-class regex artifacts only;
+- llm requests reuse `llm`-class artifacts **only when they were actually
+  produced by the LLM** (`source == "llm"`) — a regex-fallback artifact
+  is re-extracted (the fallback condition may have passed; quality must
+  follow the mode);
+- classes never cross (switching modes re-extracts; regex re-extraction
+  is instant);
+- legacy two-line sidecars are read as class `llm` (the historical
+  default), so existing LLM artifacts still hit.
+
+This closes the "first upload freezes quality forever" trap: an upload
+made without a key (rule class) upgrades automatically once a key exists
+and the mode flips.
+
+### Supersessions
+
+- The Deferred **manual no-cloud extraction toggle** is superseded
+  (restore trigger met): Rule-based mode *is* the no-cloud path now —
+  extraction runs locally and nothing leaves the machine.
+- [12-extension.md](12-extension.md) §Data disclosure copy rule 1's
+  "you select below" wording is amended to "selected above" (the
+  provider select moved into Setup); `DISCLOSURE_CONSENT_VERSION` bumps
+  to 2. M16's verbatim free disclaimer is unchanged.
+
+### Done criteria (M24)
+
+1. Panel order and the mode summary as above; free consent sits with the
+   chips and gates upload + analyze.
+2. Upload honors mode + provider; free uploads refuse without
+   `X-Privacy-Ack`; rule uploads make no LLM call at all.
+3. Cache rules hold (incl. legacy sidecars); llm↔rule never cross;
+   fallback artifacts are retried for llm requests.
+4. m21_check needles all preserved; disclaimer verbatim-unchanged;
+   `DISCLOSURE_CONSENT_VERSION == 2`.
+5. `m24_check.py` + `test_m24.py` offline PASS; `ruff check .`,
+   `pytest`, `node --check` clean; m10–m23 regressions PASS; one live
+   pass recorded in [03-milestones.md](03-milestones.md) M24.
 
 ## Explicit non-goals (M13)
 

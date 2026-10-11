@@ -39,7 +39,9 @@ No command-line flags: the side panel handles everything.
    folder. Click the toolbar icon — the side panel opens.
 
 4. **Configure in the panel:** upload your resume in **Setup** (PDF/DOCX/TXT
-   — kept locally in `output/uploads/`) and, under **Analyze gaps**, keep
+   — the file is kept locally in `output/uploads/`; the extracted text is
+   sent over HTTPS to the AI provider you select for analysis, never to
+   the extension's developer) and, under **Analyze gaps**, keep
    **Use LLM intelligence** on (default) and paste your API key there
    (stored in the OS keyring — Windows Credential Manager / macOS
    Keychain — never in the browser). LLM mode without a key refuses to
@@ -47,7 +49,9 @@ No command-line flags: the side panel handles everything.
    (keyword matching, no LLM calls).
 
 5. **Use it:** open a LinkedIn JD → **Capture JD** (repeat per JD — the
-   list only grows) → **Analyze gaps** → **Generate plan**. Every gap row
+   list only grows; if LinkedIn truncates the description, the panel
+   highlights its "…see more" button — click it yourself and capture
+   again) → **Analyze gaps** → **Generate plan**. Every gap row
    and plan section states its source (`LLM` / `LLM (cached)` /
    `Rule-based`).
 
@@ -122,6 +126,15 @@ Design detail in
 [specs/11-sweep.md](specs/11-sweep.md) and
 [specs/12-extension.md](specs/12-extension.md); build order in
 [specs/03-milestones.md](specs/03-milestones.md).
+
+## Privacy & store readiness
+
+Data handling is described in [docs/privacy-policy.md](docs/privacy-policy.md)
+(what leaves the machine: the AI provider you choose + GitHub search terms;
+the developer receives nothing). Chrome Web Store submission material —
+permission justifications, declarations, listing copy — is maintained in
+[CHROMEWEBSTORE.md](CHROMEWEBSTORE.md); bundled dependency licenses in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## For contributors
 

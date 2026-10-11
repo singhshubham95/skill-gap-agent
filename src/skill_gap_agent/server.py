@@ -20,7 +20,15 @@ M14 self-serve setup (specs/12-extension.md §M14):
   POST /api/resume  -> upload a resume (raw file bytes; original name in
                        X-Filename), validate (10 MB cap, .pdf/.docx/.txt,
                        magic bytes), store under output/uploads/, run the
-                       M8 extraction immediately (blocks until done)
+                       M8 extraction immediately (blocks until done).
+                       M24: X-Extraction-Mode (rule|paid|free, default
+                       paid) governs the extraction call (rule = local
+                       regex), X-Provider picks the LLM endpoint, and
+                       free extraction requires X-Privacy-Ack: 1 (409
+                       otherwise). X-Disclosure-Ack: 1 required (M21)..
+                       M21: requires X-Disclosure-Ack: 1 (409 otherwise) —
+                       the panel's data-disclosure consent, enforced
+                       server-side (specs/12-extension.md §Data disclosure)
   GET  /api/providers -> [{id, model, key_set}] — key_set is a boolean;
                        key material is never returned by any endpoint
   GET  /api/key/status?provider=<id> -> M18 panel chip: {key_set, ok,
@@ -43,10 +51,17 @@ Single-run guard: POST /api/run while running -> 409. Status carries
 started_at/finished_at/error. Paths resolve from the repo root (this file's
 parents), never hardcoded — data/ and output/ stay gitignored.
 
-No CORS headers on purpose (decision in specs/02-decisions.md): the Chrome
-extension (extension/) calls with host_permissions for localhost, which
-bypasses CORS; absent ACAO + no OPTIONS handler keeps hostile web pages from
-reading gaps or triggering runs. Server binds 127.0.0.1 only.
+Request protection (M20, specs/12-extension.md §Security posture): every
+request passes a request-origin gate — if an `Origin` header is present it
+must be the extension's (`chrome-extension://…`) or the server's own origin
+(`http://127.0.0.1:<port>` / `http://localhost:<port>`); anything else
+(including `Origin: null`) is refused 403 before any handler runs.
+Headerless requests (navigations, CLI, mN_check harnesses) pass unchanged.
+POSTs enforce Content-Type (`application/json`; `/api/resume`:
+`application/octet-stream`), and an explicit run-body `skills_path` must be
+an existing `.json` under the repo root or the OS temp dir. No CORS headers
+on purpose — absent ACAO means even allowed cross-origin callers cannot
+*read* responses. Server binds 127.0.0.1 only.
 
 Run: python -m skill_gap_agent.server [--port 8000] [--skills <file>]
 Then open http://localhost:8000/ — bookmarklet-saved JDs appear in the list.
@@ -58,6 +73,7 @@ import html
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 import traceback
@@ -76,6 +92,49 @@ CAPTURED_DIR = OUTPUT_DIR / "captured_jds"
 UPLOAD_DIR = OUTPUT_DIR / "uploads"  # M14: uploaded resumes (output/ gitignored)
 DEFAULT_SKILLS = REPO_ROOT / "data" / "skillsdataset.json"
 MAX_RESUME_BYTES = 10 * 1024 * 1024  # M14 upload cap
+
+
+# --- M20 request protection (specs/12-extension.md §Security posture) ------
+
+
+def _origin_ok(origin: str | None, port: int) -> bool:
+    """Request-origin gate (pure — unit-tested in test_m20).
+
+    No Origin header = browser navigation or non-browser client (CLI,
+    mN_check harnesses) — allowed. Otherwise only the extension's own
+    origin or the server's own origin (the M11 index page) may pass;
+    web pages cannot omit or forge this header.
+    """
+    if origin is None:
+        return True
+    if origin.startswith("chrome-extension://"):
+        return True
+    return origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+
+
+def _validate_skills_path(value) -> str | None:
+    """M20 containment: an explicit run-body skills_path must be an
+    existing .json under the repo root or the OS temp dir (check fixtures
+    live there). Returns an error message, or None when acceptable.
+
+    Defense in depth — the origin gate is the primary barrier; this kills
+    the file-ingest primitive (arbitrary local file -> LLM prompt) even if
+    the gate were bypassed. cli.py keeps unrestricted paths (terminal-side).
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "skills_path must be a non-empty string"
+    p = Path(value).expanduser().resolve()
+    if p.suffix.lower() != ".json":
+        return f"skills_path must be a .json file: {value!r}"
+    roots = (REPO_ROOT.resolve(), Path(tempfile.gettempdir()).resolve())
+    if not any(p.is_relative_to(root) for root in roots):
+        return (
+            "skills_path must live under the repo root or the OS temp dir: "
+            f"{value!r}"
+        )
+    if not p.is_file():
+        return f"skills_path not found: {value!r}"
+    return None
 
 _lock = threading.Lock()
 _run: dict = {
@@ -575,7 +634,14 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, payload: dict) -> None:
         self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
 
+    def _origin_gate_ok(self) -> bool:
+        """M20 request-origin gate — see §Security posture in the spec."""
+        return _origin_ok(self.headers.get("Origin"), self.server.server_address[1])
+
     def do_GET(self) -> None:
+        if not self._origin_gate_ok():
+            self._send(403, b"forbidden origin", "text/plain")
+            return
         path = urllib.parse.urlparse(self.path).path
         if path in ("/", "/index.html"):
             self._send(200, INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
@@ -715,7 +781,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
+        if not self._origin_gate_ok():
+            self._send(403, b"forbidden origin", "text/plain")
+            return
         path = urllib.parse.urlparse(self.path).path
+        # M20 Content-Type enforcement: a browser "simple request" cannot
+        # carry these types cross-origin without a failing preflight, so
+        # even a hypothetical origin-gate bypass cannot smuggle a body in.
+        json_endpoints = (
+            "/api/run", "/api/key", "/api/oauth/exchange", "/api/oauth/state",
+        )
+        if path == "/api/resume" or path in json_endpoints:
+            expected = (
+                "application/octet-stream" if path == "/api/resume"
+                else "application/json"
+            )
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0]
+            if ctype.strip().lower() != expected:
+                self._send(415, b"unsupported content type", "text/plain")
+                return
         if path == "/api/resume":
             self._handle_resume(int(self.headers.get("Content-Length", 0) or 0))
             return
@@ -780,6 +864,16 @@ class Handler(BaseHTTPRequestHandler):
                 "free-mode run (see the panel's consent checkbox).",
             })
             return
+        # M20 containment (specs/12-extension.md §Security posture): an
+        # explicit skills_path is refused outside the repo root / OS temp
+        # dir before any run starts — the HTTP API never becomes a
+        # local-file-ingest primitive. Checked after the gates above so the
+        # M15/M16 refusals keep their exact ordering.
+        if "skills_path" in options:
+            err = _validate_skills_path(options.get("skills_path"))
+            if err:
+                self._json(400, {"error": err})
+                return
         with _lock:
             _run.update(
                 status="running", stage=None, phase=phase, started_at=time.time(),
@@ -797,6 +891,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_resume(self, length: int) -> None:
         """M14 resume upload: raw bytes in, extraction runs immediately."""
+        # M21 (specs/12-extension.md §Data disclosure): the disclosure
+        # consent gate is not UI-only — no client uploads without it.
+        if self.headers.get("X-Disclosure-Ack") != "1":
+            self._json(409, {
+                "error": "disclosure consent required: confirm the panel's "
+                "data disclosure before uploading (X-Disclosure-Ack: 1).",
+            })
+            return
+        # M24 (specs/12-extension.md §M24): the mode governs extraction —
+        # rule = local regex (nothing leaves the machine), paid/free = LLM
+        # via the chosen provider. Defaults preserve the pre-M24 behavior.
+        mode = (self.headers.get("X-Extraction-Mode") or "paid").strip().lower()
+        if mode not in ("paid", "free", "rule"):
+            self._json(400, {"error": f"bad extraction mode: {mode!r}"})
+            return
+        provider = (self.headers.get("X-Provider") or "openrouter").strip().lower()
+        if provider not in PROVIDERS:
+            self._json(400, {"error": f"unknown provider: {provider!r}"})
+            return
+        # M16's consent gate covers free-mode ingestion too (M24): free
+        # providers may log/train on inputs — the resume is the most
+        # sensitive data the product touches. Gate is not UI-only.
+        if mode == "free" and self.headers.get("X-Privacy-Ack") != "1":
+            self._json(409, {
+                "error": "free extraction requires privacy consent "
+                "(X-Privacy-Ack: 1) — free models may log or use inputs for "
+                "training; confirm the consent checkbox first.",
+            })
+            return
         if length <= 0:
             self._json(400, {"error": "empty upload"})
             return
@@ -825,7 +948,11 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             _json_path, stats = resume_to_skills_json(
-                target, use_llm=True, auto=True, ask_fn=None
+                target,
+                use_llm=(mode != "rule"),
+                auto=True,
+                ask_fn=None,
+                cfg=LLMConfig(provider=provider, free_tier=(mode == "free")),
             )
         except Exception as e:  # noqa: BLE001 — surfaced as 500
             traceback.print_exc()
@@ -844,6 +971,7 @@ class Handler(BaseHTTPRequestHandler):
             "skills": stats.get("phrases"),
             "source": stats.get("source"),
             "provenance": stats.get("provenance"),
+            "mode": mode,
         }
         if stats.get("provenance") == "Rule-based":
             resp["warning"] = (

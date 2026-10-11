@@ -12,6 +12,35 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M24: Mode governs ingestion — free/paid/rule now applies to resume
+  extraction too (rule = local regex, nothing leaves the machine); Setup
+  order = AI access → mode + consent → resume; mode-aware extraction
+  cache; `POST /api/resume` gains mode/provider/consent headers; live
+  pass pending (spec: [12-extension.md](../specs/12-extension.md) §M24)
+- T-M23: LinkedIn posture — assist, don't act: the content script never
+  clicks page controls; truncated JDs get the "…see more" button scrolled
+  into view, focused and highlighted (Ctrl+F-style) for the user to click
+  themselves; capture guardrails explicit; mitigates L3 (spec:
+  [12-extension.md](../specs/12-extension.md) §Capture)
+- T-M22: Store readiness — hosted privacy policy (`docs/`, GitHub Pages)
+  with the Limited Use statement + named destinations,
+  `CHROMEWEBSTORE.md` submission register (per-permission justifications,
+  declarations, listing copy with LinkedIn + AI disclaimers), generated
+  placeholder icons + manifest wiring, `THIRD-PARTY-NOTICES`; prepares
+  blockers L1/L2/L6/L7 (spec:
+  [12-extension.md](../specs/12-extension.md) §Data disclosure)
+- T-M21: Honest data disclosure — banned the "stays on your machine" claim
+  (the file is local; the extracted text goes over HTTPS to the selected
+  AI provider, never to the developer), named destinations (OpenRouter →
+  DeepSeek, Z.ai GLM, OpenAI; GitHub gets skill-gap terms only), first-use
+  consent gating upload + analyze with a server-enforced
+  `X-Disclosure-Ack`; fixes S2 + the disclosure side of L5 (spec:
+  [12-extension.md](../specs/12-extension.md) §Data disclosure)
+- T-M20: Public-release hardening — request-origin gate (web pages can no
+  longer call the local agent), Content-Type enforcement, `skills_path`
+  containment, https-only non-loopback `serverBase`; closes security
+  findings S1/L4 (spec:
+  [12-extension.md](../specs/12-extension.md) §Security posture)
 - T-M19: Light/dark theme — panel + plan follow the OS theme
   (`prefers-color-scheme`) with a minimal Auto/Light/Dark override button;
   plan follows via serve-time `?theme=` injection (plan.html stays
