@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M22; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M23; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -130,7 +130,8 @@ request-origin hardening (public-release security over the built local
 API) — likewise not a pipeline stage. M21 is data-disclosure honesty
 (public-release copy + consent over the built flow) — likewise not a
 pipeline stage. M22 is store packaging (privacy policy, submission
-register, icons) — likewise not a pipeline stage.
+register, icons) — likewise not a pipeline stage. M23 is the LinkedIn
+capture posture (assist-not-act) — likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -792,6 +793,36 @@ register, icons) — likewise not a pipeline stage.
       product whose extension transmits *nothing* — the companion does.
       The register keeps that distinction explicit for the reviewer
       instead of over-claiming on the form.
+23. **LinkedIn capture posture — assist, don't act.** ✅ Built 2026-10-11
+    (design home: [12-extension.md](12-extension.md) §Capture; work order
+    [tasks/T-M23.md](tasks/T-M23.md)). Security finding L3: the content
+    script's synthetic `btn.click()` on LinkedIn's "…see more" control —
+    the strongest "automated access" signal in the product — is gone. On
+    capture of a truncated description the script now **assists instead**:
+    scrolls the control to center, focuses it, paints a persistent
+    Ctrl+F-style yellow highlight + tooltip, and returns a guiding error
+    ("click the highlighted button, then Capture again"); only the user's
+    click expands the text. Expanded descriptions capture exactly as
+    before. Capture guardrails made explicit (single page, one click, no
+    batch/scroll harvesting); the residual ToS risk of DOM extraction is
+    accepted and documented (decision rows, `SECURITY-REVIEW.md`). User
+    decision 2026-10-11: focus + highlight over a synthetic click — the
+    "assist, don't act" line.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M23` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check` (both JS files), `m23_check` (no `.click(` remains;
+      assist wiring + tooltip present; guiding error + panel surfacing +
+      docs mention the expand step; extraction selectors/response shape/
+      message contract unchanged), and the m10–m16 + m18–m22 regressions
+      (`board/verify-T-M23.md`).
+    - **Learnings:** (a) The ToS line is drawn at *state change*, not at
+      touching the page: scrolling/focusing/highlighting are what the
+      user could do themselves and read as presentation aids, while one
+      `.click()` made the extension an actor on LinkedIn's UI. The tests
+      assert the rule structurally (`.click(` is banned in `content.js`)
+      so it cannot regress silently. (b) The UX cost is one extra click
+      per *truncated* JD, paid only when LinkedIn truncates — the guiding
+      error + auto-highlight carry the user through it.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 

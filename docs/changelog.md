@@ -12,6 +12,11 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M23: LinkedIn posture — assist, don't act: the content script never
+  clicks page controls; truncated JDs get the "…see more" button scrolled
+  into view, focused and highlighted (Ctrl+F-style) for the user to click
+  themselves; capture guardrails explicit; mitigates L3 (spec:
+  [12-extension.md](../specs/12-extension.md) §Capture)
 - T-M22: Store readiness — hosted privacy policy (`docs/`, GitHub Pages)
   with the Limited Use statement + named destinations,
   `CHROMEWEBSTORE.md` submission register (per-permission justifications,
