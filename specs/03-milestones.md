@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M21; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M22; M9 deferred/re-scoped)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -129,7 +129,8 @@ only, panel + plan surfaces) — likewise not a pipeline stage. M20 is
 request-origin hardening (public-release security over the built local
 API) — likewise not a pipeline stage. M21 is data-disclosure honesty
 (public-release copy + consent over the built flow) — likewise not a
-pipeline stage.
+pipeline stage. M22 is store packaging (privacy policy, submission
+register, icons) — likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -753,6 +754,44 @@ pipeline stage.
       claim that contradicts the actual data flow — is locked out by
       plain file assertions. Treat claims about data flows like API
       contracts: named, asserted, and versioned with the consent copy.
+22. **Store packaging — privacy policy, submission register, icons.**
+    ✅ Built 2026-10-11 (work order
+    [tasks/T-M22.md](tasks/T-M22.md); the policy mirrors
+    [12-extension.md](12-extension.md) §Data disclosure — that register is
+    the design home). Public-release blockers L1/L2/L6/L7: a hosted
+    privacy policy ([../docs/privacy-policy.md](../docs/privacy-policy.md)
+    on GitHub Pages from `/docs`) carrying the Chrome Web Store **Limited
+    Use** statement and the named-destination register (OpenRouter →
+    DeepSeek, Z.ai GLM, OpenAI; GitHub terms; China processing disclosed)
+    plus a Pages landing ([../docs/index.md](../docs/index.md)); a derived
+    store-submission register
+    ([../CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md): single purpose,
+    per-permission justifications for every manifest entry, data-use
+    declarations, listing copy with the companion-app requirement +
+    "Not affiliated with LinkedIn" + AI-generated-content notice, reviewer
+    instructions, pre-submit checklist); generated placeholder icons
+    (`tools/generate_icons.py`, stdlib-only; `extension/icons/`);
+    [../THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md). Decision rows
+    in [02-decisions.md](02-decisions.md) (M22). Owner actions remain
+    (Pages toggle, trademark search, dashboard submission) — the
+    checklist in CHROMEWEBSTORE.md is the register for those.
+    - **Verification record (2026-10-11):** `python scripts/verify.py
+      --task T-M22` ALL CHECKS PASS — `ruff check .`, `pytest`,
+      `node --check`, `m22_check` (icons valid + manifest wired; policy
+      completeness incl. the Limited Use sentence + destinations + China
+      disclosure; justifications cover every manifest
+      permission/host/content-script match; disclaimers present; no stale
+      references across the five registers), and the m10–m16 + m18–m21
+      regressions (`board/verify-T-M22.md`).
+    - **Learnings:** (a) Sentence-level assertions over hand-wrapped
+      Markdown are brittle — the first red run failed on line-break
+      artifacts and one case mismatch, not on content; the checks now
+      normalize whitespace (and `> ` markers) before asserting. (b) The
+      CWS data-use form's categories ("personally identifiable info",
+      "web page content", "authentication info") map awkwardly onto a
+      product whose extension transmits *nothing* — the companion does.
+      The register keeps that distinction explicit for the reviewer
+      instead of over-claiming on the form.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 

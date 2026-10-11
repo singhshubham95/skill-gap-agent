@@ -12,6 +12,13 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M22: Store readiness — hosted privacy policy (`docs/`, GitHub Pages)
+  with the Limited Use statement + named destinations,
+  `CHROMEWEBSTORE.md` submission register (per-permission justifications,
+  declarations, listing copy with LinkedIn + AI disclaimers), generated
+  placeholder icons + manifest wiring, `THIRD-PARTY-NOTICES`; prepares
+  blockers L1/L2/L6/L7 (spec:
+  [12-extension.md](../specs/12-extension.md) §Data disclosure)
 - T-M21: Honest data disclosure — banned the "stays on your machine" claim
   (the file is local; the extracted text goes over HTTPS to the selected
   AI provider, never to the developer), named destinations (OpenRouter →

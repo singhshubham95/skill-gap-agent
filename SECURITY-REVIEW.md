@@ -136,9 +136,9 @@ third-party LLM data handling (disclosed, user-chosen).
 |---|---|
 | S1 — unauthenticated local API | ✅ Fixed (T-M20): request-origin gate + Content-Type enforcement + `skills_path` containment. Session-token pairing deliberately deferred — same-user processes can read `output/` directly anyway (restore trigger: `specs/03-milestones.md` §Deferred #15). |
 | S2 — "stays on your machine" disclosure | ✅ Fixed (T-M21): accurate copy across panel + both READMEs, named destinations, and versioned first-use consent gating upload + analyze (server-enforced `X-Disclosure-Ack` on upload). Manual no-cloud extraction toggle deferred as an enhancement (§Deferred #16). |
-| L1/L2 — privacy policy, declarations, store packaging | ⚠️ Open — follow-up work order. |
-| L3 — LinkedIn posture | ⚠️ Open — follow-up work order (product decision needed). |
+| L1/L2 — privacy policy, declarations, store packaging | ✅ Prepared (T-M22): hosted policy (`docs/privacy-policy.md` + Pages landing) with the Limited Use statement, `CHROMEWEBSTORE.md` register (justifications + declarations + listing copy), icons + manifest wiring. Owner actions remain (Pages toggle, trademark search, dashboard submission) — checklist in `CHROMEWEBSTORE.md`. |
+| L3 — LinkedIn posture | ⚠️ Open — follow-up work order (product decision needed). The listing disclaimer is already drafted. |
 | L4 — plaintext `serverBase` | ✅ Fixed (T-M20): `http://` is loopback-only; other hosts require `https://`; invalid values never persist. |
 | L5 — named-provider disclosure | ✅ Disclosure side fixed (T-M21): destinations + jurisdictions named in-product; PII minimization deferred (user decision, §Deferred #16). |
-| L6 — AI transparency | ⚠️ Partial (M15 provenance labels, M16 free-mode disclosure); a formal AI-generated-content notice for the store listing remains. |
-| L7 — licensing housekeeping | ⚠️ Open. |
+| L6 — AI transparency | ✅ Fixed (T-M22): AI-generated-content notice in the listing copy + policy; in-product provenance labels since M15. |
+| L7 — licensing housekeeping | ✅ Fixed (T-M22): `THIRD-PARTY-NOTICES.md`; trademark search on the owner checklist. |
