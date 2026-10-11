@@ -7,13 +7,16 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
 
 ## What it does
 
-0. **Setup** — upload your resume (PDF/DOCX/TXT). For LLM analysis the
-   panel checks whether a key is saved and shows one of two states: with a
-   key, pick **Free model**, **Paid model** or **Rule-based**; without one,
-   **Create free LLM key** (one click, no key to paste) or run
-   rule-based. No command-line flags, no env vars: keys go to the local
-   agent, which keeps them in the OS keyring. **I already have a key**
-   opens a paste form for other providers (GLM, OpenAI, OpenRouter).
+0. **Setup** — three steps in the panel, in order: **your AI access**
+   (key state chip; with a key pick **Free model**, **Paid model** or
+   **Rule-based** in **analysis mode**; without one, **Create free LLM
+   key** — one click, no key to paste — or run rule-based), then
+   **your resume** (PDF/DOCX/TXT). The mode governs everything AI:
+   skill extraction *and* gap analysis — Rule-based extracts locally
+   and nothing leaves the machine. No command-line flags, no env vars:
+   keys go to the local agent, which keeps them in the OS keyring.
+   **I already have a key** opens a paste form for other providers
+   (GLM, OpenAI, OpenRouter).
 1. **Capture JD** — reads the LinkedIn job description on the active tab
    (same extraction as [../tools/linkedin_jd_bookmarklet.js](../tools/linkedin_jd_bookmarklet.js))
    and appends it to a list. If LinkedIn truncates the description, the
@@ -50,15 +53,8 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
    - click **Load unpacked** and select this `extension/` folder
    - (if it was already loaded) click the reload icon after pulling changes
 
-3. **Open the panel** (toolbar icon) and configure it:
-   - **Setup › Your resume** — upload a PDF/DOCX/TXT. The file is kept
-     locally under `output/uploads/`; the extracted text is sent over
-     HTTPS to the AI provider you select for skill extraction (see the
-     panel's data disclosure, which must be confirmed before the first
-     upload) — it is never sent to the extension's developer. The panel
-     shows the extracted skill count. First upload of a new resume can
-     take minutes (LLM extraction); the same file is instant afterwards.
-   - **Analyze gaps › key state** — the panel verifies a saved key with a
+3. **Open the panel** (toolbar icon) and configure it top to bottom:
+   - **Setup › Your AI access** — the panel verifies a saved key with a
      free key-info call and shows `Key ✓ verified` (or "couldn't verify —
      runs will retry"; validation never blocks a run). **Create free LLM
      key** opens an OpenRouter login and stores the minted key in the OS
@@ -68,7 +64,18 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
      never stored in the browser. LLM modes with no key are refused up
      front — the panel will not quietly run without the LLM. Picking
      **Free model** reveals the consent block (free providers may log
-     inputs); runs without consent are refused server-side too.
+     inputs); uploads and runs without consent are refused server-side too.
+   - **Setup › Analysis mode** — Free / Paid / Rule-based; applies to
+     skill extraction *and* gap analysis.
+   - **Setup › Your resume** — upload a PDF/DOCX/TXT. The file is kept
+     locally under `output/uploads/`; the extracted text is sent over
+     HTTPS to the AI provider selected above for skill extraction (see
+     the panel's data disclosure, which must be confirmed before the
+     first upload) — unless Rule-based mode is selected, which extracts
+     locally and nothing leaves the machine. It is never sent to the
+     extension's developer. The panel shows the extracted skill count.
+     First LLM upload of a new resume can take minutes; re-uploading the
+     same file in the same mode is instant (cached).
 
 ## First capture
 

@@ -211,6 +211,7 @@ def save_extracted(
     path: str | Path = EXTRACTED_PATH,
     source_sha: str | None = None,
     source: str | None = None,
+    mode: str | None = None,
 ) -> Path:
     """Persist the extraction artifact (reviewable, re-runs reuse it).
 
@@ -222,12 +223,15 @@ def save_extracted(
     source (M15): "llm" or "regex" — recorded on the sidecar's second line
     so a cache hit can label its provenance honestly ("LLM (cached)" vs
     "Rule-based"), per specs/05-ai-caller.md §Provenance vocabulary.
+
+    mode (M24): the requested mode class ("llm" / "rule") on the sidecar's
+    third line — cache reuse is mode-scoped (specs/12-extension.md §M24).
     """
     p = Path(path)
     p.parent.mkdir(exist_ok=True)
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     if source_sha is not None:
-        sidecar = source_sha + "\n" + (source or "") + "\n"
+        sidecar = source_sha + "\n" + (source or "") + "\n" + (mode or "") + "\n"
         p.with_suffix(".sha256").write_text(sidecar, encoding="utf-8")
     return p
 
@@ -260,6 +264,39 @@ def extracted_provenance(path: str | Path = EXTRACTED_PATH) -> str | None:
         return None
     lines = sidecar.read_text(encoding="utf-8").splitlines()
     return lines[1].strip() if len(lines) > 1 and lines[1].strip() else None
+
+
+def extracted_mode(path: str | Path = EXTRACTED_PATH) -> str:
+    """M24: the mode class the artifact was produced for ("llm" / "rule").
+
+    Sidecar line 3; legacy two-line sidecars predate mode-scoping and are
+    read as "llm" (the historical `use_llm=True` default), so existing
+    LLM artifacts keep hitting (specs/12-extension.md §M24)."""
+    sidecar = Path(path).with_suffix(".sha256")
+    if not sidecar.exists():
+        return "llm"
+    lines = sidecar.read_text(encoding="utf-8").splitlines()
+    if len(lines) > 2 and lines[2].strip() in ("llm", "rule"):
+        return lines[2].strip()
+    return "llm"
+
+
+def _artifact_reusable(path: str | Path, use_llm: bool) -> bool:
+    """M24 mode-aware cache rules (specs/12-extension.md §M24).
+
+    - Classes never cross: a rule request only reuses rule artifacts, an
+      llm request only reuses llm-mode artifacts.
+    - An llm request never reuses a regex-fallback artifact: the fallback
+      condition may have passed (key saved, provider back) and quality
+      must follow the mode — re-extraction retries the LLM.
+    - Rule artifacts are regex by construction and always reusable within
+      the rule class (re-extraction would be identical)."""
+    want = "llm" if use_llm else "rule"
+    if extracted_mode(path) != want:
+        return False
+    if want == "llm":
+        return extracted_provenance(path) == "llm"
+    return True
 
 
 def _flatten_phrases(data: dict) -> list[str]:
@@ -381,6 +418,10 @@ def resume_to_skills_json(
 
     data = load_extracted(artifact_path, expect_sha=source_sha)
     source = "artifact"
+    # M24 (specs/12-extension.md §M24): reuse is mode-scoped — a mode
+    # mismatch or a stale regex-fallback artifact forces re-extraction.
+    if data is not None and not _artifact_reusable(artifact_path, use_llm):
+        data = None
     if data is None:
         if use_llm:
             try:
@@ -393,7 +434,13 @@ def resume_to_skills_json(
         else:
             data = extract_skills_regex(text)
             source = "regex"
-        save_extracted(data, artifact_path, source_sha=source_sha, source=source)
+        save_extracted(
+            data,
+            artifact_path,
+            source_sha=source_sha,
+            source=source,
+            mode=("llm" if use_llm else "rule"),
+        )
         print(f"Extraction artifact saved: {artifact_path} (source: {source})")
         provenance = LABEL_LLM if source == "llm" else LABEL_RULE
     else:

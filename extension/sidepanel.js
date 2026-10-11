@@ -29,8 +29,10 @@ const STAGE_LABELS = {
 // older version is ignored and the checkbox re-prompts.
 const CONSENT_VERSION = 1;
 // M21 (specs/12-extension.md §Data disclosure): bump when the data
-// disclosure copy changes — same re-prompt rule as M16's consent.
-const DISCLOSURE_CONSENT_VERSION = 1;
+// disclosure copy changes — same re-prompt rule as M16's consent. 2:
+// M24 amended the copy (destination "selected above", extraction follows
+// the selected mode).
+const DISCLOSURE_CONSENT_VERSION = 2;
 // M16 A: OpenRouter OAuth PKCE (specs/12-extension.md §M16 A).
 const OAUTH_AUTH_URL = "https://openrouter.ai/auth";
 const OAUTH_KEYS_PAGE = "https://openrouter.ai/settings/keys";
@@ -186,16 +188,29 @@ async function uploadResume() {
     setStatus("Please confirm the data disclosure above first.", true);
     return;
   }
-  $("resumeinfo").textContent =
-    "Uploading resume and extracting skills (first time can take minutes)…";
+  // M24: extraction follows the mode — and free-mode extraction sends
+  // resume text to free providers, so the M16 consent gate applies here
+  // too (the server refuses without X-Privacy-Ack).
+  const mode = selectedMode();
+  if (mode === "free" && !$("privacyack").checked) {
+    setStatus("Please confirm the free-model consent first.", true);
+    return;
+  }
+  const headers = {
+    "Content-Type": "application/octet-stream",
+    "X-Filename": encodeURIComponent(file.name),
+    "X-Disclosure-Ack": "1",
+    "X-Extraction-Mode": mode,
+    "X-Provider": activeProvider,
+  };
+  if (mode === "free") headers["X-Privacy-Ack"] = "1";
+  $("resumeinfo").textContent = mode === "rule"
+    ? "Extracting skills locally (Rule-based mode — nothing leaves this machine)…"
+    : "Uploading resume and extracting skills (first time can take minutes)…";
   try {
     const r = await fetch(server + "/api/resume", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "X-Filename": encodeURIComponent(file.name),
-        "X-Disclosure-Ack": "1",
-      },
+      headers,
       body: file,
     });
     const body = await r.json().catch(() => ({}));
@@ -225,10 +240,14 @@ function renderKeyState(keySet) {
   // no key => create-free-key button + rule-based path.
   $("nokey").hidden = keySet;
   $("modechips").hidden = !keySet;
+  // M24: the mode section governs ingestion too — it lives in Setup and
+  // has nothing to choose while rule-based is the only mode.
+  $("setupmode").hidden = !keySet;
   if (!keySet) {
     $("freeconsent").hidden = true;
     $("freemode").hidden = true;
   }
+  updateModeSummary();
   updateRunGate();
 }
 
@@ -465,6 +484,21 @@ function selectedMode() {
   return (el && el.value) || "paid";
 }
 
+// M24: the Analyze section points back at the Setup choice it runs with.
+const MODE_LABELS = {
+  free: "Free model — costs nothing; provider may log inputs",
+  paid: "Paid model — uses your key's credits",
+  rule: "Rule-based — instant, no AI",
+};
+
+function updateModeSummary() {
+  const el = $("modesummary");
+  if (el) {
+    el.textContent =
+      "Mode: " + MODE_LABELS[selectedMode()] + " — change it in Setup.";
+  }
+}
+
 function updateRunGate() {
   // Free mode without consent cannot run (M16 B consent gate).
   const freeUnconsented = selectedMode() === "free" && !$("privacyack").checked;
@@ -483,6 +517,7 @@ function onModeChange() {
     $("privacyack").checked = false;
     $("freemode").hidden = true;
   }
+  updateModeSummary();
   updateRunGate();
 }
 

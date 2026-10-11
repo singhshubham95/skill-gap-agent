@@ -21,6 +21,11 @@ M14 self-serve setup (specs/12-extension.md §M14):
                        X-Filename), validate (10 MB cap, .pdf/.docx/.txt,
                        magic bytes), store under output/uploads/, run the
                        M8 extraction immediately (blocks until done).
+                       M24: X-Extraction-Mode (rule|paid|free, default
+                       paid) governs the extraction call (rule = local
+                       regex), X-Provider picks the LLM endpoint, and
+                       free extraction requires X-Privacy-Ack: 1 (409
+                       otherwise). X-Disclosure-Ack: 1 required (M21)..
                        M21: requires X-Disclosure-Ack: 1 (409 otherwise) —
                        the panel's data-disclosure consent, enforced
                        server-side (specs/12-extension.md §Data disclosure)
@@ -894,6 +899,27 @@ class Handler(BaseHTTPRequestHandler):
                 "data disclosure before uploading (X-Disclosure-Ack: 1).",
             })
             return
+        # M24 (specs/12-extension.md §M24): the mode governs extraction —
+        # rule = local regex (nothing leaves the machine), paid/free = LLM
+        # via the chosen provider. Defaults preserve the pre-M24 behavior.
+        mode = (self.headers.get("X-Extraction-Mode") or "paid").strip().lower()
+        if mode not in ("paid", "free", "rule"):
+            self._json(400, {"error": f"bad extraction mode: {mode!r}"})
+            return
+        provider = (self.headers.get("X-Provider") or "openrouter").strip().lower()
+        if provider not in PROVIDERS:
+            self._json(400, {"error": f"unknown provider: {provider!r}"})
+            return
+        # M16's consent gate covers free-mode ingestion too (M24): free
+        # providers may log/train on inputs — the resume is the most
+        # sensitive data the product touches. Gate is not UI-only.
+        if mode == "free" and self.headers.get("X-Privacy-Ack") != "1":
+            self._json(409, {
+                "error": "free extraction requires privacy consent "
+                "(X-Privacy-Ack: 1) — free models may log or use inputs for "
+                "training; confirm the consent checkbox first.",
+            })
+            return
         if length <= 0:
             self._json(400, {"error": "empty upload"})
             return
@@ -922,7 +948,11 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             _json_path, stats = resume_to_skills_json(
-                target, use_llm=True, auto=True, ask_fn=None
+                target,
+                use_llm=(mode != "rule"),
+                auto=True,
+                ask_fn=None,
+                cfg=LLMConfig(provider=provider, free_tier=(mode == "free")),
             )
         except Exception as e:  # noqa: BLE001 — surfaced as 500
             traceback.print_exc()
@@ -941,6 +971,7 @@ class Handler(BaseHTTPRequestHandler):
             "skills": stats.get("phrases"),
             "source": stats.get("source"),
             "provenance": stats.get("provenance"),
+            "mode": mode,
         }
         if stats.get("provenance") == "Rule-based":
             resp["warning"] = (

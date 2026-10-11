@@ -15,6 +15,79 @@
     <p id="conn" class="conn" hidden></p>
   </header>
 
+  <!-- M24: key + mode come before the resume — they decide whether and
+       where resume text is processed (specs/12-extension.md §M24). -->
+  <section id="setupkey">
+    <h2>Setup — your AI access</h2>
+    <p class="hint">One-time setup: an API key unlocks LLM skill
+    extraction and analysis. The key goes straight to the local agent,
+    which keeps it in the OS credential vault (Windows Credential
+    Manager / macOS Keychain) — never in the browser.</p>
+    <p id="keystate" class="keystate"></p>
+
+    <div id="nokey">
+      <button id="connectfree">Create free LLM key</button>
+      <button id="morerule" class="linkish" type="button">or run rule-based (no AI)</button>
+    </div>
+
+    <p><button id="havekeylink" class="linkish" type="button">I already have a key</button></p>
+
+    <div id="llmarea" hidden>
+      <label>Provider:
+        <select id="provider"></select>
+      </label>
+      <label>API key:
+        <input id="apikey" type="password" spellcheck="false" autocomplete="off">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="remember" checked> Remember on this machine
+      </label>
+      <button id="savekey">Save key</button>
+      <p class="hint">Uncheck "remember" to keep the key for this server
+      session only.</p>
+      <p class="hint">Where your data goes: analysis sends your resume and
+      job-description text to this provider over HTTPS (OpenRouter forwards
+      to the underlying model — default DeepSeek; Z.ai GLM; OpenAI) — some
+      processing outside your country. GitHub Search receives skill-gap
+      terms only. Nothing goes to the extension's developer.</p>
+    </div>
+  </section>
+
+  <section id="setupmode">
+    <h2>Setup — analysis mode</h2>
+    <p class="hint">How your resume and job descriptions are processed.
+    Applies to skill extraction here and to gap analysis later.</p>
+
+    <div id="modechips" hidden>
+      <label class="chip">
+        <input type="radio" name="mode" id="modefree" value="free">
+        <span><strong>Free model</strong><br><small>costs nothing; provider may log inputs</small></span>
+      </label>
+      <label class="chip">
+        <input type="radio" name="mode" id="modepaid" value="paid" checked>
+        <span><strong>Paid model</strong><br><small>uses your key's credits</small></span>
+      </label>
+      <label class="chip">
+        <input type="radio" name="mode" id="moderule" value="rule">
+        <span><strong>Rule-based</strong><br><small>instant, no AI</small></span>
+      </label>
+    </div>
+
+    <div id="freeconsent" hidden>
+      <p class="hint">Free models cost nothing, but the providers behind
+      them may log or use your inputs for training. Job descriptions are
+      public — <strong>your resume is not</strong>: it contains personal
+      information (name, contact details, work history) and will be sent
+      to these third-party providers. Your own key's paid endpoints
+      generally do not train on inputs. Consent is required before any
+      free-mode run.</p>
+      <label class="check">
+        <input type="checkbox" id="privacyack"> I understand and consent
+      </label>
+    </div>
+    <p id="freemode" class="hint" hidden></p>
+  </section>
+
   <p id="resumeline" hidden>
     <span id="resumetext"></span>
     <button id="resumechange" class="linkish" type="button">Change</button>
@@ -22,18 +95,20 @@
   </p>
   <p id="resumeprivacy" class="hint" hidden>The file stays on this machine
   under <code>output/uploads/</code>; the extracted text is sent over HTTPS
-  to the AI provider selected below for skill analysis — never to the
-  extension's developer.</p>
+  to the AI provider selected above for skill analysis (unless Rule-based
+  mode is selected — extraction is local and nothing leaves the machine) —
+  never to the extension's developer.</p>
 
   <section id="setupresume">
     <h2>Setup — your resume</h2>
     <p class="hint">Upload the resume to analyze against (PDF, DOCX or
     TXT). The file is kept locally under <code>output/uploads/</code>; the
-    extracted text is sent over HTTPS to the AI provider you select below
+    extracted text is sent over HTTPS to the AI provider selected above
     (OpenRouter → DeepSeek, Z.ai GLM or OpenAI — some processing outside
-    your country) for skill extraction and analysis. It is never sent to
-    the extension's developer. GitHub Search receives skill-gap terms
-    only, never resume text.</p>
+    your country) for skill extraction and analysis. Extraction follows
+    the mode selected above: Rule-based mode extracts locally and nothing
+    leaves the machine. It is never sent to the extension's developer.
+    GitHub Search receives skill-gap terms only, never resume text.</p>
     <label class="check">
       <input type="checkbox" id="disclosureack"> I understand my resume
       and job descriptions are sent to the AI provider for analysis.
@@ -56,66 +131,7 @@
     <p class="hint">Ranks what the collected JDs demand against your
     skills. The first run takes minutes (LLM judge); later runs reuse
     cached judgments.</p>
-
-    <p id="keystate" class="keystate"></p>
-
-    <div id="nokey">
-      <button id="connectfree">Create free LLM key</button>
-      <button id="morerule" class="linkish" type="button">or run rule-based (no AI)</button>
-    </div>
-
-    <div id="modechips" hidden>
-      <label class="chip">
-        <input type="radio" name="mode" id="modefree" value="free">
-        <span><strong>Free model</strong><br><small>costs nothing; provider may log inputs</small></span>
-      </label>
-      <label class="chip">
-        <input type="radio" name="mode" id="modepaid" value="paid" checked>
-        <span><strong>Paid model</strong><br><small>uses your key's credits</small></span>
-      </label>
-      <label class="chip">
-        <input type="radio" name="mode" id="moderule" value="rule">
-        <span><strong>Rule-based</strong><br><small>instant, no AI</small></span>
-      </label>
-    </div>
-
-    <p><button id="havekeylink" class="linkish" type="button">I already have a key</button></p>
-
-    <div id="llmarea" hidden>
-      <label>Provider:
-        <select id="provider"></select>
-      </label>
-      <label>API key:
-        <input id="apikey" type="password" spellcheck="false" autocomplete="off">
-      </label>
-      <label class="check">
-        <input type="checkbox" id="remember" checked> Remember on this machine
-      </label>
-      <button id="savekey">Save key</button>
-      <p class="hint">The key goes straight to the local agent, which stores
-      it in the OS credential vault (Windows Credential Manager / macOS
-      Keychain) — never in the browser. Uncheck "remember" to keep it for
-      this server session only.</p>
-      <p class="hint">Where your data goes: analysis sends your resume and
-      job-description text to this provider over HTTPS (OpenRouter forwards
-      to the underlying model — default DeepSeek; Z.ai GLM; OpenAI) — some
-      processing outside your country. GitHub Search receives skill-gap
-      terms only. Nothing goes to the extension's developer.</p>
-    </div>
-
-    <div id="freeconsent" hidden>
-      <p class="hint">Free models cost nothing, but the providers behind
-      them may log or use your inputs for training. Job descriptions are
-      public — <strong>your resume is not</strong>: it contains personal
-      information (name, contact details, work history) and will be sent
-      to these third-party providers. Your own key's paid endpoints
-      generally do not train on inputs. Consent is required before any
-      free-mode run.</p>
-      <label class="check">
-        <input type="checkbox" id="privacyack"> I understand and consent
-      </label>
-    </div>
-    <p id="freemode" class="hint" hidden></p>
+    <p id="modesummary" class="hint"></p>
 
     <div id="degraded" class="banner" hidden></div>
     <button id="analyze">Analyze gaps</button>
@@ -151,8 +167,8 @@
     <p class="hint">If you run the server on another port, update the URL and
     reload the extension after changing manifest host_permissions.</p>
     <label>Top gaps: <input id="topn" type="number" min="1" max="23" value="5"></label>
-    <p class="hint">API keys: use "I already have a key" in the Analyze
-    section to change providers or paste a different key.</p>
+    <p class="hint">API keys and analysis mode are configured in Setup
+    above ("I already have a key" reveals the paste form).</p>
   </details>
 
   <script src="sidepanel.js"></script>

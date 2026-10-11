@@ -473,8 +473,21 @@ def check_extraction_provenance() -> None:
         assert stats["provenance"] == "Rule-based", stats
         assert resume_mod.extracted_provenance(artifact) == "regex"
 
-        # Cache hit of a regex artifact must not read as LLM output.
+        # M24 (specs/12-extension.md §M24) supersedes the old cache rule:
+        # an llm request never reuses a regex-fallback artifact — it
+        # retries the LLM (here: falls back again). Either way the result
+        # must not read as cached LLM output.
         _json_path, stats = resume_mod.resume_to_skills_json(resume, **kwargs)
+        assert stats["source"] == "regex", stats
+        assert stats["provenance"] == "Rule-based", stats
+
+        # A regex artifact reused within the rule class (the mode that
+        # can reuse it) must not read as LLM output — the M15 label
+        # contract, unchanged.
+        rule_kwargs = dict(kwargs, use_llm=False)
+        _json_path, stats = resume_mod.resume_to_skills_json(resume, **rule_kwargs)
+        assert stats["source"] == "regex", stats  # class differs -> fresh
+        _json_path, stats = resume_mod.resume_to_skills_json(resume, **rule_kwargs)
         assert stats["source"] == "artifact", stats
         assert stats["provenance"] == "Rule-based", stats
 

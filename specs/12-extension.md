@@ -230,8 +230,11 @@ first data flow.
 
 **Deferred (user decision 2026-10-11, restore triggers in
 `03-milestones.md` §Deferred):** PII minimization (strip names/contact
-details before LLM calls — skill extraction never needs them) and a manual
-no-cloud extraction toggle (the regex path already exists server-side).
+details before LLM calls — skill extraction never needs them). ~~and a
+manual no-cloud extraction toggle~~ (superseded by the M24 row —
+Rule-based mode is the no-cloud path). The disclosure copy is amended by
+M24 (§M24): the destination is "selected above" and the copy states that
+extraction follows the selected mode.
 
 ## M14 — self-serve setup (✅ Built 2026-10-04)
 
@@ -580,6 +583,104 @@ Content, escaping and `target='_blank'` links are byte-identical.
 5. `m19_check.py` + `test_m19.py` offline PASS; `ruff check .`, `pytest`,
    `node --check` clean; m10–m18 regressions PASS (record in
    [03-milestones.md](03-milestones.md) M19).
+
+## M24 — mode governs ingestion; setup order (✅ Built 2026-10-11)
+
+The M18 mode chips promised "Rule-based — instant, no AI" and "Free model
+— costs nothing", but resume ingestion hardcoded `use_llm=True` with the
+paid default config: a Rule-based user's resume still went to the LLM at
+upload, and a Free-mode user paid for extraction. M24 makes the mode
+govern **every** AI touchpoint on user data — extraction included — and
+reorders the panel so key, mode and their consents are settled **before**
+the first data flow. Security-review context: this closes the gap between
+the §Data disclosure copy contract and actual behavior (copy is the
+contract). Decision rows in [02-decisions.md](02-decisions.md) (M24);
+roadmap entry [03-milestones.md](03-milestones.md) M24.
+
+### Semantics: one mode, all touchpoints
+
+`free | paid | rule` now governs resume extraction exactly as it governs
+the run ([05-ai-caller.md](05-ai-caller.md) §LLM presence policy
+unchanged for runs):
+
+| Mode | Extraction at upload |
+|---|---|
+| `rule` | `extract_skills_regex` — local, nothing leaves the machine |
+| `paid` | `extract_skills_llm` via the **active provider's** endpoint (fixes the old default-config gap: GLM/OpenAI selections now honored) |
+| `free` | free-tier models (M16 routing) |
+
+Rule-based extraction remains the labeled fallback when an LLM call
+fails (M15 provenance vocabulary unchanged).
+
+### Setup order (panel)
+
+1. **AI access** — key chip (`Key ✓ verified` / rejected / no key),
+   "Create free LLM key", "I already have a key" + paste form.
+2. **Mode + consent** — the three chips and, on Free, the M16 verbatim
+   consent block. Hidden entirely in the no-key state (rule is the only
+   mode there).
+3. **Your resume** — §Data disclosure copy (amended wording: destination
+   "selected **above**" + extraction-follows-mode note), the `#disclosureack`
+   gate, upload.
+
+Then the unchanged loop: collect → analyze (a one-line mode summary
+points back at the setting) → plan.
+
+### `POST /api/resume` contract (M24)
+
+New headers (all validated; defaults preserve the pre-M24 behavior):
+
+- `X-Extraction-Mode: rule | paid | free` (default `paid`) — selects
+  `use_llm` + `free_tier` for the extraction call.
+- `X-Provider: openrouter | glm | openai` (default `openrouter`) —
+  extraction cfg uses it.
+- `X-Privacy-Ack: 1` — **required for `free`** (409 otherwise): the M16
+  consent gate applies to free-mode ingestion exactly as to free-mode
+  runs (the gate is not UI-only — M16 lesson).
+- `X-Disclosure-Ack: 1` unchanged (M21).
+
+### Mode-aware extraction cache
+
+The SHA-256 sidecar gains a third line: the **requested mode** class
+(`llm` / `rule`). Reuse rules:
+
+- rule requests reuse `rule`-class regex artifacts only;
+- llm requests reuse `llm`-class artifacts **only when they were actually
+  produced by the LLM** (`source == "llm"`) — a regex-fallback artifact
+  is re-extracted (the fallback condition may have passed; quality must
+  follow the mode);
+- classes never cross (switching modes re-extracts; regex re-extraction
+  is instant);
+- legacy two-line sidecars are read as class `llm` (the historical
+  default), so existing LLM artifacts still hit.
+
+This closes the "first upload freezes quality forever" trap: an upload
+made without a key (rule class) upgrades automatically once a key exists
+and the mode flips.
+
+### Supersessions
+
+- The Deferred **manual no-cloud extraction toggle** is superseded
+  (restore trigger met): Rule-based mode *is* the no-cloud path now —
+  extraction runs locally and nothing leaves the machine.
+- [12-extension.md](12-extension.md) §Data disclosure copy rule 1's
+  "you select below" wording is amended to "selected above" (the
+  provider select moved into Setup); `DISCLOSURE_CONSENT_VERSION` bumps
+  to 2. M16's verbatim free disclaimer is unchanged.
+
+### Done criteria (M24)
+
+1. Panel order and the mode summary as above; free consent sits with the
+   chips and gates upload + analyze.
+2. Upload honors mode + provider; free uploads refuse without
+   `X-Privacy-Ack`; rule uploads make no LLM call at all.
+3. Cache rules hold (incl. legacy sidecars); llm↔rule never cross;
+   fallback artifacts are retried for llm requests.
+4. m21_check needles all preserved; disclaimer verbatim-unchanged;
+   `DISCLOSURE_CONSENT_VERSION == 2`.
+5. `m24_check.py` + `test_m24.py` offline PASS; `ruff check .`,
+   `pytest`, `node --check` clean; m10–m23 regressions PASS; one live
+   pass recorded in [03-milestones.md](03-milestones.md) M24.
 
 ## Explicit non-goals (M13)
 
