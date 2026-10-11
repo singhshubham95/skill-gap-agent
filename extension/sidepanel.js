@@ -50,12 +50,41 @@ let oauthPending = null;
 
 // ---- persistence (chrome.storage.local) -----------------------------------
 
+// M20 (specs/12-extension.md §Security posture): http:// is loopback-only —
+// resume text, JDs and API keys must never transit plaintext to a remote
+// host. Invalid values are refused and never persisted.
+function normalizeServer(raw) {
+  const value = (raw || "").trim().replace(/\/+$/, "") || DEFAULT_SERVER;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return { error: "Not a valid server URL." };
+  }
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
+  if (url.protocol === "http:" && !loopback) {
+    return {
+      error:
+        "http:// is only allowed for localhost — use https:// for other hosts.",
+    };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { error: "Only http(s) server URLs are supported." };
+  }
+  return { value };
+}
+
 async function loadState() {
   const stored = await chrome.storage.local.get([
     "capturedJds", "serverBase", "freeConsent", "themePref",
   ]);
   jds = Array.isArray(stored.capturedJds) ? stored.capturedJds : [];
-  server = stored.serverBase || DEFAULT_SERVER;
+  // M20: a stored value that violates the transport rule falls back to the
+  // default instead of being used.
+  server = normalizeServer(stored.serverBase).value || DEFAULT_SERVER;
   $("serverBase").value = server;
   // M16 B: consent is a flag + timestamp + version only, never data.
   freeConsent = stored.freeConsent || null;
@@ -790,7 +819,15 @@ $("clear").addEventListener("click", async () => {
   setStatus("List cleared.");
 });
 $("serverBase").addEventListener("change", async (e) => {
-  server = e.target.value.replace(/\/+$/, "") || DEFAULT_SERVER;
+  // M20: invalid / plaintext-remote values are refused, reverted and never
+  // persisted.
+  const norm = normalizeServer(e.target.value);
+  if (norm.error) {
+    e.target.value = server;
+    setStatus(norm.error, true);
+    return;
+  }
+  server = norm.value;
   await chrome.storage.local.set({ serverBase: server });
   checkConnection();
   refreshKeyStatus();

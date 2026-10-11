@@ -59,7 +59,10 @@ with M16 — §M16 below).
 
 Single-run guard unchanged (409 while `running`). `skills_path` defaults to
 `data/skillsdataset.json` (server `--skills` flag); a resume file works too
-(M8 extraction runs before the graph).
+(M8 extraction runs before the graph). Request expectations (origin gate,
+Content-Type, `skills_path` containment) are in §Security posture — every
+caller above satisfies them (the panel sends `application/json` /
+`application/octet-stream` with its `chrome-extension://` origin).
 
 ## Why one graph with a pause, not two runs
 
@@ -101,13 +104,59 @@ matches only), so extension-run links work too.
 
 ## Security posture
 
-Server binds `127.0.0.1` only. **No CORS headers on purpose**: the extension
-calls with `host_permissions` for `http://localhost:8000/*` +
-`http://127.0.0.1:8000/*` (which bypass CORS entirely), while absent
-`Access-Control-Allow-*` + no `OPTIONS` handler means hostile web pages can
-neither read resume-derived gaps nor trigger runs (JSON `Content-Type`
-forces a preflight, which fails). Trust model: any local process can reach
-the server — same as M11, acceptable for a personal tool.
+Threat model (M20, from the public-release review —
+[../SECURITY-REVIEW.md](../SECURITY-REVIEW.md) S1/L4): the user browses
+hostile web pages on the same machine where the local agent holds their
+resume-derived data and LLM keys. Primary attacker = **a web page using the
+browser as a confused deputy** against `127.0.0.1`; secondary = stray local
+processes on a shared machine. The realistic chain to kill: CSRF a run →
+overwrite the stored LLM key → ingest an arbitrary local file via
+`skills_path` → exfiltrate it through the attacker's key as LLM prompt text.
+
+Three barriers, in order (server side):
+
+1. **Request-origin gate — the primary barrier.** Any request that carries
+   an `Origin` header must present the extension's origin
+   (`chrome-extension://…`) or the server's own origin
+   (`http://127.0.0.1:<port>` / `http://localhost:<port>` — the M11 index
+   page's fetches); anything else — web pages, `Origin: null` — is refused
+   **403 before any handler runs**. Requests with **no** `Origin` (browser
+   navigations: the plan iframe, the JD viewer, the OAuth callback
+   redirect; and non-browser clients: CLI and the `mN_check` harnesses)
+   pass the gate unchanged. Web pages cannot omit or forge `Origin`, so
+   every fetch/XHR/form attack is turned away at the door.
+2. **Content-Type enforcement.** JSON endpoints (`/api/run`, `/api/key`,
+   `/api/oauth/state`, `/api/oauth/exchange`) accept only
+   `application/json`; `POST /api/resume` only `application/octet-stream`;
+   anything else 415s. A cross-origin fetch with these content types
+   triggers a CORS preflight, which fails (no `OPTIONS` handler, no
+   `Access-Control-Allow-*`), so even a hypothetical origin-gate bypass
+   could not smuggle a browser "simple request". *This corrects the M13
+   claim (decision row superseded 2026-10-11) that preflight alone was the
+   barrier: a JSON body sent as `text/plain` is a simple request and needs
+   no preflight — the origin gate is what actually stops it.*
+3. **`skills_path` containment (defense in depth).** An explicit run-body
+   `skills_path` must be an existing `.json` under the repo root or the OS
+   temp dir (check fixtures live there); anything else 400s before a run
+   starts. `_resolve_skills` precedence is unchanged; `cli.py` keeps
+   unrestricted paths (terminal-side).
+
+Unchanged properties: the server binds `127.0.0.1` and sends **no CORS
+headers**, so cross-origin reads stay impossible even for requests the gate
+allows (navigations may *display* data to the user; a foreign page can never
+*read* it).
+
+**Transport (M20, L4):** the panel's `serverBase` accepts `http://` only for
+`localhost`/`127.0.0.1` (the default); any other host must be `https://`.
+Resume text, JDs and API keys must never transit plaintext to a non-loopback
+host; invalid values fall back to the default and are never persisted.
+
+**Accepted residual risk:** a process running **as the same OS user** sends
+no `Origin`, passes the gate, and can read `output/` directly anyway — a
+session token would not change that boundary (any local process can already
+read the resume file on disk). Restore trigger for token pairing: the
+product starts handling other users' data or runs as a service — recorded in
+`03-milestones.md` §Deferred.
 
 ## M14 — self-serve setup (✅ Built 2026-10-04)
 
