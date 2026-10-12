@@ -260,6 +260,19 @@ def check_two_phase_flow() -> None:
     _cli.synthesize_for_gaps = _fake_synthesize
     _cli.source_oss_for_gaps = _fake_oss
 
+    # M9: this check exercises the M13 two-phase flow, not the intake chat —
+    # pre-complete the fixture's profile so the run flows straight through
+    # (the chat itself is covered by m9_check). The session starts empty so
+    # judge-reuse cannot pick up stub edges from a previous check run.
+    from .sessions import save_profile, session_dir
+
+    shutil.rmtree(session_dir(skills), ignore_errors=True)
+    save_profile(skills, {
+        "version": 1, "source_sha256": "", "phrases": {}, "implied": {},
+        "depth": {}, "intent": {}, "proficiency": {}, "progress": {},
+        "completed": True, "skipped": True, "updated_at": "",
+    })
+
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

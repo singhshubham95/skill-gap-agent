@@ -3,10 +3,11 @@ no network beyond localhost).
 
 Checks:
 1. Resume upload endpoint: raw-bytes POST validates size/type/magic bytes,
-   stores under output/uploads/, extracts immediately (forced regex path —
-   deterministic), reports {filename, skills, source}; the SHA-256 sidecar
-   keys the extraction artifact (same resume -> cache hit, new resume ->
-   re-extract); sanitized filenames only (traversal rejected).
+   stores under output/uploads/ **rule-only** (M9 placement revision 2026-10-12:
+   extraction runs at Analyze gaps), reports {filename, stored, mode}; the
+   SHA-256 sidecar keys the analyze-time extraction artifact in the session
+   store (same resume -> cache hit, new resume -> re-extract); sanitized
+   filenames only (traversal rejected).
 2. Key endpoint: "remember" -> secrets.set_secret (stubbed — the real OS
    keyring is never touched), "session" -> process env; unknown provider /
    empty key -> 400; GET /api/providers reports key_set booleans and no
@@ -178,32 +179,53 @@ def check_resume_endpoint() -> None:
         with _Preserve():
             code, body = _upload(base, "resume a.txt", RESUME_A.encode("utf-8"))
             assert code == 200, (code, body)
-            # M24: rule mode extracts locally (regex) — no LLM involved.
-            assert body["source"] == "regex", body
-            assert body["skills"] and body["skills"] > 0, body
+            # M9 (placement revision 2026-10-12): upload is rule-only —
+            # stored + stashed mode; extraction runs at Analyze gaps.
+            assert body.get("stored") is True and body.get("extract_at_analyze"), body
+            assert body["mode"] == "rule", body
+
+            # Extraction (analyze-time) is SHA-keyed per resume (M14 rules,
+            # now in the session store): same resume -> artifact reuse,
+            # different resume -> re-extract.
+            from .sessions import session_dir
+
+            up_a = server.UPLOAD_DIR / "resume a.txt"
+            sess_a = session_dir(up_a)
+            import shutil
+
+            shutil.rmtree(sess_a, ignore_errors=True)  # hermetic across runs
+            resume_mod.extract_to_artifact(
+                up_a, artifact_path=sess_a / "extracted_skills.json", use_llm=False
+            )
             sha_a = hashlib.sha256(RESUME_A.encode("utf-8")).hexdigest()
-            sidecar = OUTPUT_DIR / "extracted_skills.sha256"
+            sidecar = sess_a / "extracted_skills.sha256"
             assert sidecar.exists(), "hash sidecar missing"
             # Sidecar line 1 = source hash, line 2 = extraction source (M15).
             assert sidecar.read_text(encoding="utf-8").splitlines()[0] == sha_a
-            artifact_a = (OUTPUT_DIR / "extracted_skills.json").read_bytes()
+            artifact_a = (sess_a / "extracted_skills.json").read_bytes()
 
-            # Same resume + same mode class -> cache hit (M24: reuse is
-            # mode-scoped; artifacts never cross rule/llm classes).
-            code, body = _upload(base, "resume a.txt", RESUME_A.encode("utf-8"))
-            assert code == 200 and body["source"] == "artifact", (code, body)
+            # Same resume -> cache hit (M24: reuse is mode-scoped; artifacts
+            # never cross rule/llm classes).
+            _data, source = resume_mod.extract_to_artifact(
+                up_a, artifact_path=sess_a / "extracted_skills.json", use_llm=False
+            )
+            assert source == "artifact", source
 
             # Different resume -> hash mismatch -> re-extract.
             code, body = _upload(base, "resume b.txt", RESUME_B.encode("utf-8"))
-            assert code == 200, (code, body)
-            assert body["source"] == "regex", body
-            artifact_b = (OUTPUT_DIR / "extracted_skills.json").read_bytes()
+            assert code == 200 and body.get("stored"), (code, body)
+            up_b = server.UPLOAD_DIR / "resume b.txt"
+            sess_b = session_dir(up_b)
+            shutil.rmtree(sess_b, ignore_errors=True)  # hermetic across runs
+            _data_b, source_b = resume_mod.extract_to_artifact(
+                up_b, artifact_path=sess_b / "extracted_skills.json", use_llm=False
+            )
+            assert source_b == "regex", source_b
+            artifact_b = (sess_b / "extracted_skills.json").read_bytes()
             assert artifact_b != artifact_a, "second resume reused stale extraction"
             assert b"Graph" in artifact_b and b"Graph" not in artifact_a, (
                 "extraction did not follow the new resume"
             )
-            sha_b = hashlib.sha256(RESUME_B.encode("utf-8")).hexdigest()
-            assert sidecar.read_text(encoding="utf-8").splitlines()[0] == sha_b
 
             # Status reports what a run will use.
             code, status = _get_json(base, "/api/status")

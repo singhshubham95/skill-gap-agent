@@ -16,6 +16,7 @@
 
 const DEFAULT_SERVER = "http://127.0.0.1:8000";
 const STAGE_LABELS = {
+  intake: "confirming your skills (a few questions)",
   ingest: "reading skills + JDs",
   judge: "judging transferability (LLM, minutes)",
   gate: "confidence gate",
@@ -824,17 +825,118 @@ async function poll() {
   }
   setBusy(false);
   if (s.status === "paused") {
-    await showGaps();
+    if (s.pause_phase === "intake") {
+      await showIntake();
+    } else {
+      $("intake").hidden = true;
+      await showGaps();
+    }
   } else if (s.status === "done") {
+    $("intake").hidden = true;
     if (s.phase === "gaps") {
       await showGaps();
     } else {
       showPlan();
     }
   } else if (s.status === "error") {
+    $("intake").hidden = true;
     setStatus("Run failed: " + (s.error || "unknown error"), true);
   } else {
     setStatus("idle");
+  }
+}
+
+// ---- M9 intake chat (specs/13-intake.md §In-panel intake) -----------------
+// The run pauses at Analyze gaps for a short profile conversation; every
+// answer persists server-side (panel-close safe). Completion continues the
+// run automatically into the analysis.
+
+let intakeTurn = null;
+
+function renderIntakeTurn(turn) {
+  intakeTurn = turn;
+  $("intake").hidden = false;
+  $("intakeprompt").textContent = turn
+    ? turn.prompt
+    : "Profile saved — continuing…";
+  const ul = $("intakeitems");
+  ul.textContent = "";
+  const items = [];
+  if (turn && turn.payload) {
+    const p = turn.payload;
+    (p.phrases || []).forEach((x, i) => items.push(`${i + 1}. ${x}`));
+    (p.concepts || []).forEach((x, i) => items.push(`${i + 1}. ${x} (y/n)`));
+    if (p.evidence) items.push("evidence: " + p.evidence);
+    if (p.remaining && p.remaining.length > 1) {
+      items.push("more to review: " + (p.remaining.length - 1));
+    }
+  }
+  for (const text of items) {
+    const li = document.createElement("li");
+    li.textContent = text; // textContent only — never innerHTML (M21 rule)
+    ul.appendChild(li);
+  }
+  $("intakeanswer").disabled = !turn;
+  $("intakesend").disabled = !turn;
+}
+
+async function showIntake() {
+  setStatus("A few profile questions before the analysis…");
+  try {
+    const r = await fetch(server + "/api/intake/turn");
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
+    if (body.completed || !body.turn) {
+      $("intake").hidden = true;
+      setStatus("Profile saved — continuing…");
+      setTimeout(poll, 1500);
+      return;
+    }
+    renderIntakeTurn(body.turn);
+  } catch (e) {
+    setStatus("Profile questions failed: " + e.message, true);
+  }
+}
+
+async function sendIntakeAnswer(text) {
+  if (!intakeTurn) return;
+  try {
+    const r = await fetch(server + "/api/intake/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turn_id: intakeTurn.id, text: text }),
+    });
+    const body = await r.json();
+    if (!r.ok) {
+      setStatus("Hmm: " + (body.error || "HTTP " + r.status), true);
+      return;
+    }
+    $("intakeanswer").value = "";
+    if (body.completed) {
+      $("intake").hidden = true;
+      setStatus("Profile saved — continuing to the analysis…");
+      setTimeout(poll, 1500);
+    } else {
+      renderIntakeTurn(body.turn);
+    }
+  } catch (e) {
+    setStatus("Profile questions failed: " + e.message, true);
+  }
+}
+
+async function skipIntake() {
+  try {
+    const r = await fetch(server + "/api/intake/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skip: true }),
+    });
+    await r.json();
+    $("intake").hidden = true;
+    setStatus("Using your resume as-is — continuing…");
+    setTimeout(poll, 1500);
+  } catch (e) {
+    setStatus("Profile questions failed: " + e.message, true);
   }
 }
 
@@ -864,6 +966,13 @@ $("themebtn").addEventListener("click", async () => {
 });
 $("capture").addEventListener("click", captureJd);
 $("analyze").addEventListener("click", analyze);
+$("intakesend").addEventListener("click", () =>
+  sendIntakeAnswer($("intakeanswer").value)
+);
+$("intakeskip").addEventListener("click", skipIntake);
+$("intakeanswer").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendIntakeAnswer($("intakeanswer").value);
+});
 $("plan").addEventListener("click", generatePlan);
 $("reopen").addEventListener("click", () => {
   loadPlan();

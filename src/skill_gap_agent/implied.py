@@ -158,6 +158,8 @@ def propose_implied(
     approvals_path: str | Path = Path("output/implied_skills.json"),
     auto_accept: bool = False,
     ask_fn: AskFn | None = None,
+    decisions: dict[str, bool] | None = None,
+    on_save=None,
 ) -> set[str]:
     """Interactive proposal flow: show evidence, ask y/n/a per skill.
 
@@ -165,14 +167,17 @@ def propose_implied(
     auto-skipped. 'a' accepts all remaining. Returns the accepted skill set.
     ask_fn lets a caller (e.g. the LangGraph runner) route the prompt through
     interrupt()/resume instead of blocking stdin; defaults to input().
+    M9: `decisions` (the intake chat's session profile) applies answers
+    silently — no prompts, no approval-file writes.
     """
+    if decisions is not None:
+        return {i.skill for i in implied if decisions.get(i.skill)}
     ask = ask_fn or input
 
     path = Path(approvals_path)
     saved: dict[str, bool] = {}
     if path.exists():
         saved = json.loads(path.read_text(encoding="utf-8"))
-
     accepted: set[str] = {s for s, ok in saved.items() if ok}
     pending = [i for i in implied if i.skill not in saved]
 
@@ -202,6 +207,11 @@ def propose_implied(
 
     # Persist decisions
     saved.update({i.skill: (i.skill in accepted) for i in implied})
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
+    if on_save is not None:
+        # M9: persist into the session profile (the retired global
+        # implied_skills.json is never created or read).
+        on_save(dict(sorted(saved.items())))
+    else:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
     return accepted

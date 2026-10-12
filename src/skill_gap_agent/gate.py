@@ -110,6 +110,8 @@ def review_targets(
     overrides_path: str | Path = DEFAULT_OVERRIDES_PATH,
     auto: bool = False,
     ask_fn: AskFn | None = None,
+    overrides: dict[str, dict] | None = None,
+    on_save: Callable[[dict], None] | None = None,
 ) -> list[GateDecision]:
     """Review the top TRANSFERS_TO edge of each sub-threshold target skill.
 
@@ -117,10 +119,15 @@ def review_targets(
     decisions are applied silently. Returns all decisions.
     ask_fn lets a caller (e.g. the LangGraph runner) route prompts through
     interrupt()/resume instead of blocking stdin; defaults to input().
+    M9: `overrides` supplies the session profile's decisions in-memory (no
+    file read); `on_save` routes persistence into the profile instead of
+    the retired global gate_overrides.json. The no-double-count rule
+    (specs/13-intake.md): where the judge score already reflects depth
+    (edge stamped `depth_used`), the depth multiplier is NOT applied again.
     """
     ask = ask_fn or input
     weights = sg.requires_weights()
-    saved = load_overrides(overrides_path)
+    saved = overrides if overrides is not None else load_overrides(overrides_path)
     decisions: list[GateDecision] = []
     pending: list[tuple[str, dict]] = []
 
@@ -130,6 +137,7 @@ def review_targets(
             continue
         d, src = top
         conf = float(d["confidence"])
+        depth_in_score = bool(d.get("depth_val"))
 
         if target in saved:  # apply persisted decision silently
             sv = saved[target]
@@ -141,7 +149,10 @@ def review_targets(
             )
             _apply_decision(sg, target, src, final, sv.get("depth", ""),
                             sv.get("intent", ""), sv.get("note", ""))
-        elif conf < threshold:
+        elif conf < threshold and not depth_in_score:
+            # Depth already in the score -> no gate question and no
+            # multiplier (the score reflects depth; asking again would
+            # double-count). Only depth-naive sub-threshold edges pend.
             pending.append((target, {"src": src, "conf": conf, "data": d}))
         else:
             decisions.append(GateDecision(target, _bare(src), conf, conf, False))
@@ -202,10 +213,16 @@ def review_targets(
         print(f"    -> final confidence: {info['conf']:.2f} x {DEPTH_FACTORS[depth]} = {final:.2f}\n")
 
     if not auto and pending:
-        p = Path(overrides_path)
-        p.parent.mkdir(exist_ok=True)
-        p.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
-        print(f"Decisions saved to {p}")
+        if on_save is not None:
+            # M9: decisions persist in the session profile (the retired
+            # global gate_overrides.json is never created or read).
+            on_save(dict(sorted(saved.items())))
+            print("Decisions saved to the session profile")
+        else:
+            p = Path(overrides_path)
+            p.parent.mkdir(exist_ok=True)
+            p.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
+            print(f"Decisions saved to {p}")
 
     return decisions
 

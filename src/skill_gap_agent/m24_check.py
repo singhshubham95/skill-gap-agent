@@ -163,22 +163,25 @@ def check_upload_contract() -> None:
             def text(tag: str) -> bytes:
                 return f"{RESUME_TEXT} [{tag}]".encode()
 
-            # Rule mode: local regex — the LLM extractor must not be touched.
+            # M9 (placement revision 2026-10-12): upload is rule-only — no
+            # LLM call happens at upload in ANY mode; the mode is stashed and
+            # applied at Analyze (extract_to_artifact). The LLM extractor
+            # must never be touched here.
             code, body = _upload(base, "r1.txt", text("r1"), mode="rule")
             assert code == 200, (code, body)
-            assert body["source"] == "regex" and body["mode"] == "rule", body
-            assert calls == [], "rule mode must make no LLM call"
+            assert body.get("stored") is True and body["mode"] == "rule", body
+            assert server._resume.get("mode") == "rule", server._resume
 
-            # Paid mode honors the provider (M24: cfg is passed now).
+            # Paid mode stashes the provider for analyze-time extraction.
             code, body = _upload(base, "r2.txt", text("r2"),
                                  mode="paid", provider="glm")
             assert code == 200, (code, body)
-            assert body["source"] == "llm" and body["mode"] == "paid", body
-            assert calls and calls[-1]["cfg"].provider == "glm", calls
-            assert calls[-1]["cfg"].free_tier is False, calls
+            assert body["mode"] == "paid", body
+            assert server._resume.get("provider") == "glm", server._resume
+            assert calls == [], "upload must make no LLM call (M9 rule-only)"
 
             # Free mode: refused without the M16 privacy consent (not
-            # UI-only), accepted with it, and routes free_tier.
+            # UI-only), accepted with it, and the mode is stashed.
             code, body = _upload(base, "r3.txt", text("r3"), mode="free")
             assert code == 409 and "privacy" in body.get("error", "").lower(), (code, body)
             assert body.get("mode") is None, body
@@ -186,12 +189,13 @@ def check_upload_contract() -> None:
                                  mode="free", privacy_ack=True)
             assert code == 200, (code, body)
             assert body["mode"] == "free", body
-            assert calls[-1]["cfg"].free_tier is True, calls
+            assert server._resume.get("mode") == "free", server._resume
 
             # Defaults preserve pre-M24 behavior: paid + openrouter.
             code, body = _upload(base, "r4.txt", text("r4"))
             assert code == 200 and body["mode"] == "paid", (code, body)
-            assert calls[-1]["cfg"].provider == "openrouter", calls
+            assert server._resume.get("provider") == "openrouter", server._resume
+            assert calls == [], "upload must make no LLM call (M9 rule-only)"
 
             # Bad input is rejected; the disclosure gate is unchanged (M21).
             code, body = _upload(base, "r5.txt", text("r5"), mode="hmm")
@@ -205,8 +209,9 @@ def check_upload_contract() -> None:
         server._resume.clear()
         server._resume.update(saved_resume)
         httpd.shutdown()
-    print("upload contract OK: rule=local, provider honored, free consent "
-          "enforced, defaults preserved, bad input rejected")
+    print("upload contract OK: rule-only upload (no LLM), mode/provider "
+          "stashed for analyze, free consent enforced, defaults preserved, "
+          "bad input rejected")
 
 
 def check_mode_scoped_cache() -> None:

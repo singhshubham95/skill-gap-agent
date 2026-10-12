@@ -221,7 +221,20 @@ def _start() -> tuple[ThreadingHTTPServer, str]:
 def _run_body(tmp: Path, use_llm: bool, **extra) -> dict:
     skills = tmp / "skills.json"
     if not skills.exists():
-        skills.write_text(json.dumps(SKILLS), encoding="utf-8")
+        # The tmp dir name makes each scenario's content (and thus its
+        # SHA-keyed session — M9) unique: scenarios must not share judge/OSS
+        # caches across the run history.
+        payload = {"skills": list(SKILLS["skills"]) + [f"session variant {tmp.name}"]}
+        skills.write_text(json.dumps(payload), encoding="utf-8")
+        # M9: these runs exercise LLM-presence policy, not the intake chat —
+        # pre-complete the session profile so runs flow straight through.
+        from .sessions import save_profile
+
+        save_profile(skills, {
+            "version": 1, "source_sha256": "", "phrases": {}, "implied": {},
+            "depth": {}, "intent": {}, "proficiency": {}, "progress": {},
+            "completed": True, "skipped": True, "updated_at": "",
+        })
     body = {
         "phase": "gaps",
         "jds": JD_FIXTURES,

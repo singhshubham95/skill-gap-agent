@@ -136,6 +136,19 @@
     <div id="degraded" class="banner" hidden></div>
     <button id="analyze">Analyze gaps</button>
     <p id="status" class="status">idle</p>
+    <div id="intake" hidden>
+      <p class="hint">Confirm your profile — every answer is saved as you
+      go (you can close the panel and come back).</p>
+      <p id="intakeprompt" class="status"></p>
+      <ul id="intakeitems" class="hint"></ul>
+      <p>
+        <input id="intakeanswer" type="text" spellcheck="false"
+               autocomplete="off" placeholder="your answer">
+        <button id="intakesend" type="button">Send</button>
+      </p>
+      <button id="intakeskip" class="linkish" type="button">Just use my
+        resume as-is (skip the questions)</button>
+    </div>
     <div id="gapbox" hidden>
       <table id="gaps">
         <thead>

@@ -11,14 +11,18 @@ to them. (Folded from
 S-files. The M9 design and graph schema that survived that merge have since
 moved to `13-intake.md` and `06-skill-map.md`, their owning files.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M8 + M10–M16 built; M9
-deferred / re-scoped 2026-10-04; M17 designed** (order notes: M13's
+**Status: v1 built and validated** (M1–M6) **; M7–M16 built (M9 built
+2026-10-12); M17 designed** (order notes: M13's
 extension shell jumped ahead of M9 on user priority 2026-10-03 — the
 capture → analyze → plan flow works on the M8 resume path; M9's skill
 validation improves plan quality but is not a mechanical prerequisite for
-it. 2026-10-04: the conversational half of M9 is off the table — the
-non-conversational extension panel is the locked interaction model — and
-M14 [extension self-serve setup](12-extension.md) §M14 was built next).
+it. 2026-10-04: the conversational half of M9 was deferred;
+**2026-10-12: restored and built** — the conversation returned
+*inside the panel* at Analyze gaps (upload stays rule-only; extraction →
+chat → profile saved run with the captured-JD context), full C3 in one
+pass; supersession logged in
+[02-decisions.md](02-decisions.md). M14
+[extension self-serve setup](12-extension.md) §M14 was built in between).
 All pipeline stages are built and validated against a sealed hand-performed
 gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
 §Validation rubric — the acceptance criteria and results live there). The
@@ -106,7 +110,7 @@ flowchart TB
 |---|---|---|---|---|
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
 | C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16) |
-| C3 intake + validation | Evidence-backed skill depth (non-conversational when it returns) | `intake.py`, `validate.py` (planned) | [13-intake.md](13-intake.md) | ⏸ Deferred / re-scoped (M9 — §Deferred #13) |
+| C3 intake + validation | In-panel intake chat + evidence-backed skill depth (depth-aware judge) | `intake.py`, `validate.py`, `sessions.py` | [13-intake.md](13-intake.md) | ✅ Built (M9, 2026-10-12) |
 | C4 observability + judge evaluation | LangSmith tracing + judge golden-set eval | `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | 🎯 Designed (M17) |
 
 ## Pipeline (stage order = data flow)
@@ -136,21 +140,23 @@ IN:  data/skillsdataset.json (146 phrases)   data/jds/*.txt (16 JDs)
         confidence gate (M4) → gap ranking (M5) → plan.md (M5)
 
 PERSISTED: output/graph.json (whole graph), output/judge_report.json,
-           output/implied_skills.json (approval record)
+           output/sessions/<sha>/profile.json (intake + approval record, M9)
 ```
 
 _Counts are a fresh ingestion snapshot on the current seed data (2026-10-03):
-118 canonical + 41 implied (the persisted approval record; 23 of those are
+118 canonical + 41 implied (the persisted approval record in the session
+profile; 23 of those are
 still re-proposed by today's patterns) vs. 16 JDs → 19 target skills (of 48
 required-skill terms; the rest resolve to held skills) → 17 unmatched. The
 judge-edge count is LLM output and varies per run — the M12 sweep
 ([11-sweep.md](11-sweep.md)) is the mechanism for refreshing numbers like these._
 
-**Target flow (M7–M9):** the IN edge becomes conversational — resume
-PDF/DOCX or skills JSON → LLM extraction → skill validation on triaged
-skills → proficiency evidence feeds the gate (which shrinks to unvalidated
-skills) — and the whole flow runs as a LangGraph graph with `interrupt()`
-at the human-in-the-loop points.
+**Target flow (C3, restored 2026-10-12):** resume upload (rule-only) → JD
+capture → Analyze gaps: LLM extraction → in-panel intake chat (phrase +
+implied-skill review, skill validation, depth — JD-aware triage) → profile
+saved in the resume's SHA-keyed session store → the depth-aware judge
+consumes it (the gate shrinks to unvalidated skills).
+Design home: [13-intake.md](13-intake.md).
 
 ## Component designs (high level here — details live in the owning file)
 
@@ -172,13 +178,13 @@ link. If you need the mechanics, open the linked file.
   (OpenRouter OAuth PKCE → OS keyring), an opt-in free-model mode behind
   a consent gate, and retry hardening — mechanics home:
   [05-ai-caller.md](05-ai-caller.md) §Free-tier routing.
-- **C3 intake + skill validation (M9, ⏸ Deferred / re-scoped 2026-10-04)** —
-  [13-intake.md](13-intake.md). Originally: a tool-calling chat agent
-  assembles the input, then ranking-relevant skills are validated with
-  calibration questions so the gate gets evidence-backed depth instead of
-  self-report. The conversational half is deferred (§Deferred #13) — the
-  extension panel is the locked interaction model; the validation goal
-  returns non-conversational after the plan/gap-quality brainstorm.
+- **C3 intake + skill validation (M9, ✅ Built 2026-10-12)** —
+  [13-intake.md](13-intake.md). In-panel chat at Analyze gaps (upload stays
+  rule-only; extraction + validation run with the captured-JD context)
+  replaces the y/n/a approval flows; skills are validated with calibration
+  questions so depth is evidence-backed; the judge is depth-aware
+  (profile-stamped caches, no double-count with the gate). Supersedes the
+  2026-10-04 deferral (see [02-decisions.md](02-decisions.md)).
 - **C4 observability + judge evaluation (M17, 🎯 Designed)** —
   [14-observability.md](14-observability.md). Opt-in LangSmith tracing of
   every run (what happened inside it) plus a golden-set evaluation of the
@@ -230,6 +236,9 @@ skill-gap-agent/
 │   ├── server.py              ← M11 local UI + M13 run contract (captured JDs, phase gaps|plan,
 │   │                            GET /api/gaps)
 │   ├── sweep.py               ← M12: JD-subset sweep harness (seeded sampling + shared caches)
+│   ├── sessions.py            ← M9: session store (SHA-keyed output/sessions/<sha>/ + profile.json)
+│   ├── intake.py              ← M9: intake conversation state machine (phrases→implied→depth→checklist)
+│   ├── validate.py            ← M9: skill validation protocol (author/grade, leakage, JD triage)
 │   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)
 │   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow
 │   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison
@@ -242,17 +251,20 @@ skill-gap-agent/
 │   ├── m2_check.py            ← milestone-2 verification script (scaffolding)
 │   └── smoke_test.py          ← milestone-1 schema test (scaffolding)
 ├── output/                    ← pipeline artifacts (gitignored): plan.md, plan.html, graph.json,
-│                                 gaps.json (M13), judge_report.json, gate_overrides.json,
-│                                 implied_skills.json, oss_issues.json,
-│                                 captured_jds/ (M13 extension run input)
+│                                 gaps.json (M13), judge_report.json, oss_issues.json,
+│                                 captured_jds/ (M13 extension run input),
+│                                 sessions/<sha>/ (M9: per-resume session — profile.json,
+│                                 extracted_skills.json, plan.md, …). Legacy global decision
+│                                 files retired at M9 (see 13-intake.md).
 └── (no .env file)             ← API keys live in the OS keyring only (secrets.py;
                                   env-var override supported). No .env / .env.example.
 ```
 
 **Scaffolding note:** the `m*_*.py` runners are milestone scripts. Entries:
 `m5_plan.py` (v1 sequential runner), `cli.py` (the M7 LangGraph runner — the
-primary entry, accepts resume files as of M8). The v2 modules (`intake.py`,
-`validate.py`) do not exist yet; creating them is milestone M9. `sweep.py`
+primary entry, accepts resume files as of M8). The M9 modules (`intake.py`,
+`validate.py`, `sessions.py`) are library modules consumed by the runners
+and `server.py`, not runners themselves. `sweep.py`
 (M12) is an evaluation harness, not a runner — it calls the pipeline's stage
 functions once per JD subset (see [11-sweep.md](11-sweep.md)).
 
@@ -270,9 +282,13 @@ accurate (workflow rules live in
   [05-ai-caller.md](05-ai-caller.md) §LLM presence policy): every
   rule-based fallback is labeled with the provenance vocabulary defined
   in `llm.py`; never present rule-based results as LLM results.
-- Human decisions persist as override files in `output/` (e.g.
-  `gate_overrides.json`, `implied_skills.json`) and are re-applied silently
-  on re-runs — follow this pattern for any new interactive flow.
+- Human decisions persist in the session profile
+  (`output/sessions/<sha>/profile.json` — M9 session store, see
+  [13-intake.md](13-intake.md)) and are re-applied silently on re-runs —
+  follow this pattern for any new interactive flow. The legacy global
+  decision files (`extracted_approvals.json`, `implied_skills.json`,
+  `gate_overrides.json`, `extracted_skills.json`) are retired: never
+  create or read them.
 - Console output must be ASCII-safe (dev machines may run cp1252; use
   `.encode("ascii", "replace")`-style guards for LLM-generated text).
 - Data files under `data/` and `output/` are gitignored; never hardcode
@@ -285,7 +301,7 @@ accurate (workflow rules live in
 - **Why these choices:** [02-decisions.md](02-decisions.md)
 - **Build order + progress + trade-offs + open questions:** [03-milestones.md](03-milestones.md) (roadmap — §§Deferred/Open hold the rest)
 - **Stage mechanics:** S1–S7 files (`04-reader.md` … `10-flow-runner.md`), routed via the Stage Table above
-- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup + M15 LLM mode), [13-intake.md](13-intake.md) (C3 intake + validation, Deferred / re-scoped), [14-observability.md](14-observability.md) (C4 observability + judge evaluation, Designed M17)
+- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup + M15 LLM mode), [13-intake.md](13-intake.md) (C3 intake + validation, Built M9), [14-observability.md](14-observability.md) (C4 observability + judge evaluation, Designed M17)
 - **Skill graph schema:** S3 [06-skill-map.md](06-skill-map.md) §Schema
 - **Validation rubric:** S5 [08-gap-measurer.md](08-gap-measurer.md) §Validation rubric
 - **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal

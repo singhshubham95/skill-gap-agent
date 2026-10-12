@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M24; M9 deferred/re-scoped)
+## Milestones (linear and global — M1…M24; M9 built 2026-10-12)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -217,20 +217,48 @@ not a pipeline stage.
      DeepSeek V4 Flash / OpenRouter (see §Open: extraction latency below);
      artifact reuse makes it a one-time cost per resume.
    **Status: built and validated on the user's real resume.**
-9. **Conversational intake + skill validation.** ⏸ Deferred / re-scoped
-   2026-10-04 (was 🎯 Designed; original design kept in
-   [13-intake.md](13-intake.md) for history). User decision 2026-10-04:
-   **no conversational flow** — the extension panel stays the only
-   interaction model (decision row in [02-decisions.md](02-decisions.md)).
-   Split on deferral: the *conversational intake* half (chat agent
-   collecting evidence / pre-filling gate questions) is deferred outright
-   (§Deferred #13); the *skill validation* half (evidence-backed depth —
-   concept checklist + applied question with hidden rubric, grades on the
-   gate's 1–5 scale) remains the standing quality lever, but its UX must be
-   redesigned **non-conversational** (e.g. a panel checklist of extracted
-   skills with confidence badges) at the upcoming plan/gap-quality
-   brainstorm. M9 keeps its number (linear, global); its build follows
-   that brainstorm.
+9. **Conversational intake + skill validation (C3).** ✅ Built 2026-10-12
+   (the conversation returned — inside the panel). Design home:
+   [13-intake.md](13-intake.md) (rewritten 2026-10-12); restore decisions:
+   [02-decisions.md](02-decisions.md) M9-restore rows (the 2026-10-04 "no
+   conversational flow" row struck). Full C3 scope in one pass: intake
+   chat + skill validation + depth-aware judge + session store. Built as
+   `sessions.py` (SHA-keyed session store), `intake.py` (conversation
+   state machine), `validate.py` (calibration protocol), with
+   depth-aware judging in `judge.py`, the no-double-count gate rule in
+   `gate.py`, and session routing through `resume.py` / `cli.py` /
+   `server.py` / `m5_plan.py` / `m4_gate.py` / `m2_check.py`.
+   **Verification record (2026-10-12):** `m9_check.py` FULL PASS
+   (offline, hermetic: session store, 7-turn scripted intake incl. skip +
+   kind-level defaults, validation protocol, depth-judge + gate
+   no-double-count, server end-to-end, panel surface); `ruff check .`
+   clean; `pytest` 51 passed; full check sweep green (smoke_test, m2, m7
+   ×2 hermeticity, m8, m9, m10–m16, m18–m24). Interactive validation
+   (live, real resume + 16 JDs, scripted answers): flow ran end-to-end —
+   intake profile saved to the SHA session, 47 phrases extracted, 46
+   canonical + 6 implied skills, gaps + plan written to the session dir.
+   The provider key had expired (401), so the run exercised the designed
+   degradation paths (loud regex fallback, per-target synthesis errors,
+   self-report chat tier) instead of full LLM mode — degradation behavior
+   is itself part of the M9/M15 promise, so the run validates the flow; a
+   full-LLM re-run is a re-validation, not a gate.
+   **Learnings (build-time):** the depth-stamp rule (`depth_val` on judge
+   edges; reuse only on stamp match) is what keeps M12's cache invariant
+   intact — without it a depth-aware re-judge would poison the shareable
+   judge cache with depth-dependent scores. The no-double-count rule has
+   a subtle shape: only *stamped* sub-threshold edges skip the gate
+   prompt (their score already reflects depth); depth-naive edges still
+   prompt. `validate.py` binds `llm.judge` at import like the other
+   callers — every offline check must patch `validate_mod.judge` too or
+   hang on a real network call. PowerShell `Set-Content -Encoding utf8`
+   writes a BOM; JSON written that way must be read with `utf-8-sig`.
+   Deterministic fixture content maps to the same SHA session across
+   check invocations — hermetic checks must wipe the session dir or vary
+   content. **Deferred from this milestone** (triggers in §Deferred #13 +
+   §Open): vocab-bridge wiring (§Open), analyze-time chat segment for
+   JD-relevant unvalidated skills (follow-up option in 13-intake), sweep
+   adoption of the conversation (user-deferred), m17 golden-set
+   depth-profile fixtures.
 10. **OSS issue sourcing (GFI thin slice).** ✅ Built 2026-09-28
     (mechanics in S6 `09-practice-planner.md`). New `oss.py`
     consumed from `rank_gaps()` `Gap` objects: 2-attempt search loop
@@ -322,7 +350,8 @@ not a pipeline stage.
     priority 2026-10-03 the locked sequence was reordered: the extension
     shell jumped ahead of M9 (decision rows in `02-decisions.md`); M9
     was then the next milestone *(superseded 2026-10-04: M9
-    deferred/re-scoped — M14 is next)*.
+    deferred/re-scoped — M14 is next; then superseded again 2026-10-12:
+    M9 restored and built — see the M9 entry)*.
     - **M10/M11 wiring completed here (discovery).** The M10/M11 entries
       described the `cli.py` wiring as built, but the code had never landed
       there: `set_stage_listener`/`_stage`, the `oss` node, `plan.html`
@@ -882,7 +911,7 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 10 | **Confidence-threshold auto-tuning** | Manual threshold, start 0.5 → tuned to 0.75 at M4 | Tune empirically against the rubric after the first full run (done — see M4). |
 | 11 | **JD auto-discovery/scraping** | User-supplied JDs | Explicit non-goal of v1; extension prerequisite (browser JD is the input). M13's Capture button covers manual browser-JD input; *automatic* discovery/scraping remains deferred. |
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
-| 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14) | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. |
+| 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | ~~Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14)~~ **Restored 2026-10-12 (M9 built)** — the user restored the conversation directly, bypassing the trigger below; the chat lives inside the panel flow as required. | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. *(Superseded 2026-10-12: user restored C3 in full — intake chat + validation + depth-aware judge — as M9; see roadmap M9 + `13-intake.md`.)* |
 | 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
 | 15 | **Session-token pairing for the local agent API** (per-session bearer token minted at server start, required on every request) | M20's request-origin gate + Content-Type enforcement + `skills_path` containment only | Same-user processes send no `Origin` and can read `output/` directly anyway — tokens add pairing friction without raising that boundary. Restore trigger: the product starts handling other users' data or running as a service (multi-user machines become a supported target). |
 | 16 | **PII minimization** ~~+ manual no-cloud extraction toggle~~ (strip names/contact details before LLM calls) | M21's disclosure-only contract: accurate copy + named destinations + first-use consent; the regex fallback still runs automatically when no key is set | User decision 2026-10-11 — T-M21 is disclosure-only. ~~The no-cloud toggle is superseded by M24 (2026-10-11): Rule-based mode now governs extraction — the restore trigger is met.~~ Restore triggers (PII half): store review pushes for data minimization, or users report discomfort sending contact details to providers (skill extraction never needs them). |

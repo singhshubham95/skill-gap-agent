@@ -317,11 +317,31 @@ def _flatten_phrases(data: dict) -> list[str]:
     return phrases
 
 
+def _prune_rejected(data: dict, rejected: set[str]) -> dict:
+    """Rebuild the skills hierarchy without rejected phrases (drop empties)."""
+
+    def prune(obj):
+        if isinstance(obj, dict):
+            out = {}
+            for k, v in obj.items():
+                pruned = prune(v)
+                if pruned:  # drop empty dicts/lists
+                    out[k] = pruned
+            return out
+        if isinstance(obj, list):
+            return [p for p in obj if p not in rejected]
+        return obj
+
+    return {"skills": prune(data.get("skills", data))}
+
+
 def review_extracted(
     data: dict,
     approvals_path: str | Path = Path("output/extracted_approvals.json"),
     auto_accept: bool = False,
     ask_fn=None,
+    decisions: dict[str, bool] | None = None,
+    on_save=None,
 ) -> dict:
     """First-run approval flow over extracted phrases (y/n/a per phrase).
 
@@ -330,7 +350,13 @@ def review_extracted(
     all remaining. Returns the filtered skills-JSON dict. The APPROVAL record
     is keyed by phrase text; the artifact itself is left untouched so the
     user can hand-edit it between runs.
+    M9: `decisions` (the intake chat's session profile) applies answers
+    silently — no prompts, no approval-file writes (the retired global
+    extracted_approvals.json is never created or read).
     """
+    if decisions is not None:
+        rejected = {p for p in _flatten_phrases(data) if decisions.get(p) is False}
+        return _prune_rejected(data, rejected) if rejected else data
     ask = ask_fn or input
     path = Path(approvals_path)
     saved: dict[str, bool] = {}
@@ -363,32 +389,83 @@ def review_extracted(
         if ans == "n":
             rejected.add(phrase)
 
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
+    if on_save is not None:
+        # M9: persist into the session profile (the retired global
+        # extracted_approvals.json is never created or read).
+        on_save(dict(sorted(saved.items())))
+    else:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
 
     if not rejected and not auto_accept:
         return data
 
-    # Rebuild the hierarchy without rejected phrases (drop empty branches).
-    def prune(obj):
-        if isinstance(obj, dict):
-            out = {}
-            for k, v in obj.items():
-                pruned = prune(v)
-                if pruned:  # drop empty dicts/lists
-                    out[k] = pruned
-            return out
-        if isinstance(obj, list):
-            kept = [p for p in obj if p not in rejected]
-            return kept
-        return obj
-
-    return {"skills": prune(data.get("skills", data))}
+    return _prune_rejected(data, rejected)
 
 
 # ---------------------------------------------------------------------------
 # Front-end entry point (called by the runner, not a graph node)
 # ---------------------------------------------------------------------------
+
+
+def save_upload(data: bytes, filename: str, upload_dir: str | Path) -> Path:
+    """Rule-only upload (M9 placement revision 2026-10-12).
+
+    Upload = save + readability check (text extraction, scanned-PDF guard);
+    no LLM call, nothing leaves the machine. Skill extraction and the intake
+    chat run later, at Analyze gaps (specs/13-intake.md §In-panel intake).
+    """
+    upload_dir = Path(upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target = upload_dir / filename
+    target.write_bytes(data)
+    extract_text(target)  # scanned-PDF guard fires here; raises on unreadable
+    return target
+
+
+def extract_to_artifact(
+    resume_path: str | Path,
+    artifact_path: str | Path = EXTRACTED_PATH,
+    use_llm: bool = True,
+    cfg: LLMConfig | None = None,
+) -> tuple[dict, str]:
+    """Extraction only (M9 intake): resume -> (data, source).
+
+    No review, no approval files — the intake chat reviews the phrases and
+    its answers live in the session profile. Artifact reuse follows the M14
+    SHA sidecar (same resume -> same artifact).
+    """
+    text = extract_text(resume_path)
+    source_sha = hashlib.sha256(Path(resume_path).read_bytes()).hexdigest()
+    data = load_extracted(artifact_path, expect_sha=source_sha)
+    if data is not None and not _artifact_reusable(artifact_path, use_llm):
+        data = None  # M24: classes never cross; llm never reuses a fallback
+    if data is not None:
+        return data, "artifact"
+    if use_llm:
+        try:
+            data = extract_skills_llm(text, cfg=cfg)
+            source = "llm"
+        except Exception as e:  # noqa: BLE001 — no key / provider down -> regex
+            # Loud degradation (M15): the fallback is labeled, never silent.
+            print(f"LLM extraction unavailable ({e}); falling back to regex scan.")
+            data = extract_skills_regex(text)
+            source = "regex"
+    else:
+        data = extract_skills_regex(text)
+        source = "regex"
+    save_extracted(
+        data,
+        artifact_path,
+        source_sha=source_sha,
+        source=source,
+        mode="llm" if use_llm else "rule",
+    )
+    return data, source
+
+
+# Public alias for the phrase flattener (M9 intake needs the raw phrase list).
+flatten_phrases = _flatten_phrases
 
 
 def resume_to_skills_json(
@@ -399,6 +476,8 @@ def resume_to_skills_json(
     auto: bool = False,
     ask_fn=None,
     cfg: LLMConfig | None = None,
+    review_decisions: dict | None = None,
+    review_on_save=None,
 ) -> tuple[Path, dict]:
     """Resume file -> skills-JSON file ready for ingest_skills_json().
 
@@ -407,7 +486,8 @@ def resume_to_skills_json(
     2. Reuse the extraction artifact only if it was produced from this
        same resume (SHA-256 sidecar, M14); else LLM extraction (or regex
        fallback when use_llm=False / no API key).
-    3. First-run approval flow over the phrases (silent once approved).
+    3. First-run approval flow over the phrases — or, with `review_decisions`
+       (M9 intake chat), those answers applied silently.
     4. Write the (possibly approved-filtered) JSON to a temp artifact and
        return its path for the ingest node.
 
@@ -451,7 +531,14 @@ def resume_to_skills_json(
             else LABEL_LLM_CACHED
         )
 
-    reviewed = review_extracted(data, approvals_path=approvals_path, auto_accept=auto, ask_fn=ask_fn)
+    reviewed = review_extracted(
+        data,
+        approvals_path=approvals_path,
+        auto_accept=auto,
+        ask_fn=ask_fn,
+        decisions=review_decisions,
+        on_save=review_on_save,
+    )
 
     # The ingest node consumes a file path; write the reviewed JSON next to
     # the artifact so the whole flow stays auditable on disk.

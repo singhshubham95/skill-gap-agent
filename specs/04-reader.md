@@ -31,16 +31,19 @@ files (and later browser pages) into plain text for downstream stages.
 - No skill extraction (S4 via LLM in S2, or lexicon tables).
 - No canonicalization (S4). No graph writes beyond passing text on.
 - Not a LangGraph node: `cli.py` calls `resume_to_skills_json()` before
-  the graph starts (M9 intake will reuse it as a tool).
+  the graph starts (the M9 intake reuses it as a tool).
 
 ## Artifacts
 
-- `output/extracted_skills.json` (raw LLM/regex output, reviewable).
-- `output/extracted_skills.reviewed.json` (post-approval, feeds ingest).
-- `output/extracted_approvals.json` (phrase → keep/drop, silent re-runs).
-- `output/extracted_skills.sha256` (M14 — SHA-256 of the source
-  resume; the artifact is reused only when it matches, so uploading a
-  second resume can never silently serve the first one's skills).
+All extraction artifacts are session-scoped since M9 (the session store in
+[13-intake.md](13-intake.md)): `output/sessions/<sha>/extracted_skills.json`
+(raw LLM/regex output, reviewable) and
+`output/sessions/<sha>/extracted_skills.reviewed.json` (post-approval,
+feeds ingest), where `<sha>` is the SHA-256 of the source resume — the
+artifact is reused only when it matches, so uploading a
+second resume can never silently serve the first one's skills. The legacy
+global `output/extracted_skills.json` + `.sha256` sidecar +
+`extracted_approvals.json` are retired (M9).
 
 ## History (links, not copies)
 
