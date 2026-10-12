@@ -890,7 +890,20 @@ not a pipeline stage.
         artifact" step and m24's own fallback scenario both needed the
         artifact *removed* or the request *mode-switched* before the
         intended path could even trigger — when a harness can't reach its
-        assertion's premise, the premise is what's wrong.
+        assertion's premise, the premise is what's wrong. (c) **Live pass
+      2026-10-12 found a latent gate crash (fixed same day, T-M25):**
+      `_profile_gate_overrides` compared `(confidence, edge_dict)` tuples
+      with `max()` — on equal-confidence ties Python falls through to the
+      second element and died with `TypeError: '>' not supported between
+      instances of 'dict' and 'dict'` right after judging. It hid from
+      every harness because stub edges carried *identical* dicts and
+      tuple comparison skips `==`-equal elements — only real judge data
+      (distinct rationales) trips it. Fix compares plain floats (the dict
+      was never read afterwards); regression `check_profile_ties()` in
+      `m7_check` (red→green verified against the pre-fix code). All
+      other `max`/`sort` sites audited: `judge.py`/`oss.py`/
+      `synthesis.py` sort tuples of scalars, `ranking.py` and
+      `cli._top_edge_data` use keys — none tie-unsafe.
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -918,13 +931,14 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
-- **M24 live pass (done criterion 5).** The automated suite is green
-  (2026-10-11); one live pass is the human's step: reload the extension,
-  walk the new Setup order (AI access → mode → resume), confirm a
-  Rule-based upload extracts locally (fast, "nothing leaves this
-  machine") and that switching to Paid re-extracts with the LLM (the
-  mode-aware cache upgrades a rule artifact instead of reusing it).
-  Record the result in the M24 entry above, then delete this item.
+- **M24 live pass (done criterion 5).** Live pass run 2026-10-12 got
+  through key save + paid mode + resume upload + capture + judging all 14
+  targets, then crashed on a latent gate-profiling bug (equal-confidence
+  tie — fixed in T-M25, learning (c) in the M24 entry). Retest pending
+  the human: walk the Setup order, confirm a Rule-based upload extracts
+  locally and switching to Paid re-extracts (mode-aware cache), then
+  Analyze gaps should now proceed past the gate to the gap table. Record
+  the result in the M24 entry above, then delete this item.
 - **Extraction latency (S1/S2).** The M8 resume-extraction LLM call (one
   call, full resume text, hierarchical JSON out) took ~19 minutes via
   DeepSeek V4 Flash on OpenRouter (2026-09-23), vs. ~3–10s for

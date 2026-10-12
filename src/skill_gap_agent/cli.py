@@ -147,9 +147,14 @@ def _profile_gate_overrides(sg: SkillGraph, profile: dict) -> dict[str, dict]:
     out: dict[str, dict] = {}
     intents = profile.get("intent") or {}
     for target in sorted(sg.target_skills()):
+        # Confidence only (fix 2026-10-12): comparing (confidence,
+        # edge-dict) tuples crashed on equal-confidence ties — tuple
+        # comparison fell through to the dicts (TypeError: '>' not
+        # supported between instances of 'dict' and 'dict'). The dict was
+        # never read afterwards; ties yield the same confidence anyway.
         top = max(
             (
-                (float(d.get("confidence", 0.0)), d)
+                float(d.get("confidence", 0.0))
                 for _, _, d in sg.g.in_edges(f"skill:{target}", data=True)
                 if d.get("type") == "TRANSFERS_TO"
             ),
@@ -163,7 +168,7 @@ def _profile_gate_overrides(sg: SkillGraph, profile: dict) -> dict[str, dict]:
                     break
         intent = intents.get(target) or intents.get(_top_source(sg, target) or "")
         if depth or intent:
-            conf = top[0] if top else 0.0
+            conf = top if top is not None else 0.0
             note = f"depth={depth} (reflected in score)" if depth else ""
             out[target] = {
                 "final_confidence": conf,

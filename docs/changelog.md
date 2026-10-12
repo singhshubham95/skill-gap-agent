@@ -12,6 +12,11 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M25: Fix gate-profiling crash on equal-confidence ties — `max()` over
+  `(confidence, edge_dict)` tuples compared dicts on ties (TypeError right
+  after judging; found by the M24 live pass 2026-10-12); compares plain
+  floats now, red→green regression in `m7_check` (spec:
+  [03-milestones.md](../specs/03-milestones.md) M24 learning (c))
 - T-M9-impl: Conversational intake + skill validation (C3) built —
   in-panel intake chat at Analyze gaps, SHA-keyed session store
   (`output/sessions/<sha>/profile.json`), depth-aware judge with

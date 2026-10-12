@@ -23,7 +23,13 @@ from pathlib import Path
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
-from .cli import AgentState, build_app, pending_interrupt, prompt_text
+from .cli import (
+    AgentState,
+    _profile_gate_overrides,
+    build_app,
+    pending_interrupt,
+    prompt_text,
+)
 from .graph import Skill, SkillGraph, SkillSource
 from .sessions import retire_legacy_files, session_dir
 
@@ -32,6 +38,28 @@ CHECKPOINT_PATH = Path("output/checkpoints_test.sqlite")
 # Fixture edges: two real target skills (from data/jds) at sub-threshold
 # confidence -> the gate must prompt for each (depth + intent = 2 prompts).
 FIXTURE_EDGES = {"Fine-tuning": 0.5, "Spark": 0.5}
+
+
+def check_profile_ties() -> None:
+    """Regression (live-pass bug, 2026-10-12): gate profiling must survive
+    EQUAL-confidence TRANSFERS_TO edges into one target. The old
+    max((confidence, edge_dict)) compared the dicts on ties —
+    TypeError: '>' not supported between instances of 'dict' and 'dict' —
+    crashing gate_needed right after judging (real judge scores tie
+    often; the offline harnesses stubbed distinct ones, so it hid)."""
+    sg = SkillGraph()
+    sg.add_skill(Skill(name="Python", source=SkillSource.CURRENT))
+    sg.add_skill(Skill(name="PyTorch", source=SkillSource.CURRENT))
+    sg.add_skill(Skill(name="TensorFlow", source=SkillSource.TARGET))
+    # Distinct rationale per edge: equal-confidence ties only crash when
+    # the edge dicts DIFFER (tuple comparison skips elements that are ==,
+    # so identical stub data masked the bug in every earlier harness).
+    sg.add_transfers_to("Python", "TensorFlow", 0.85, "from python")
+    sg.add_transfers_to("PyTorch", "TensorFlow", 0.85, "from pytorch")
+    out = _profile_gate_overrides(sg, {"intent": {"TensorFlow": "count"}})
+    assert "TensorFlow" in out, out
+    assert out["TensorFlow"]["final_confidence"] == 0.85, out
+    print("profile ties OK: equal-confidence edges do not crash gate profiling")
 
 
 def _seed_fixture_graph(session: Path) -> None:
@@ -45,6 +73,7 @@ def _seed_fixture_graph(session: Path) -> None:
 
 
 def main() -> None:
+    check_profile_ties()
     if CHECKPOINT_PATH.exists():
         CHECKPOINT_PATH.unlink()
 
