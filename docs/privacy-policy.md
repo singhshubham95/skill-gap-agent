@@ -34,8 +34,10 @@ Data is processed **locally** except for these flows — all triggered by
 your explicit actions (upload / analyze), all over **HTTPS**:
 
 1. **The AI provider you select** receives your resume text (for skill
-   extraction), your job-description text and skill list (for gap
-   analysis), and your gap details (for plan synthesis):
+   extraction), your answers to the short profile questions the panel
+   asks at analysis time (skill review, depth, calibration grading), your
+   job-description text and skill list (for gap analysis), and your gap
+   details (for plan synthesis):
    - **OpenRouter** — an aggregator that forwards requests to the
      underlying model (the default is **DeepSeek**)
    - **Z.ai GLM** (BigModel, `open.bigmodel.cn`)

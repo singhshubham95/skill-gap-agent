@@ -28,8 +28,25 @@ def main() -> None:
     else:
         print("No external taxonomy found — using built-in alias/pattern tables")
 
+    # M9 session store: decisions persist in the source's profile (the
+    # retired global implied_skills.json is never created or read).
+    from .sessions import load_profile, retire_legacy_files, save_profile
+
+    retire_legacy_files()
+    profile = load_profile(skills_path) or {}
+
+    def _save_implied(saved: dict) -> None:
+        p = load_profile(skills_path) or {}
+        p["implied"] = saved
+        save_profile(skills_path, p)
+
     sg, stats = build_seed_graph(
-        skills_path, jds_path, taxonomy=taxonomy, auto_accept_implied=auto
+        skills_path,
+        jds_path,
+        taxonomy=taxonomy,
+        auto_accept_implied=auto,
+        implied_decisions=(profile.get("implied") or None),
+        implied_on_save=_save_implied,
     )
     print(
         f"ingestion: {stats['raw']} raw phrases -> {stats['canonical']} canonical "

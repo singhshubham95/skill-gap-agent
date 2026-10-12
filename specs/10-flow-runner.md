@@ -2,10 +2,10 @@
 
 Step order and display. Owns no domain logic — calls S1→S6.
 
-**Status: Built** (M7 graph + M8 resume front-end + M11 local UI);
-M12 sweep harness and M13 extension shell are separate components
-([11-sweep.md](11-sweep.md), [12-extension.md](12-extension.md)); M9
-intake Designed; M17 `--trace` flag
+**Status: Built** (M7 graph + M8 resume front-end + M11 local UI + M9
+intake); M12 sweep harness and M13 extension shell are separate components
+([11-sweep.md](11-sweep.md), [12-extension.md](12-extension.md)); M17
+`--trace` flag
 ([14-observability.md](14-observability.md)) Designed.
 
 ## Runners
@@ -33,6 +33,15 @@ intake Designed; M17 `--trace` flag
   The M10 OSS flags (`--no-oss`, `--no-llm-oss`) live on `m5_plan.py`; the
   `cli.py` graph honors the same options as state fields (`skip_oss`,
   `no_llm_oss` — settable via `server.py`'s run contract).
+- M9 intake (✅ Built 2026-10-12): `--intake` / `--intake-json` on `cli.py`
+  run the intake conversation before the graph (extraction → implied →
+  depth → checklist → profile saved to the SHA-keyed session dir). In the
+  server run contract, `phase: "gaps"` pauses at intake
+  (`pause_phase: "intake"`) when the session profile is incomplete; the
+  panel chats via `POST /api/intake/turn` + `/api/intake/answer`, and
+  completion auto-continues to the gaps pause. `POST /api/resume` is
+  rule-only (M14's immediate extraction moved to analyze). Design:
+  [13-intake.md](13-intake.md).
 - M17 (🎯 Designed): `--trace` on `cli.py` / `server.py` / `sweep.py` calls
   `tracing.enable_tracing()` before the graph is built and merges
   `tracing.run_config()` (run name, tags, model metadata) into the
@@ -71,8 +80,9 @@ intake Designed; M17 `--trace` flag
   sandboxed iframe whose links open in new tabs. Design:
   [12-extension.md](12-extension.md); install: `extension/README.md`.
 - Panel self-serve setup (M14, ✅ Built 2026-10-04): resume upload
-  (`POST /api/resume`, raw bytes → `output/uploads/`, extraction cache
-  keyed by resume SHA-256), LLM key entry (`POST /api/key` → OS keyring or
+  (`POST /api/resume`, raw bytes → `output/uploads/` — rule-only since M9;
+  extraction runs at analyze into the session's extraction cache keyed by
+  resume SHA-256), LLM key entry (`POST /api/key` → OS keyring or
   session-only env; `GET /api/providers` returns `key_set` booleans),
   `provider` field in the run contract, `tools/start-server.bat` launcher.
   Design: [12-extension.md](12-extension.md) §M14.
@@ -88,6 +98,7 @@ intake Designed; M17 `--trace` flag
 - Deferred: `03-milestones.md` §Deferred #2 (done M7), #8 (web UI — done
   M11 + M13), #11 (JD scraping — manual capture covered by M13, automatic
   discovery still deferred), #12 (in-page gap marking), #13 (conversational
-  intake), #14 (native-messaging launcher).
+  intake — restored and built as M9 2026-10-12), #14 (native-messaging
+  launcher).
 - Open items: `03-milestones.md` §Open (msgpack registration, sweep ground
   truth).

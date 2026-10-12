@@ -12,6 +12,14 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M9-impl: Conversational intake + skill validation (C3) built —
+  in-panel intake chat at Analyze gaps, SHA-keyed session store
+  (`output/sessions/<sha>/profile.json`), depth-aware judge with
+  profile-stamped caches, gate no-double-count rule, legacy global
+  decision files retired; upload is rule-only (extraction moves to
+  analyze). Verified: m9_check FULL PASS, ruff clean, pytest 51 passed,
+  full check sweep green, live end-to-end run (degradation paths —
+  provider key expired) (spec: [13-intake.md](../specs/13-intake.md))
 - T-M24: Mode governs ingestion — free/paid/rule now applies to resume
   extraction too (rule = local regex, nothing leaves the machine); Setup
   order = AI access → mode + consent → resume; mode-aware extraction

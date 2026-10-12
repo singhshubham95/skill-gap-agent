@@ -76,6 +76,7 @@ below, surfaced once above.
 | Touchpoint | Rule-based behavior | LLM-mode failure behavior (M15) |
 |---|---|---|
 | S1 extraction | regex lexicon scan | unchanged mechanics (already warns); the warning becomes the standard provenance label |
+| C3 question authoring + grading (M9) | no questions authored — the intake falls back to the **self-report** tier (depth turn alone) | authoring failure degrades to self-report for that skill; a grading failure falls back to the checklist answer — both labeled, never silent |
 | S5 judge (`TRANSFERS_TO`) | skip — targets render **unjudged** | failed targets render **unjudged (LLM unavailable)** — a missing edge must never read as a measured "full gap" |
 | S6 synthesis | section replaced by a labeled note | failed gaps show the labeled placeholder, not an empty project |
 | S6 GFI filter | keyword results, labeled | keep the raw top-5 but label it "keyword matches — not LLM-ranked" |
@@ -84,8 +85,8 @@ below, surfaced once above.
 
 Every rendered section and gap row states its origin using exactly these
 labels: `LLM` · `LLM (cached)` · `Rule-based` · `Rule-based (LLM
-unavailable — <reason>)`. Cache reuse — `reuse_judged` edges,
-`output/oss_issues.json`, the extraction sidecar — renders `LLM
+unavailable — <reason>)`. Cache reuse — `reuse_judged` edges, the session's
+`oss_issues.json`, the extraction sidecar — renders `LLM
 (cached)`: reused LLM output must not read as fresh. Run status gains
 `llm_mode` (`"llm" | "rule-based"`) and `degraded_reasons
 [{touchpoint, error}]`, served by `GET /api/status` (M16 adds

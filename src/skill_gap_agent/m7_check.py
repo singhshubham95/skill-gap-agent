@@ -4,76 +4,118 @@ Simulates a user answering gate prompts by feeding scripted answers into the
 interrupt/resume loop — the same loop cli.main() drives. Verifies:
 1. The graph interrupts at the gate (instead of blocking stdin).
 2. Resume with answers completes the run.
-3. Decisions persist to output/gate_overrides.json.
+3. Decisions persist to the SESSION PROFILE (M9 rule: the retired global
+   gate_overrides.json is never created or read).
+
+Deterministic (M9): the check seeds its own session (a temp copy of the
+skills JSON) with a fixture graph carrying two sub-threshold TRANSFERS_TO
+edges, so the gate fires regardless of what other checks left behind. Fully
+offline: top_n=0 skips synthesis, skip_oss skips sourcing.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import tempfile
 from pathlib import Path
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from .cli import AgentState, build_app, pending_interrupt, prompt_text
+from .graph import Skill, SkillGraph, SkillSource
+from .sessions import retire_legacy_files, session_dir
 
 CHECKPOINT_PATH = Path("output/checkpoints_test.sqlite")
+
+# Fixture edges: two real target skills (from data/jds) at sub-threshold
+# confidence -> the gate must prompt for each (depth + intent = 2 prompts).
+FIXTURE_EDGES = {"Fine-tuning": 0.5, "Spark": 0.5}
+
+
+def _seed_fixture_graph(session: Path) -> None:
+    """Pre-seed the session's graph.json so skip_judge copies these edges."""
+    sg = SkillGraph()
+    sg.add_skill(Skill(name="Python", source=SkillSource.CURRENT))
+    for target, conf in FIXTURE_EDGES.items():
+        sg.add_skill(Skill(name=target, source=SkillSource.TARGET))
+        sg.add_transfers_to("Python", target, conf, "fixture")
+    sg.save(str(session / "graph.json"))
 
 
 def main() -> None:
     if CHECKPOINT_PATH.exists():
         CHECKPOINT_PATH.unlink()
 
-    # Back up and clear saved gate decisions so the gate path actually fires
-    # (persisted decisions are applied silently by design).
-    overrides = Path("output/gate_overrides.json")
-    backup = Path("output/gate_overrides.json.m7bak")
-    if overrides.exists():
-        backup.write_bytes(overrides.read_bytes())
-        overrides.unlink()
+    retire_legacy_files()  # M9 migration: retired globals must not linger
 
-    conn = sqlite3.connect(str(CHECKPOINT_PATH), check_same_thread=False)
-    saver = SqliteSaver(conn)
-    app = build_app(checkpointer=saver)
-    config = {"configurable": {"thread_id": "m7-test"}}
+    with tempfile.TemporaryDirectory() as td:
+        skills = Path(td) / "skills.json"
+        skills.write_text(
+            json.dumps({"skills": ["Python programming experience"]}),
+            encoding="utf-8",
+        )
+        import shutil
 
-    state: AgentState = {
-        "skills_path": "data/skillsdataset.json",
-        "jds_path": "data/jds",
-        "auto": False,
-        "skip_judge": True,
-        "top_n": 2,
-    }
+        shutil.rmtree(session_dir(skills), ignore_errors=True)  # hermetic
+        session = session_dir(skills, create=True)
+        _seed_fixture_graph(session)
 
-    answers = iter(["3", "y", "3", "y", "3", "y", "3", "y", "3", "y", "3", "y"])
-    resumed = 0
+        conn = sqlite3.connect(str(CHECKPOINT_PATH), check_same_thread=False)
+        saver = SqliteSaver(conn)
+        app = build_app(checkpointer=saver)
+        config = {"configurable": {"thread_id": "m7-test"}}
 
-    app.invoke(state, config=config)
-    while True:
-        pending = pending_interrupt(app, config)
-        if pending is None:
-            break
-        prompt = prompt_text(pending.value)
-        print(f"INTERRUPT: {prompt.strip()[:90]}")
-        answer = next(answers)
-        print(f"  -> scripted answer: {answer}")
-        resumed += 1
-        app.invoke(Command(resume=answer), config=config)
+        state: AgentState = {
+            "skills_path": str(skills),
+            "jds_path": "data/jds",
+            "auto": False,
+            "skip_judge": True,
+            "skip_oss": True,
+            "top_n": 0,
+            "source_input": str(skills),
+            "session_dir": str(session),
+        }
 
-    print(f"\nInterrupts handled: {resumed}")
-    print(f"gate_overrides.json exists: {overrides.exists()}")
-    snap = app.get_state(config)
-    print(f"Final state next: {snap.next}")
-    ok = resumed > 0 and not snap.next and overrides.exists()
-    print("PASS" if ok else "FAIL")
+        answers = iter(["3", "y", "3", "y", "3", "y", "3", "y"])
+        resumed = 0
 
-    conn.close()  # Windows: must close before unlinking the sqlite file
-    CHECKPOINT_PATH.unlink(missing_ok=True)
+        app.invoke(state, config=config)
+        while True:
+            pending = pending_interrupt(app, config)
+            if pending is None:
+                break
+            prompt = prompt_text(pending.value)
+            print(f"INTERRUPT: {prompt.strip()[:90]}")
+            answer = next(answers)
+            print(f"  -> scripted answer: {answer}")
+            resumed += 1
+            app.invoke(Command(resume=answer), config=config)
 
-    # Restore the user's real gate decisions
-    if backup.exists():
-        overrides.write_bytes(backup.read_bytes())
-        backup.unlink()
+        print(f"\nInterrupts handled: {resumed}")
+        profile_path = session / "profile.json"
+        profile = (
+            json.loads(profile_path.read_text(encoding="utf-8"))
+            if profile_path.exists()
+            else {}
+        )
+        gate = profile.get("gate") or {}
+        print(f"profile.json gate decisions: {sorted(gate)}")
+        legacy = Path("output/gate_overrides.json")
+        print(f"gate_overrides.json exists (must be False): {legacy.exists()}")
+        snap = app.get_state(config)
+        print(f"Final state next: {snap.next}")
+        ok = (
+            resumed >= 2 * len(FIXTURE_EDGES)  # depth + intent per fixture target
+            and not snap.next
+            and set(gate) >= set(FIXTURE_EDGES)
+            and not legacy.exists()
+        )
+        print("PASS" if ok else "FAIL")
+
+        conn.close()  # Windows: must close before unlinking the sqlite file
+        CHECKPOINT_PATH.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

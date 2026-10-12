@@ -24,14 +24,16 @@ SYSTEM_PROMPT = (
     "You judge how much a person's EXISTING skill transfers to a TARGET skill "
     "they lack. Be calibrated: reserve 0.8+ for near-equivalent skills, give "
     "0.4-0.7 for partial/adjacent transfer, below 0.3 for negligible transfer. "
-    "Respond with ONLY a valid JSON object."
+    "If a depth note is given for a candidate skill, weigh it: transfer from "
+    "deep, real experience is worth more than shallow exposure to the same "
+    "skill. Respond with ONLY a valid JSON object."
 )
 
 PROMPT_TEMPLATE = """Target skill the person LACKS: "{target}"
 
 Person's existing skills (candidates):
 {candidates}
-
+{depth_block}
 For each candidate, score how well it transfers to the target skill:
 - confidence: 0.0-1.0 (calibrated: 0.8+ near-equivalent, 0.4-0.7 partial, <0.3 negligible)
 - rationale: one short sentence
@@ -121,21 +123,47 @@ def prune_candidates(
     return picked
 
 
+def depth_note_block(candidates: list[str], depths: dict[str, str] | None) -> tuple[str, dict[str, str]]:
+    """Depth block for the judge prompt + the entries actually used.
+
+    M9 (specs/13-intake.md §Depth-aware judge): the score reflects depth at
+    call time. `used` is stamped onto each TRANSFERS_TO edge (`depth_val`)
+    so cached edges are reusable only while the source's depth is unchanged.
+    """
+    depths = depths or {}
+    used = {c: str(depths[c]) for c in candidates if c in depths and str(depths[c])}
+    if not used:
+        return "", {}
+    lines = ["", "Known self-assessed/validated depth of these skills (1=awareness .. 5=expert):"]
+    lines += [f"- {skill}: {d}/5" for skill, d in sorted(used.items())]
+    lines.append("Weigh depth when scoring transfer (deeper experience transfers more).")
+    return "\n".join(lines) + "\n", used
+
+
 def judge_target(
     sg: SkillGraph,
     target: str,
     cfg: LLMConfig | None = None,
     k: int = 5,
     min_confidence: float = 0.3,
+    depths: dict[str, str] | None = None,
 ) -> JudgeResult:
-    """Judge one target skill against pruned candidates; write TRANSFERS_TO edges."""
+    """Judge one target skill against pruned candidates; write TRANSFERS_TO edges.
+
+    M9: `depths` (session profile) makes the score depth-aware; each edge is
+    stamped with the depth value used for its source (`depth_val`) so reuse
+    (`reuse_judged`, cache replay) can refuse stale-depth edges.
+    """
     current = sg.current_skills()
     candidates = prune_candidates(target, current, k=k)
     if not candidates:
         return JudgeResult(target=target, scores=[], error="no candidates")
 
     cand_block = "\n".join(f"- {c}" for c in candidates)
-    prompt = PROMPT_TEMPLATE.format(target=target, candidates=cand_block)
+    depth_block, used = depth_note_block(candidates, depths)
+    prompt = PROMPT_TEMPLATE.format(
+        target=target, candidates=cand_block, depth_block=depth_block
+    )
     try:
         result = judge(prompt, system=SYSTEM_PROMPT, cfg=cfg)
     except Exception as e:  # noqa: BLE001
@@ -158,8 +186,13 @@ def judge_target(
             )
         if match is None or conf < min_confidence:
             continue
-        scores.append({"skill": match, "confidence": conf, "rationale": rationale})
+        depth_val = used.get(match, "")
+        scores.append(
+            {"skill": match, "confidence": conf, "rationale": rationale,
+             "depth_val": depth_val}
+        )
         sg.add_transfers_to(match, target, conf, rationale)
+        sg.g[f"skill:{match}"][f"skill:{target}"]["depth_val"] = depth_val
     return JudgeResult(target=target, scores=scores)
 
 
@@ -168,12 +201,18 @@ def judge_all_unmatched(
     cfg: LLMConfig | None = None,
     k: int = 5,
     only: list[str] | None = None,
+    depths: dict[str, str] | None = None,
 ) -> list[JudgeResult]:
-    """Judge every unmatched target skill (or a subset via `only`)."""
+    """Judge every unmatched target skill (or a subset via `only`).
+
+    M9: `depths` (session profile) makes scores depth-aware; stamped edges
+    let reuse refuse stale-depth results (specs/13-intake.md §Depth-aware
+    judge).
+    """
     targets = only if only is not None else sg.unmatched_target_skills()
     results = []
     for i, t in enumerate(sorted(targets), 1):
-        r = judge_target(sg, t, cfg=cfg, k=k)
+        r = judge_target(sg, t, cfg=cfg, k=k, depths=depths)
         results.append(r)
         top = max(r.scores, key=lambda s: s["confidence"], default=None)
         top_str = f"top: {top['skill']} @ {top['confidence']:.2f}" if top else "no transfer"

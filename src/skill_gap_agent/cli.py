@@ -47,6 +47,7 @@ from .oss import source_oss_for_gaps
 from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
 from .resume import resume_to_skills_json
+from .sessions import load_profile, retire_legacy_files, save_profile, session_dir
 from .synthesis import save_synthesis_report, synthesize_for_gaps
 from .taxonomy import load_taxonomy
 
@@ -110,6 +111,79 @@ class AgentState(TypedDict, total=False):
     # records ({touchpoint, error}) accumulate across nodes and phases.
     unjudged: Annotated[list[dict], operator.add]
     degraded_reasons: Annotated[list[dict], operator.add]
+    # M9 session store (specs/13-intake.md §Session store): every artifact
+    # of the run lives under the skills source's SHA-keyed session dir, and
+    # human decisions live in its profile.json (the retired global
+    # extracted_approvals/implied_skills/gate_overrides files are never
+    # created or read).
+    source_input: str  # the skills source (resume or JSON) — session key
+    session_dir: str  # resolved session directory for this run
+
+
+def _out(state: AgentState) -> Path:
+    """Run artifact directory: the session dir (M9), output/ as fallback."""
+    return Path(state.get("session_dir") or "output")
+
+
+def _profile(state: AgentState) -> dict:
+    """Session profile (chat product), reloaded from disk — its file is the
+    source of truth so answers survive every pause and process restart."""
+    src = state.get("source_input") or ""
+    if not src:
+        return {}
+    return load_profile(src) or {}
+
+
+def _profile_depths(profile: dict) -> dict[str, str]:
+    return {k: str(v) for k, v in (profile.get("depth") or {}).items() if v}
+
+
+def _profile_gate_overrides(sg: SkillGraph, profile: dict) -> dict[str, dict]:
+    """Gate-decision dict from the session profile (chat answers + CLI
+    gate prompts). Shape matches gate.py's saved overrides: target ->
+    {final_confidence, depth, intent, note}. The no-double-count rule lives
+    in gate.py: depth already reflected in a stamped score is not
+    multiplied again."""
+    out: dict[str, dict] = {}
+    intents = profile.get("intent") or {}
+    for target in sorted(sg.target_skills()):
+        top = max(
+            (
+                (float(d.get("confidence", 0.0)), d)
+                for _, _, d in sg.g.in_edges(f"skill:{target}", data=True)
+                if d.get("type") == "TRANSFERS_TO"
+            ),
+            default=None,
+        )
+        depth = ""
+        if top is not None:
+            for u, _, d in sg.g.in_edges(f"skill:{target}", data=True):
+                if d.get("type") == "TRANSFERS_TO" and d.get("depth_val"):
+                    depth = str(d["depth_val"])
+                    break
+        intent = intents.get(target) or intents.get(_top_source(sg, target) or "")
+        if depth or intent:
+            conf = top[0] if top else 0.0
+            note = f"depth={depth} (reflected in score)" if depth else ""
+            out[target] = {
+                "final_confidence": conf,
+                "depth": depth,
+                "intent": intent or "count",
+                "note": note,
+            }
+    for target, sv in (profile.get("gate") or {}).items():  # CLI gate answers
+        out[target] = sv
+    return out
+
+
+def _top_source(sg: SkillGraph, target: str) -> str | None:
+    best = None
+    best_conf = -1.0
+    for u, _, d in sg.g.in_edges(f"skill:{target}", data=True):
+        if d.get("type") == "TRANSFERS_TO" and float(d.get("confidence", 0.0)) > best_conf:
+            best_conf = float(d.get("confidence", 0.0))
+            best = u.removeprefix("skill:")
+    return best
 
 
 def _llm_cfg(state: AgentState) -> LLMConfig:
@@ -175,12 +249,15 @@ def _ask_or_interrupt(prompt: str, checkpointer, config: dict) -> str:
 def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
     _stage("ingest")
     taxonomy = load_taxonomy()
+    profile = _profile(state)
     sg, stats = build_seed_graph(
         state["skills_path"],
         state["jds_path"],
         taxonomy=taxonomy,
         auto_accept_implied=state["auto"],
         ask_fn=None if state["auto"] else ask_via_interrupt,
+        implied_decisions=(profile.get("implied") or None) if profile.get("completed") or profile.get("implied") else None,
+        implied_on_save=lambda saved: _save_profile_key(state, "implied", saved),
     )
     print(
         f"Graph: {stats['canonical']} canonical + {stats['implied']} implied skills, "
@@ -190,32 +267,50 @@ def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
     return {"stats": stats}
 
 
-def _copy_previous_transfers(sg: SkillGraph) -> int:
+def _save_profile_key(state: AgentState, key: str, value: dict) -> None:
+    """Persist one decision map into the session profile (M9: the retired
+    global approval files are never created or read)."""
+    src = state.get("source_input") or ""
+    if not src:
+        return
+    profile = load_profile(src) or {}
+    profile[key] = value
+    save_profile(src, profile)
+
+
+def _copy_previous_transfers(sg: SkillGraph, out_dir: Path, depths: dict[str, str]) -> int:
     """Copy TRANSFERS_TO edges from the last saved graph into this run.
 
     Copied edges are marked cached=True so ranking can label their rows
     "LLM (cached)" instead of freshly-judged (M15 provenance).
+    M9 stamp rule: an edge is reusable only while its source's depth is
+    unchanged from when the score was computed (`depth_val`); a changed
+    depth re-judges the affected targets (specs/13-intake.md §Depth-aware
+    judge) — never silently replays a stale-depth score.
     """
-    prev_path = Path("output/graph.json")
+    prev_path = out_dir / "graph.json"
     if not prev_path.exists():
         return 0
     prev = SkillGraph.load(str(prev_path))
     reused = 0
     for u, v, d in prev.g.edges(data=True):
         if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(v):
+            source = u.removeprefix("skill:")
+            if str(d.get("depth_val", "")) != str(depths.get(source, "")):
+                continue  # stale depth stamp -> re-judge
             sg.g.add_edge(u, v, **{**d, "cached": True})
             reused += 1
     return reused
 
 
-def _save_merged_judge_report(results: list) -> None:
-    """Append new judge results to output/judge_report.json, keyed by target.
+def _save_merged_judge_report(results: list, out_dir: Path) -> None:
+    """Append new judge results to <session>/judge_report.json, keyed by target.
 
-    Used with reuse_judged: cached targets keep their old report rows, newly
-    judged targets replace/add theirs (judge score is a pure function of the
-    target — the M12 insight — so rows are interchangeable across runs).
+    Used with reuse_judged: stamped cached targets keep their old report
+    rows, newly judged targets replace/add theirs (the judge score is a pure
+    function of the target given a fixed depth stamp — the M12 insight).
     """
-    path = Path("output/judge_report.json")
+    path = out_dir / "judge_report.json"
     merged: dict[str, dict] = {}
     if path.exists():
         try:
@@ -245,8 +340,10 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
             "unjudged": [{"target": t, "reason": None} for t in targets],
         }
     if state.get("skip_judge") or state.get("reuse_judged"):
-        reused = _copy_previous_transfers(sg)
-        print(f"Reused {reused} TRANSFERS_TO edges from output/graph.json")
+        profile = _profile(state)
+        depths = _profile_depths(profile)
+        reused = _copy_previous_transfers(sg, _out(state), depths)
+        print(f"Reused {reused} TRANSFERS_TO edges from {_out(state) / 'graph.json'}")
         if state.get("skip_judge"):
             # --no-judge measures nothing new: remaining unmatched targets
             # are unjudged, not measured gaps (M15).
@@ -255,16 +352,20 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
                 "judged": False,
                 "unjudged": [{"target": t, "reason": None} for t in targets],
             }
+        # reuse_judged: targets whose edges were stale (depth changed) or
+        # absent fall through to fresh judging below.
 
+    profile = _profile(state)
+    depths = _profile_depths(profile)
     unmatched = sg.unmatched_target_skills()
     if not unmatched:
         return {"judged": False}
     print(f"Judging {len(unmatched)} unmatched target skills...\n")
-    results = judge_all_unmatched(sg, cfg=_llm_cfg(state))
+    results = judge_all_unmatched(sg, cfg=_llm_cfg(state), depths=depths)
     if state.get("reuse_judged"):
-        _save_merged_judge_report(results)
+        _save_merged_judge_report(results, _out(state))
     else:
-        save_judge_report(results, Path("output/judge_report.json"))
+        save_judge_report(results, _out(state) / "judge_report.json")
     out: dict = {"judged": True}
     # M15: a failed judge call must never read as a measured 0-confidence
     # gap — the target is labeled unjudged and the run is marked degraded.
@@ -283,26 +384,40 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
 
 
 def gate_needed(state: AgentState, config: RunnableConfig) -> str:
-    """Conditional edge: run the interactive gate only if sub-threshold,
-    not-yet-decided targets exist (auto mode never prompts)."""
+    """Conditional edge: run the gate node when there is anything to apply.
+
+    M9: the session profile's depth/intent answers (from the intake chat)
+    must reach the edges, so the gate node runs even in auto mode — it
+    applies them silently (review_targets never prompts when auto=True).
+    Interactive prompting happens only for depth-naive sub-threshold edges
+    (the no-double-count rule: stamped edges never get a second multiplier).
+    """
     if state["auto"]:
-        return "rank"
+        # Auto: gate runs only when profile decisions exist to apply.
+        return "gate" if _profile_gate_overrides(
+            _runtime(config)["sg"], _profile(state)
+        ) else "rank"
     sg: SkillGraph = _runtime(config)["sg"]
-    saved = _gate_override_names()
+    saved = set(_profile_gate_overrides(sg, _profile(state)))
     for target in sorted(sg.target_skills()):
         if target in saved:
             continue
-        top = _top_confidence(sg, target)
-        if top is not None and top < DEFAULT_THRESHOLD:
+        top = _top_edge_data(sg, target)
+        if top is None:
+            continue
+        d, _src = top
+        if float(d["confidence"]) < DEFAULT_THRESHOLD and not d.get("depth_val"):
             return "gate"
     return "rank"
 
 
-def _gate_override_names() -> set[str]:
-    p = Path("output/gate_overrides.json")
-    if not p.exists():
-        return set()
-    return set(json.loads(p.read_text(encoding="utf-8")).keys())
+def _top_edge_data(sg: SkillGraph, target: str):
+    edges = [
+        (d, u)
+        for u, _, d in sg.g.in_edges(f"skill:{target}", data=True)
+        if d.get("type") == "TRANSFERS_TO"
+    ]
+    return max(edges, key=lambda e: e[0]["confidence"]) if edges else None
 
 
 def _top_confidence(sg: SkillGraph, target: str) -> float | None:
@@ -317,18 +432,24 @@ def _top_confidence(sg: SkillGraph, target: str) -> float | None:
 def node_gate(state: AgentState, config: RunnableConfig) -> dict:
     _stage("gate")
     sg: SkillGraph = _runtime(config)["sg"]
+    profile = _profile(state)
     decisions = review_targets(
-        sg, threshold=DEFAULT_THRESHOLD, ask_fn=ask_via_interrupt
+        sg,
+        threshold=DEFAULT_THRESHOLD,
+        auto=state["auto"],
+        ask_fn=ask_via_interrupt,
+        overrides=_profile_gate_overrides(sg, profile),
+        on_save=lambda saved: _save_profile_key(state, "gate", saved),
     )
     print(gate_summary(decisions))
     return {"gate_decisions": decisions}
 
 
-def _write_gaps_json(gaps: list) -> Path:
-    """Persist the ranked gaps (M13: served to the extension via GET /api/gaps)."""
-    out = Path("output")
-    out.mkdir(exist_ok=True)
-    p = out / "gaps.json"
+def _write_gaps_json(gaps: list, out_dir: Path) -> Path:
+    """Persist the ranked gaps (M13: served to the extension via GET /api/gaps;
+    M9: into the session dir)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    p = out_dir / "gaps.json"
     payload = {"gaps": [dataclasses.asdict(g) for g in gaps]}
     p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return p
@@ -344,7 +465,7 @@ def node_rank(state: AgentState, config: RunnableConfig) -> dict:
     gaps = rank_gaps(_runtime(config)["sg"], unjudged=unjudged or None)
     print("\n=== Gap ranking ===")
     print(format_ranking(gaps))
-    gaps_path = _write_gaps_json(gaps)
+    gaps_path = _write_gaps_json(gaps, _out(state))
     print(f"Gaps written: {gaps_path}")
     return {"gaps": gaps}
 
@@ -423,6 +544,7 @@ def node_oss(state: AgentState, config: RunnableConfig) -> dict:
         state["gaps"],
         top_n=state["top_n"],
         cfg=_llm_cfg(state),
+        cache_path=_out(state) / "oss_issues.json",
         use_llm=use_llm_oss,
         degraded_out=degraded,
     )
@@ -432,7 +554,8 @@ def node_oss(state: AgentState, config: RunnableConfig) -> dict:
 def node_output(state: AgentState, config: RunnableConfig) -> dict:
     _stage("output")
     sg: SkillGraph = _runtime(config)["sg"]
-    out = Path("output")
+    out = _out(state)
+    out.mkdir(parents=True, exist_ok=True)
     projects = state.get("projects", [])
     oss_by_gap = state.get("oss_by_gap") or {}
     jd_files = state.get("jd_files") if state.get("link_jds") else None
@@ -492,6 +615,64 @@ def build_app(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
+def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
+    """M9 in-panel intake conversation (CLI: stdin or scripted JSON).
+
+    Extraction (or the skills JSON itself) feeds the phrase review; the
+    captured-JD set feeds validation triage (JD-aware — placement revision
+    2026-10-12). Every answer lands in the session profile immediately.
+    """
+    from .implied import detect_implied
+    from .ingest import jd_target_weights
+    from .intake import IntakeSession, drive
+    from .normalize import canonical_term
+    from .resume import extract_to_artifact, flatten_phrases
+    from .validate import Validator, triage_skills
+
+    if src_path.suffix.lower() == ".json":
+        data = json.loads(src_path.read_text(encoding="utf-8"))
+        source = "json"
+    else:
+        data, source = extract_to_artifact(
+            src_path,
+            artifact_path=session / "extracted_skills.json",
+            use_llm=not args.no_llm,
+            cfg=cfg,
+        )
+    print(f"Intake: skills from {source}")
+    phrases = flatten_phrases(data)
+    canonical = {canonical_term(p) for p in phrases}
+    canonical.discard("")
+    implied_list = [
+        {"skill": i.skill, "evidence": i.evidence}
+        for i in detect_implied(phrases, canonical, None)
+    ]
+    weights = jd_target_weights(args.jds) if Path(args.jds).is_dir() else {}
+    triaged = triage_skills(weights, sorted(canonical)) if weights else []
+    validator = (
+        None if args.no_llm else Validator(session / "questions.json", cfg=cfg)
+    )
+    sess = IntakeSession(
+        source_sha=session.name,
+        source_path=src_path,
+        phrases=phrases,
+        implied=implied_list,
+        triaged=triaged,
+        validator=validator,
+        use_llm=not args.no_llm,
+    )
+    if args.intake_json:
+        # utf-8-sig: tolerate a BOM (PowerShell's Set-Content -Encoding utf8
+        # writes one).
+        answers = json.loads(
+            Path(args.intake_json).read_text(encoding="utf-8-sig")
+        )
+        drive(sess, answers=answers)
+    else:
+        drive(sess, ask=input, echo=print)
+    print(f"Intake profile saved: {session / 'profile.json'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Skill-gap agent (LangGraph runner)")
     parser.add_argument(
@@ -521,6 +702,18 @@ def main() -> None:
         help="persist checkpoints to output/checkpoints.sqlite so an interrupted "
         "run can be resumed by re-running with --resume",
     )
+    parser.add_argument(
+        "--intake",
+        action="store_true",
+        help="M9: run the in-panel intake conversation on stdin before the graph "
+        "(phrase/implied review, depth/intent, validation)",
+    )
+    parser.add_argument(
+        "--intake-json",
+        default=None,
+        metavar="PATH",
+        help="M9: scripted intake — JSON {turn_id: answer} (+ optional _skip:true)",
+    )
     args = parser.parse_args()
 
     # M15 pre-flight (specs/05-ai-caller.md §Availability): LLM mode with no
@@ -541,19 +734,38 @@ def main() -> None:
         conn = sqlite3.connect(str(CHECKPOINT_PATH), check_same_thread=False)
         checkpointer = SqliteSaver(conn)
 
+    # M9 session store (specs/13-intake.md §Session store): every artifact of
+    # this run lives under the skills source's SHA-keyed session dir, and the
+    # retired global decision files are deleted (migration) and never
+    # recreated by any flow.
+    retire_legacy_files()
+    src_path = Path(args.skills)
+    session = session_dir(src_path, create=True)
+    cfg = LLMConfig(provider=args.provider)
+
+    if args.intake or args.intake_json:
+        _run_intake(args, src_path, session, cfg)
+
     config = {"configurable": {"thread_id": "cli"}}
 
     # M8 front-end: a resume file is converted to skills JSON BEFORE the
-    # graph starts (extraction needs no interrupt; M9 intake will reuse the
-    # same function as a tool). A .json input takes today's path unchanged.
+    # graph starts (extraction needs no interrupt; M9 intake reuses the same
+    # function — its phrase review applies the chat's answers). A .json input
+    # takes today's path unchanged.
     skills_path = args.skills
     if Path(skills_path).suffix.lower() != ".json":
+        profile = load_profile(src_path) or {}
         json_path, _stats = resume_to_skills_json(
             skills_path,
+            artifact_path=session / "extracted_skills.json",
             use_llm=not args.no_llm,
             auto=args.auto,
             ask_fn=None if args.auto else (lambda p: _ask_or_interrupt(p, checkpointer, config)),
-            cfg=LLMConfig(provider=args.provider),
+            cfg=cfg,
+            review_decisions=profile.get("phrases") or None,
+            review_on_save=lambda saved: _save_profile_key(
+                {"source_input": str(src_path)}, "phrases", saved
+            ),
         )
         skills_path = str(json_path)
 
@@ -566,6 +778,8 @@ def main() -> None:
         "top_n": args.top_n,
         "provider": args.provider,
         "use_llm": not args.no_llm,
+        "source_input": str(src_path),
+        "session_dir": str(session),
     }
     config = {"configurable": {"thread_id": "cli"}}
 

@@ -206,13 +206,20 @@ in-product claim that contradicts it — the copy is the contract.
    verbatim disclaimer covers this and stays unchanged); GitHub Search
    receives skill-gap terms derived from the analysis, never resume text;
    the developer receives nothing (no telemetry, no backend).
+   **M9 conversational intake (2026-10-12):** at Analyze gaps the panel
+   asks short profile questions (skill review, depth, calibration); your
+   **answers** are sent to the same AI provider for grading/analysis —
+   named here alongside the resume-derived text, never a new silent flow.
 3. The hosted privacy policy
    ([../docs/privacy-policy.md](../docs/privacy-policy.md), served from
    GitHub Pages) mirrors this destination list — it is the same register,
-   restated for the store audience. When M17 lands, LangSmith (opt-in
-   tracing) joins **both** lists — see
-   [14-observability.md](14-observability.md); do not add it before the
-   code exists. The store-submission register (permission justifications,
+   restated for the store audience. When M17 lands, LangSmith is
+   **developer-only tooling** — nothing in the product can activate it
+   (§Scope boundary in
+   [14-observability.md](14-observability.md)) — so it is **not** a panel
+   destination and needs no consent surface: the privacy policy gains one
+   completeness line and the store register notes the capability. Do not
+   add even that before the code exists. The store-submission register (permission justifications,
    dashboard declarations, listing copy) is the derived
    [../CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md) — same mirror rule.
 

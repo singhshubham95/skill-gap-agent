@@ -12,7 +12,12 @@ Stdlib-only HTTP server (no new dep — same rationale as M10's urllib):
                          synthesize -> oss -> output (409 if none paused)
                        no phase (M11): full one-shot run
   GET  /api/status  -> {status: idle|running|paused|done|error, ...} (poll target)
-  GET  /api/gaps    -> output/gaps.json (M13: ranked gaps for the side panel)
+  GET  /api/gaps    -> the run session's gaps.json (M13: ranked gaps for the
+                       side panel; M9: served from output/sessions/<sha>/)
+  GET  /api/intake/turn  -> M9 intake chat: the current question
+  POST /api/intake/answer -> M9 intake chat: answer ({turn_id,text} |
+                       {answers:{...}} | {skip:true}); completion continues
+                       the run automatically into the graph half
   GET  /plan.html   -> serve output/plan.html (render_plan_html, GFI links)
   GET  /api/jds     -> JSON list of data/jds/*.txt|.md (folder contents)
 
@@ -141,6 +146,7 @@ _run: dict = {
     "status": "idle",
     "stage": None,
     "phase": None,
+    "pause_phase": None,  # M9: "intake" (chat) | "gaps" (M13 preview) | None
     "started_at": None,
     "finished_at": None,
     "error": None,
@@ -156,9 +162,19 @@ _run: dict = {
 # must happen in this process — the app/config pair is kept here until then.
 _paused: dict = {"app": None, "config": None}
 
+# M9 intake chat (specs/13-intake.md §In-panel intake): the paused
+# conversation at Analyze gaps — its turn/answer endpoints read this state.
+# A completed conversation auto-continues into the graph half.
+_INTAKE: dict = {"sess": None, "options": None, "jds_path": None, "jd_files": None}
+
 # M14: the uploaded resume a run should use when the body carries no
 # explicit skills_path. Never chrome.storage — this is server-side state.
-_resume: dict = {"path": None, "filename": None, "count": None, "source": None}
+# M9: extraction runs at analyze, so the upload also stashes the M24
+# extraction mode/provider chosen at upload time.
+_resume: dict = {
+    "path": None, "filename": None, "count": None, "source": None,
+    "mode": None, "provider": None,
+}
 
 # M16 OAuth connect (specs/12-extension.md §M16 A): the one-time code
 # OpenRouter redirects back with, kept in memory keyed by the panel's
@@ -423,31 +439,81 @@ go back to the Skill-Gap Agent side panel.</p>
 </body></html>"""
 
 
-def _run_pipeline(options: dict) -> None:
-    """Background worker: same graph cli.py runs, forced --auto (no prompts).
+def _build_intake(source: Path, session: Path, jds_path: str, options: dict):
+    """M9 intake prep at Analyze gaps (placement revision 2026-10-12).
 
-    With phase == "gaps" the run gets two_phase state and pauses right after
-    ranking (interrupt() + in-memory checkpointer); the app/config pair stays
-    in _paused for _resume_pipeline. The SkillGraph lives in cli.py's
-    process-bound runtime registry, so both phases must run here.
+    Extraction runs here (rule-only at upload since M9), the phrase/implied
+    proposals and JD-aware triage feed the conversation, and an incomplete
+    profile pauses the run at the intake chat. Returns the IntakeSession to
+    pause on, or None when the profile is already complete (re-analysis asks
+    nothing — same-input sessions resume).
     """
-    from langgraph.checkpoint.memory import InMemorySaver
+    from . import sessions
+    from .implied import detect_implied
+    from .ingest import jd_target_weights
+    from .intake import IntakeSession
+    from .normalize import canonical_term
+    from .resume import extract_to_artifact, flatten_phrases
+    from .validate import Validator, triage_skills
 
-    from .cli import AgentState, build_app, pending_interrupt, set_stage_listener
+    profile = sessions.load_profile(source)
+    if profile and profile.get("completed"):
+        return None
 
-    # cli.py writes artifacts to repo-root-relative output/; run from the
-    # repo root so GET /api/gaps (REPO_ROOT/output) sees them regardless of
-    # where the server was started.
-    os.chdir(REPO_ROOT)
-    set_stage_listener(_set_stage)
-    _drop_paused()
-    top_n = int(options.get("top_n", 5))
-    phase = str(options.get("phase") or "full")
-    two_phase = phase == "gaps"
-    skills_path = _resolve_skills(options)
+    mode = (_resume.get("mode") or "paid").strip().lower()
     provider = _resolve_provider(options)
     use_llm = _resolve_use_llm(options)
     free_tier = bool(options.get("free_tier", False))
+    cfg = LLMConfig(provider=provider, free_tier=free_tier)
+
+    if source.suffix.lower() == ".json":
+        data = json.loads(source.read_text(encoding="utf-8"))
+    else:
+        data, _src = extract_to_artifact(
+            source,
+            artifact_path=session / "extracted_skills.json",
+            use_llm=(mode != "rule") and use_llm,
+            cfg=cfg,
+        )
+    phrases = flatten_phrases(data)
+    canonical = {canonical_term(p) for p in phrases}
+    canonical.discard("")
+    implied_list = [
+        {"skill": i.skill, "evidence": i.evidence}
+        for i in detect_implied(phrases, canonical, None)
+    ]
+    weights = jd_target_weights(Path(jds_path)) if Path(jds_path).is_dir() else {}
+    triaged = triage_skills(weights, sorted(canonical)) if weights else []
+    validator = None if not use_llm else Validator(session / "questions.json", cfg=cfg)
+    sess = IntakeSession(
+        source_sha=session.name,
+        source_path=source,
+        phrases=phrases,
+        implied=implied_list,
+        triaged=triaged,
+        validator=validator,
+        use_llm=use_llm,
+    )
+    first = sess.next_turn()
+    return None if first is None or first.kind == "complete" else sess
+
+
+def _run_pipeline(options: dict) -> None:
+    """Background worker (phase "gaps"/"full"): M9 intake first, then the graph.
+
+    Intake (specs/13-intake.md): extraction + chat pause at Analyze gaps;
+    the conversation's /api/intake/answer completion continues into
+    _run_graph_part automatically. With phase == "gaps" the graph run then
+    pauses after ranking (the M13 two-phase preview).
+    """
+    from .cli import set_stage_listener
+
+    os.chdir(REPO_ROOT)
+    set_stage_listener(_set_stage)
+    _drop_paused()
+    source = _resolve_skills(options)
+    provider = _resolve_provider(options)
+    use_llm = _resolve_use_llm(options)
     if use_llm:
         # Race-safe backstop for the POST-layer pre-flight (M15): never
         # start a run that would silently degrade the whole pipeline.
@@ -457,27 +523,14 @@ def _run_pipeline(options: dict) -> None:
             with _lock:
                 _run.update(status="error", finished_at=time.time(), error=str(e))
             return
-    if Path(skills_path).suffix.lower() != ".json":
-        # M8 resume front-end (same as cli.main()): resume -> skills JSON
-        # before the graph starts; the artifact is reused only for the same
-        # resume (SHA-256 sidecar), so the extraction cost is per-resume.
-        from .resume import resume_to_skills_json
 
-        try:
-            skills_path = str(
-                resume_to_skills_json(
-                    skills_path,
-                    use_llm=use_llm,
-                    auto=True,
-                    ask_fn=None,
-                    cfg=LLMConfig(provider=provider, free_tier=free_tier),
-                )[0]
-            )
-        except Exception as e:  # noqa: BLE001 — surfaced via /api/status
-            traceback.print_exc()
-            with _lock:
-                _run.update(status="error", finished_at=time.time(), error=str(e))
-            return
+    from . import sessions
+
+    session = sessions.session_dir(source, create=True)
+    sessions.retire_legacy_files(OUTPUT_DIR)  # M9 migration: retired globals
+    with _lock:
+        _run.update(session_dir=str(session))
+
     captured = options.get("jds") or []
     jds_path = str(JD_DIR)
     jd_files = (
@@ -488,6 +541,74 @@ def _run_pipeline(options: dict) -> None:
     if captured:
         jd_files = _write_captured_jds(captured)
         jds_path = str(CAPTURED_DIR)
+        _copy_captured_to_session(session)
+
+    try:
+        sess = _build_intake(source, session, jds_path, options)
+    except Exception as e:  # noqa: BLE001 — surfaced via /api/status
+        traceback.print_exc()
+        with _lock:
+            _run.update(status="error", finished_at=time.time(), error=str(e))
+        return
+    if sess is not None:
+        # Pause at the intake chat: the panel asks turns via /api/intake/*;
+        # the completing answer continues this run (see _intake_answer).
+        _INTAKE.update(
+            sess=sess, options=options, jds_path=jds_path, jd_files=jd_files
+        )
+        with _lock:
+            _run.update(
+                status="paused", stage="intake", pause_phase="intake",
+                finished_at=time.time(), error=None,
+            )
+        return
+    _run_graph_part(options, session, jds_path, jd_files)
+
+
+def _run_graph_part(
+    options: dict, session: Path, jds_path: str, jd_files: dict
+) -> None:
+    """The graph half of a run (after any intake chat): ingest -> ... -> output."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from .cli import AgentState, build_app, pending_interrupt, set_stage_listener
+
+    set_stage_listener(_set_stage)
+    top_n = int(options.get("top_n", 5))
+    phase = str(options.get("phase") or "full")
+    two_phase = phase == "gaps"
+    skills_path = _resolve_skills(options)
+    provider = _resolve_provider(options)
+    use_llm = _resolve_use_llm(options)
+    free_tier = bool(options.get("free_tier", False))
+    source_path = Path(skills_path)
+
+    if source_path.suffix.lower() != ".json":
+        # M8/M9 resume front-end: the extraction artifact lives in the
+        # session (M14 SHA sidecar — same resume reuses it), and the phrase
+        # review applies the intake chat's answers from the profile.
+        from . import sessions as _sessions
+        from .resume import resume_to_skills_json
+
+        profile = _sessions.load_profile(source_path) or {}
+        try:
+            skills_path = str(
+                resume_to_skills_json(
+                    source_path,
+                    artifact_path=session / "extracted_skills.json",
+                    use_llm=use_llm,
+                    auto=True,
+                    ask_fn=None,
+                    cfg=LLMConfig(provider=provider, free_tier=free_tier),
+                    review_decisions=profile.get("phrases") or None,
+                )[0]
+            )
+        except Exception as e:  # noqa: BLE001 — surfaced via /api/status
+            traceback.print_exc()
+            with _lock:
+                _run.update(status="error", finished_at=time.time(), error=str(e))
+            return
+
     state: AgentState = {
         "skills_path": skills_path,
         "jds_path": jds_path,
@@ -502,6 +623,8 @@ def _run_pipeline(options: dict) -> None:
         "provider": provider,
         "use_llm": use_llm,
         "free_tier": free_tier,
+        "source_input": str(source_path),
+        "session_dir": str(session),
     }
     checkpointer = None
     if two_phase:
@@ -514,7 +637,9 @@ def _run_pipeline(options: dict) -> None:
         if two_phase and pending_interrupt(app, config) is not None:
             _sync_run_state(app, config, "paused")
             with _lock:
-                _run.update(stage=None, finished_at=time.time(), error=None)
+                _run.update(
+                    stage=None, pause_phase="gaps", finished_at=time.time(), error=None
+                )
                 _paused["app"] = app
                 _paused["config"] = config
             return
@@ -527,7 +652,36 @@ def _run_pipeline(options: dict) -> None:
         set_stage_listener(None)
     _sync_run_state(app, config, "done")
     with _lock:
-        _run.update(stage=None, finished_at=time.time(), error=None)
+        _run.update(stage=None, pause_phase=None, finished_at=time.time(), error=None)
+
+
+def _copy_captured_to_session(session: Path) -> None:
+    """Audit copy of this run's captured JDs into the session store.
+
+    The shared output/captured_jds/ stays (plan.html JD-link resolution,
+    M13 fix); the session copy keeps the per-run record the M9 layout
+    promises (specs/13-intake.md §Session store).
+    """
+    dest = session / "captured_jds"
+    dest.mkdir(parents=True, exist_ok=True)
+    for p in CAPTURED_DIR.iterdir():
+        if p.is_file():
+            (dest / p.name).write_bytes(p.read_bytes())
+
+
+def _session_artifact(name: str) -> Path | None:
+    """Run artifact path: the run's session dir (M9), output/ fallback.
+
+    /api/gaps and /plan.html serve from the session the current run used.
+    Strict once a session is set: a missing file is missing — never fall
+    back to another run's stale artifact.
+    """
+    with _lock:
+        sess = _run.get("session_dir")
+    if sess:
+        return Path(sess) / name
+    legacy = OUTPUT_DIR / name
+    return legacy
 
 
 def _resume_pipeline(options: dict) -> None:
@@ -726,13 +880,15 @@ class Handler(BaseHTTPRequestHandler):
             pending = known and _oauth_pending_code(state) is not None
             self._json(200, {"pending": pending})
         elif path == "/api/gaps":
-            gaps = OUTPUT_DIR / "gaps.json"
-            if not gaps.exists():
+            gaps = _session_artifact("gaps.json")
+            if gaps is None or not gaps.exists():
                 self._json(404, {"error": "no gaps yet - run phase 'gaps' first"})
                 return
             self._send(200, gaps.read_bytes(), "application/json")
+        elif path == "/api/intake/turn":
+            self._handle_intake_turn()
         elif path == "/plan.html":
-            plan = OUTPUT_DIR / "plan.html"
+            plan = _session_artifact("plan.html")
             if not plan.exists():
                 self._send(
                     404,
@@ -790,6 +946,7 @@ class Handler(BaseHTTPRequestHandler):
         # even a hypothetical origin-gate bypass cannot smuggle a body in.
         json_endpoints = (
             "/api/run", "/api/key", "/api/oauth/exchange", "/api/oauth/state",
+            "/api/intake/answer",
         )
         if path == "/api/resume" or path in json_endpoints:
             expected = (
@@ -802,6 +959,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if path == "/api/resume":
             self._handle_resume(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/intake/answer":
+            self._handle_intake_answer(int(self.headers.get("Content-Length", 0) or 0))
             return
         if path == "/api/key":
             self._handle_key(int(self.headers.get("Content-Length", 0) or 0))
@@ -844,6 +1004,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if phase == "plan" and _paused["app"] is None:
                 self._json(409, {"error": "no paused run - run phase 'gaps' first"})
+                return
+            if phase != "plan" and _run.get("pause_phase") == "intake":
+                self._json(409, {
+                    "error": "intake conversation in progress - answer the "
+                    "chat first (/api/intake/*); it continues automatically",
+                })
                 return
         # M15 pre-flight (specs/05-ai-caller.md §Availability): LLM mode
         # with no stored key refuses before any work — never a silent
@@ -889,8 +1055,108 @@ class Handler(BaseHTTPRequestHandler):
         with _lock:
             self._json(202, dict(_run))
 
+    def _handle_intake_turn(self) -> None:
+        """M9: the current intake chat question (or completed)."""
+        sess = _INTAKE.get("sess")
+        if sess is None:
+            self._json(409, {"error": "no intake conversation in progress"})
+            return
+        turn = sess.next_turn()
+        if turn is None or turn.kind == "complete":
+            sess.mark_completed()
+            self._json(200, {"completed": True, "turn": None})
+            return
+        self._json(200, {
+            "completed": False,
+            "turn": {
+                "id": turn.id, "kind": turn.kind, "prompt": turn.prompt,
+                "payload": turn.payload,
+            },
+        })
+
+    def _handle_intake_answer(self, length: int) -> None:
+        """M9: answer one intake turn.
+
+        Body: {turn_id, text} | {answers: {turn_id: answer}} (scripted) |
+        {skip: true} ("use my resume as-is"). Every answer persists
+        immediately (panel-close safe). When the conversation completes, the
+        run continues automatically into the graph half (extract -> judge ->
+        rank -> gaps pause).
+        """
+        sess = _INTAKE.get("sess")
+        if sess is None:
+            self._json(409, {"error": "no intake conversation in progress"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise TypeError("body must be a JSON object")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return
+
+        from .intake import drive
+
+        try:
+            if body.get("skip"):
+                sess.skip()
+            elif isinstance(body.get("answers"), dict):
+                drive(sess, answers=body["answers"])
+            else:
+                turn = sess.next_turn()
+                if turn is None or turn.kind == "complete":
+                    sess.mark_completed()
+                else:
+                    turn_id = str(body.get("turn_id") or turn.id)
+                    if turn_id != turn.id:
+                        self._json(400, {
+                            "error": f"turn {turn_id!r} is not current ({turn.id})",
+                        })
+                        return
+                    result = sess.answer(turn.id, str(body.get("text") or ""))
+                    if not result["ok"]:
+                        self._json(400, {"error": result.get("error") or "bad answer"})
+                        return
+        except (KeyError, ValueError) as e:
+            self._json(400, {"error": str(e)})
+            return
+
+        completed = bool(sess.profile.get("completed"))
+        nxt = None if completed else sess.next_turn()
+        if nxt is not None and nxt.kind == "complete":
+            completed = True
+            sess.mark_completed()
+        if completed:
+            self._continue_after_intake()
+        self._json(200, {
+            "ok": True,
+            "completed": completed,
+            "turn": None if completed else {
+                "id": nxt.id, "kind": nxt.kind, "prompt": nxt.prompt,
+                "payload": nxt.payload,
+            },
+        })
+
+    def _continue_after_intake(self) -> None:
+        """Kick the graph half of the run once the intake chat completes."""
+        options = _INTAKE.get("options") or {}
+        jds_path = _INTAKE.get("jds_path") or str(JD_DIR)
+        jd_files = _INTAKE.get("jd_files") or {}
+        session = Path(_run.get("session_dir") or OUTPUT_DIR)
+        _INTAKE.update(sess=None, options=None)
+        with _lock:
+            _run.update(
+                status="running", stage="ingest", pause_phase=None, error=None,
+                started_at=time.time(),
+            )
+        threading.Thread(
+            target=_run_graph_part, args=(options, session, jds_path, jd_files),
+            daemon=True,
+        ).start()
+
     def _handle_resume(self, length: int) -> None:
-        """M14 resume upload: raw bytes in, extraction runs immediately."""
+        """M14 resume upload. M9 (placement revision 2026-10-12): rule-only —
+        save + readability check; extraction + intake chat run at Analyze."""
         # M21 (specs/12-extension.md §Data disclosure): the disclosure
         # consent gate is not UI-only — no client uploads without it.
         if self.headers.get("X-Disclosure-Ack") != "1":
@@ -901,7 +1167,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         # M24 (specs/12-extension.md §M24): the mode governs extraction —
         # rule = local regex (nothing leaves the machine), paid/free = LLM
-        # via the chosen provider. Defaults preserve the pre-M24 behavior.
+        # via the chosen provider. Extraction runs at Analyze (M9), so the
+        # mode is stashed here and applied there.
         mode = (self.headers.get("X-Extraction-Mode") or "paid").strip().lower()
         if mode not in ("paid", "free", "rule"):
             self._json(400, {"error": f"bad extraction mode: {mode!r}"})
@@ -941,43 +1208,29 @@ class Handler(BaseHTTPRequestHandler):
         if suffix == ".docx" and not data.startswith(b"PK\x03\x04"):
             self._json(415, {"error": "not a DOCX (missing zip header)"})
             return
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        target = UPLOAD_DIR / name
-        target.write_bytes(data)
-        from .resume import resume_to_skills_json
+        from .resume import save_upload
 
         try:
-            _json_path, stats = resume_to_skills_json(
-                target,
-                use_llm=(mode != "rule"),
-                auto=True,
-                ask_fn=None,
-                cfg=LLMConfig(provider=provider, free_tier=(mode == "free")),
-            )
-        except Exception as e:  # noqa: BLE001 — surfaced as 500
-            traceback.print_exc()
-            self._json(500, {"error": f"extraction failed: {e}"})
+            target = save_upload(data, name, UPLOAD_DIR)
+        except Exception as e:  # noqa: BLE001 — unreadable file (scanned PDF)
+            self._json(415, {"error": f"resume unreadable: {e}"})
             return
         with _lock:
             _resume.update(
                 path=str(target),
                 filename=target.name,
-                count=stats.get("phrases"),
-                source=stats.get("source"),
+                count=None,
+                source=None,
+                mode=mode,
+                provider=provider,
             )
-        resp = {
+        self._json(200, {
             "ok": True,
             "filename": target.name,
-            "skills": stats.get("phrases"),
-            "source": stats.get("source"),
-            "provenance": stats.get("provenance"),
+            "stored": True,
             "mode": mode,
-        }
-        if stats.get("provenance") == "Rule-based":
-            resp["warning"] = (
-                "Skills extracted without the LLM (regex scan, lower fidelity)."
-            )
-        self._json(200, resp)
+            "extract_at_analyze": True,
+        })
 
     def _handle_key(self, length: int) -> None:
         """M14 key entry: keyring ("remember") or session env. Never echoed."""
@@ -1101,6 +1354,9 @@ def main() -> None:
     if args.skills:
         global DEFAULT_SKILLS
         DEFAULT_SKILLS = Path(args.skills)
+    from . import sessions
+
+    sessions.retire_legacy_files(OUTPUT_DIR)  # M9 migration: retired globals
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"M11 UI: http://localhost:{args.port}/  (JD folder: {JD_DIR})")
     print("Bookmarklet: tools/linkedin_jd_bookmarklet.js -> save JDs into data/jds/")

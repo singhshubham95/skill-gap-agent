@@ -26,11 +26,30 @@ def _canonical_set(phrases: list[str]) -> set[str]:
     return out
 
 
+def _find_extracted() -> Path:
+    """Locate the extraction artifact (M9: per-session; legacy: output/)."""
+    from .sessions import session_dir
+
+    resume = Path("data/Shubham_Singh.pdf")
+    candidates = []
+    if resume.exists():
+        candidates.append(session_dir(resume) / "extracted_skills.json")
+    sess_root = Path("output/sessions")
+    if sess_root.exists():
+        candidates += sorted(sess_root.glob("*/extracted_skills.json"), reverse=True)
+    candidates.append(Path("output/extracted_skills.json"))
+    for p in candidates:
+        if p.exists():
+            return p
+    print("SKIP: no extraction artifact found yet (M9 keeps it per-session)")
+    print("      run the resume flow first (e.g. cli.py data/Shubham_Singh.pdf "
+          "data/jds --auto --no-judge), then re-run this analysis.")
+    raise SystemExit(0)
+
+
 def main() -> None:
     seed = json.loads(Path("data/skillsdataset.json").read_text(encoding="utf-8"))
-    extracted = json.loads(
-        Path("output/extracted_skills.json").read_text(encoding="utf-8")
-    )
+    extracted = json.loads(_find_extracted().read_text(encoding="utf-8"))
 
     seed_canon = _canonical_set(_flatten_phrases(seed))
     ext_canon = _canonical_set(_flatten_phrases(extracted))

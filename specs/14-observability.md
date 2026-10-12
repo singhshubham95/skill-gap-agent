@@ -13,6 +13,50 @@ first test/eval CI workflow.
 [10-flow-runner.md](10-flow-runner.md) (`--trace` flag) — this file is the
 design home.
 
+## Scope boundary — developer tooling only (🔒 locked 2026-10-12)
+
+**LangSmith is contributor tooling. An end user of the Chrome extension has
+no path — through the product — to LangSmith or to anything that sends
+their data there.** User decision 2026-10-12, recorded in
+[02-decisions.md](02-decisions.md); **do not revert without a superseding
+decision row**. Concrete exclusions:
+
+1. **Extension panel** — no tracing toggle, no key field, no permission;
+   LangSmith is not a "provider" option anywhere in the UI.
+2. **`tools/start-server.bat`** — never passes `--trace` (and `server.py`
+   offers no trace flag to pass).
+3. **`server.py`** — **never** calls `enable_tracing()` and never wraps its
+   LLM client; `server.py` is removed from the traceable-runners list (the
+   pipeline the extension triggers is untraced, full stop).
+4. **Environment scrub** — on startup `server.py` forces
+   `LANGSMITH_TRACING=false` in its own process and ignores
+   `LANGSMITH_API_KEY`. Belt-and-braces: LangSmith's SDK auto-instruments
+   LangGraph from these env vars alone, so a user who exports them for
+   *other* projects must not silently start shipping extension runs to
+   LangSmith.
+5. **`/api/key`** — refuses LangSmith as a provider (a LangSmith key is
+   settable only via CLI/env, by a contributor).
+
+Trace enablement exists only at developer entry points run from source:
+`cli.py --trace`, `sweep.py --trace`, `judge_eval.py --langsmith`. The
+`langsmith` import stays confined to `tracing.py` (the S2-style single
+owner rule).
+
+**Enforcement (mechanical, not prompt-based):** `m17_check.py` asserts the
+boundary offline — `server.py` contains no tracing enablement,
+`tools/start-server.bat` passes no trace flags, the env scrub exists, and
+`/api/key` rejects LangSmith — the same grep-level spirit as
+`path_guard.py`. **Tripwire:** if tracing is ever surfaced to end users,
+the full M21 machinery (panel disclosure copy, `disclosureConsent` version
+bump, store register) becomes mandatory *before* shipping. That tripwire
+is the point of this section.
+
+**Disclosure residue (build-time, one line):** the privacy policy gains
+exactly one line at M17 build — "optional developer tracing can send run
+data to LangSmith; off by default; requires the developer's own key" —
+for data-flow completeness. It is not a panel destination and needs no
+consent gate, because nothing in the product can activate it.
+
 ## Design
 
 **Purpose.** Two questions the repo cannot answer today. (1) *What happened
@@ -40,12 +84,13 @@ LLM calls are invisible until the client is wrapped (below).
 **Tracing is opt-in and off by default.** The project is local-first:
 resumes and JDs never leave the machine except to the LLM provider. With
 tracing on, prompts — which contain resume-derived skills and JD text — are
-also sent to LangSmith. So a run is traced **only** when the user asks:
-`--trace` on the runners (`cli.py`, `server.py`, `sweep.py`), or
-`LANGSMITH_TRACING=true` in the environment (LangSmith's own variable).
-Redaction for sensitive runs: LangSmith's `LANGSMITH_HIDE_INPUTS` /
-`LANGSMITH_HIDE_OUTPUTS` env vars keep the tree shape and timings but drop
-payloads.
+also sent to LangSmith. So a run is traced **only** when a contributor asks
+at a developer entry point: `--trace` on `cli.py` / `sweep.py`, or
+`LANGSMITH_TRACING=true` in the environment while running those (LangSmith's
+own variable). **Never `server.py`** — end users cannot enable tracing at
+all (§Scope boundary above). Redaction for sensitive runs: LangSmith's
+`LANGSMITH_HIDE_INPUTS` / `LANGSMITH_HIDE_OUTPUTS` env vars keep the tree
+shape and timings but drop payloads.
 
 **One module owns tracing: `tracing.py` (to be created in M17).** Same idea
 as `llm.py` owning LLM access — no other module imports `langsmith`.
@@ -154,7 +199,8 @@ Silently skipped when tracing is off.
 (Enterprise licence) or Langfuse (ops cost — fallback only, decision row);
 LLM-as-judge grading of `plan.md` (needs the golden set to calibrate it
 first — candidate for a later milestone); tracing the Chrome extension's
-JS (the pipeline it triggers in `server.py` *is* traced); online
+JS (and the pipeline `server.py` triggers is never traced at all —
+§Scope boundary); online
 production monitoring/alerts (single local user today).
 
 **Done criteria:** (1) `--trace` run of `cli.py` on seed data produces one
@@ -166,5 +212,8 @@ behaves exactly as before; missing key → warning, run completes. (2)
 experiment. (3) `m17_check.py` verifies offline (stubbed LLM, no network):
 tracing no-ops when off, `wrap_client` identity when disabled, golden-set
 schema valid, metric math on a fixture. (4) CI offline tier green on a PR.
-(5) `ruff check .` and `pytest` clean.
+(5) `ruff check .` and `pytest` clean. (6) `m17_check.py` asserts the
+§Scope boundary mechanically: `server.py` has no tracing-enablement path,
+`tools/start-server.bat` passes no trace flags, the `LANGSMITH_*` env scrub
+exists, and `/api/key` refuses LangSmith.
 

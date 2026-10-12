@@ -30,12 +30,16 @@ def ingest_skills_json(
     approvals_path: str | Path = Path("output/implied_skills.json"),
     auto_accept_implied: bool = False,
     ask_fn=None,
+    implied_decisions: dict[str, bool] | None = None,
+    implied_on_save=None,
 ) -> dict[str, int]:
     """Parse skills JSON -> canonical Skill nodes + HAS_SKILL edges.
 
     Dedup: two raw phrases mapping to the same canonical term collapse into
     one Skill node. After explicit skills, runs implied-skill detection and
     proposes each to the user (with evidence) unless auto_accept_implied.
+    M9: `implied_decisions` (session profile) applies the intake chat's
+    answers silently — no prompts, no approval-file writes.
     Returns {"raw": n_raw, "canonical": n_canonical, "implied": n_implied}.
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -73,6 +77,8 @@ def ingest_skills_json(
         approvals_path=approvals_path,
         auto_accept=auto_accept_implied,
         ask_fn=ask_fn,
+        decisions=implied_decisions,
+        on_save=implied_on_save,
     )
     for skill in sorted(accepted):
         if not sg.g.has_node(f"skill:{skill}"):
@@ -157,6 +163,25 @@ JD_SKILL_LEXICON: dict[str, list[str]] = {
 }
 
 
+def jd_target_weights(jd_dir: str | Path) -> dict[str, int]:
+    """Rule-based JD scan (no graph): {target skill: number of JDs}.
+
+    Same lexicon as ingest_jds. M9: the intake chat's validation triage
+    needs the captured-JD context (top-weight targets) before the graph is
+    built (specs/13-intake.md §Triage is JD-aware).
+    """
+    weights: dict[str, int] = {}
+    jd_dir = Path(jd_dir)
+    for f in sorted(jd_dir.iterdir()):
+        if f.suffix.lower() not in (".txt", ".md"):
+            continue
+        low = f.read_text(encoding="utf-8", errors="replace").lower()
+        for canon, patterns in JD_SKILL_LEXICON.items():
+            if any(re.search(p, low) for p in patterns):
+                weights[canon] = weights.get(canon, 0) + 1
+    return weights
+
+
 def ingest_jds(sg: SkillGraph, jd_dir: str | Path) -> dict[str, int]:
     """Parse JD texts -> JD nodes, target Skill nodes, REQUIRES edges.
 
@@ -187,6 +212,8 @@ def build_seed_graph(
     taxonomy=None,
     auto_accept_implied: bool = False,
     ask_fn=None,
+    implied_decisions: dict[str, bool] | None = None,
+    implied_on_save=None,
 ) -> tuple[SkillGraph, dict]:
     """Full milestone-2 build: ingest skills + JDs into one graph."""
     sg = SkillGraph()
@@ -198,6 +225,8 @@ def build_seed_graph(
             taxonomy=taxonomy,
             auto_accept_implied=auto_accept_implied,
             ask_fn=ask_fn,
+            implied_decisions=implied_decisions,
+            implied_on_save=implied_on_save,
         )
     )
     jd_stats = ingest_jds(sg, jd_dir)
