@@ -12,6 +12,26 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M26: Local debug mode for extension testing — `server.py --debug
+  [--debug-payloads]` (also `start-server.bat --debug`) adds local-only
+  stage logs (request → run → all 8 LangGraph nodes → LLM call summaries)
+  correlated by the run's `thread_id` (in `/api/status`); prompt/response
+  bodies (resume/JD PII) behind `--debug-payloads`; normal output
+  byte-stable (spec: [14-observability.md](../specs/14-observability.md)
+  §Local debug mode)
+- T-M9-fix-intake: Item-level intake freshness — a `completed` profile no
+  longer silently skips the chat (it hid new items after an extraction
+  change, and a scripted validation run had polluted the real session);
+  re-opened chats derive completion from the turn machine (never the stale
+  flag); "use as-is" is sticky + terminal; extraction class unified across
+  chat/graph halves (M24 rule-mode respected); skipped chats surface
+  `intake_note`; `SKILL_GAP_SESSIONS_DIR` isolates validation runs
+  (spec: [13-intake.md](../specs/13-intake.md) §Freshness)
+- T-M25: Fix gate-profiling crash on equal-confidence ties — `max()` over
+  `(confidence, edge_dict)` tuples compared dicts on ties (TypeError right
+  after judging; found by the M24 live pass 2026-10-12); compares plain
+  floats now, red→green regression in `m7_check` (spec:
+  [03-milestones.md](../specs/03-milestones.md) M24 learning (c))
 - T-M9-impl: Conversational intake + skill validation (C3) built —
   in-panel intake chat at Analyze gaps, SHA-keyed session store
   (`output/sessions/<sha>/profile.json`), depth-aware judge with

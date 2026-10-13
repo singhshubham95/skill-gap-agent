@@ -1,6 +1,6 @@
 # Lock board (generated view — source of truth is board/locks/)
 
-Updated: 2026-10-12 10:46:33
+Updated: 2026-10-14 00:33:08
 
 | Task | Path | Agent | Age | Stale |
 |---|---|---|---|---|

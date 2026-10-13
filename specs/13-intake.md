@@ -72,6 +72,28 @@ phrases auto-accepted, implied auto-accepted, depth unknown (gate-shrink
 default applies). The chat never re-asks a persisted answer; a same-resume
 re-upload resumes the session and only new questions are asked.
 
+**Freshness is item-level, never run-level** (amended 2026-10-12, after the
+first live extension run — learnings in roadmap M9): a `completed` profile
+short-circuits the chat **only when the current run has nothing new to
+ask**. A changed extraction (e.g. a regex fallback later upgraded to LLM),
+newly captured JDs (new triage candidates), or any unanswered item
+re-opens the conversation for exactly those items. The blanket
+"completed → skip the chat" rule silently hid new questions — it is gone;
+completion is derived from the profile's items, never trusted as a
+run-level gate. The skip ("use as-is") choice is **sticky**: a skipped
+session is never asked anything again; new extraction items are
+auto-accepted under the same skip (depth stays unknown → gate-shrink
+default). Whenever the chat is skipped, `/api/status` carries
+`intake_note` (the reason) and the panel shows it — a silently skipped
+conversation is never acceptable.
+
+**Validation runs are isolated from real sessions** (operational rule,
+same date): scripted/interactive validation runs must point the session
+store at a scratch directory via the `SKILL_GAP_SESSIONS_DIR` env
+override (default stays `output/sessions`). A validation run sharing the
+real store can complete a real user's profile with scripted answers — the
+exact incident this rule prevents (roadmap M9 learnings).
+
 The existing capture paths are reused, not rewritten: the bookmarklet /
 extension capture JDs ([12-extension.md](12-extension.md)), and
 `resume_to_skills_json()` does resume extraction
@@ -211,7 +233,9 @@ output/sessions/<sha256>/
 - [12-extension.md](12-extension.md): the run contract gained the intake
   pause (analyze pauses at intake, then at gaps); `POST /api/resume` is
   rule-only (M14's immediate extraction moved to analyze); the panel (M18
-  surface) gained the chat region (`#intake`, `/api/intake/*`).
+  surface) gained the chat region (`#intake`, `/api/intake/*`); the status
+  payload gained `intake_note` (why the chat was skipped, when it is) and
+  the panel shows it.
 - [05-ai-caller.md](05-ai-caller.md): touchpoint list + provenance
   vocabulary gained question authoring / grading; rule-based degradation
   maps to the self-report tier.

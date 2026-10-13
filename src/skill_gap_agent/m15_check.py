@@ -228,12 +228,12 @@ def _run_body(tmp: Path, use_llm: bool, **extra) -> dict:
         skills.write_text(json.dumps(payload), encoding="utf-8")
         # M9: these runs exercise LLM-presence policy, not the intake chat —
         # pre-complete the session profile so runs flow straight through.
-        from .sessions import save_profile
+        from .sessions import save_profile, source_sha
 
         save_profile(skills, {
-            "version": 1, "source_sha256": "", "phrases": {}, "implied": {},
-            "depth": {}, "intent": {}, "proficiency": {}, "progress": {},
-            "completed": True, "skipped": True, "updated_at": "",
+            "version": 1, "source_sha256": source_sha(skills), "phrases": {},
+            "implied": {}, "depth": {}, "intent": {}, "proficiency": {},
+            "progress": {}, "completed": True, "skipped": True, "updated_at": "",
         })
     body = {
         "phase": "gaps",

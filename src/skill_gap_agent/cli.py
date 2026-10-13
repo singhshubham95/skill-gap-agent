@@ -38,6 +38,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from . import debuglog
 from .gate import DEFAULT_THRESHOLD, gate_summary, review_targets
 from .graph import SkillGraph
 from .ingest import build_seed_graph
@@ -147,9 +148,14 @@ def _profile_gate_overrides(sg: SkillGraph, profile: dict) -> dict[str, dict]:
     out: dict[str, dict] = {}
     intents = profile.get("intent") or {}
     for target in sorted(sg.target_skills()):
+        # Confidence only (fix 2026-10-12): comparing (confidence,
+        # edge-dict) tuples crashed on equal-confidence ties — tuple
+        # comparison fell through to the dicts (TypeError: '>' not
+        # supported between instances of 'dict' and 'dict'). The dict was
+        # never read afterwards; ties yield the same confidence anyway.
         top = max(
             (
-                (float(d.get("confidence", 0.0)), d)
+                float(d.get("confidence", 0.0))
                 for _, _, d in sg.g.in_edges(f"skill:{target}", data=True)
                 if d.get("type") == "TRANSFERS_TO"
             ),
@@ -163,7 +169,7 @@ def _profile_gate_overrides(sg: SkillGraph, profile: dict) -> dict[str, dict]:
                     break
         intent = intents.get(target) or intents.get(_top_source(sg, target) or "")
         if depth or intent:
-            conf = top[0] if top else 0.0
+            conf = top if top is not None else 0.0
             note = f"depth={depth} (reflected in score)" if depth else ""
             out[target] = {
                 "final_confidence": conf,
@@ -246,6 +252,7 @@ def _ask_or_interrupt(prompt: str, checkpointer, config: dict) -> str:
 # --- nodes -----------------------------------------------------------------
 
 
+@debuglog.stage("ingest")
 def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
     _stage("ingest")
     taxonomy = load_taxonomy()
@@ -324,6 +331,7 @@ def _save_merged_judge_report(results: list, out_dir: Path) -> None:
     path.write_text(json.dumps(list(merged.values()), indent=2), encoding="utf-8")
 
 
+@debuglog.stage("judge")
 def node_judge(state: AgentState, config: RunnableConfig) -> dict:
     _stage("judge")
     sg: SkillGraph = _runtime(config)["sg"]
@@ -429,16 +437,20 @@ def _top_confidence(sg: SkillGraph, target: str) -> float | None:
     return max(confs) if confs else None
 
 
+@debuglog.stage("gate")
 def node_gate(state: AgentState, config: RunnableConfig) -> dict:
     _stage("gate")
     sg: SkillGraph = _runtime(config)["sg"]
     profile = _profile(state)
+    overrides = _profile_gate_overrides(sg, profile)
+    # M26 human-in-loop event: how many persisted gate overrides apply.
+    debuglog.dbg("gate", f"overrides={len(overrides)}")
     decisions = review_targets(
         sg,
         threshold=DEFAULT_THRESHOLD,
         auto=state["auto"],
         ask_fn=ask_via_interrupt,
-        overrides=_profile_gate_overrides(sg, profile),
+        overrides=overrides,
         on_save=lambda saved: _save_profile_key(state, "gate", saved),
     )
     print(gate_summary(decisions))
@@ -455,6 +467,7 @@ def _write_gaps_json(gaps: list, out_dir: Path) -> Path:
     return p
 
 
+@debuglog.stage("rank")
 def node_rank(state: AgentState, config: RunnableConfig) -> dict:
     _stage("rank")
     unjudged = {
@@ -470,6 +483,7 @@ def node_rank(state: AgentState, config: RunnableConfig) -> dict:
     return {"gaps": gaps}
 
 
+@debuglog.stage("pause")
 def node_pause(state: AgentState, config: RunnableConfig) -> dict:
     """M13 two-phase pause: hold the run after ranking until phase 2.
 
@@ -511,6 +525,7 @@ def after_synthesize(state: AgentState) -> str:
     return "output" if state.get("skip_oss") else "oss"
 
 
+@debuglog.stage("synthesize")
 def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     _stage("synthesize")
     if not state.get("use_llm", True):
@@ -531,6 +546,7 @@ def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     return out
 
 
+@debuglog.stage("oss")
 def node_oss(state: AgentState, config: RunnableConfig) -> dict:
     """M10 node: good-first-issue sourcing for the top actionable gaps."""
     _stage("oss")
@@ -551,6 +567,7 @@ def node_oss(state: AgentState, config: RunnableConfig) -> dict:
     return {"oss_by_gap": oss_by_gap, "degraded_reasons": degraded}
 
 
+@debuglog.stage("output")
 def node_output(state: AgentState, config: RunnableConfig) -> dict:
     _stage("output")
     sg: SkillGraph = _runtime(config)["sg"]
@@ -661,6 +678,12 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
         validator=validator,
         use_llm=not args.no_llm,
     )
+    # Item-level freshness (specs/13-intake.md §Freshness): the chat asks
+    # only what the profile hasn't answered — say so when there is nothing
+    # new instead of going quiet.
+    first = sess.next_turn()
+    if first is None or first.kind == "complete":
+        print("Intake: nothing new to ask - profile complete for this session.")
     if args.intake_json:
         # utf-8-sig: tolerate a BOM (PowerShell's Set-Content -Encoding utf8
         # writes one).

@@ -4,8 +4,8 @@ Step order and display. Owns no domain logic — calls S1→S6.
 
 **Status: Built** (M7 graph + M8 resume front-end + M11 local UI + M9
 intake); M12 sweep harness and M13 extension shell are separate components
-([11-sweep.md](11-sweep.md), [12-extension.md](12-extension.md)); M17
-`--trace` flag
+([11-sweep.md](11-sweep.md), [12-extension.md](12-extension.md)); M26
+`--debug` stage logs ✅ Built 2026-10-13; M17 `--trace` flag
 ([14-observability.md](14-observability.md)) Designed.
 
 ## Runners
@@ -42,11 +42,18 @@ intake); M12 sweep harness and M13 extension shell are separate components
   completion auto-continues to the gaps pause. `POST /api/resume` is
   rule-only (M14's immediate extraction moved to analyze). Design:
   [13-intake.md](13-intake.md).
-- M17 (🎯 Designed): `--trace` on `cli.py` / `server.py` / `sweep.py` calls
-  `tracing.enable_tracing()` before the graph is built and merges
-  `tracing.run_config()` (run name, tags, model metadata) into the
-  `thread_id` config. Off by default. Design:
+- M17 (🎯 Designed): `--trace` on `cli.py` / `sweep.py` (never
+  `server.py` — [14-observability.md](14-observability.md) §Scope
+  boundary) calls `tracing.enable_tracing()` before the graph is built
+  and merges `tracing.run_config()` (run name, tags, model metadata) into
+  the `thread_id` config. Off by default. Design:
   [14-observability.md](14-observability.md).
+- M26 (✅ Built 2026-10-13): `--debug` / `--debug-payloads` on `server.py`
+  (also reachable as `tools/start-server.bat --debug`) turn on local-only
+  stage logs — request → run → per-node enter/exit → LLM call summaries —
+  correlated by the run's `thread_id` (surfaced in `/api/status`). Never
+  network. Design: [14-observability.md](14-observability.md) §Local
+  debug mode.
 - M10 node: `oss` runs after synthesis on the same top-n actionable gaps
   (cache-first; zero API calls on re-runs); `output` also emits
   `plan.html` (thin slice).

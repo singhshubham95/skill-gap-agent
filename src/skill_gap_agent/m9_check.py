@@ -18,6 +18,10 @@ Checks (specs/13-intake.md done criteria):
    upload (rule-only) -> Analyze pauses at intake -> scripted chat via
    /api/intake/* -> auto-continue -> gaps pause -> plan; JD-aware triage
    targets the highest-weight JD skills.
+5. Freshness is item-level (specs/13-intake.md §Freshness): an extraction
+   upgrade re-opens the chat for exactly the new items; nothing new -> no
+   chat and /api/status says why; the skip ("use as-is") choice is sticky
+   (new items auto-accepted, never re-asked, skip surfaced).
 
 Run: python -m skill_gap_agent.m9_check
 """
@@ -25,6 +29,7 @@ Run: python -m skill_gap_agent.m9_check
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -140,9 +145,20 @@ def check_sessions() -> None:
             removed = retire_legacy_files(out)
             assert sorted(removed) == sorted(LEGACY_FILES), removed
             assert not any((out / n).exists() for n in LEGACY_FILES)
+
+            # Validation isolation (specs/13-intake.md §Freshness): the env
+            # override points the store at scratch; without it the real
+            # store is used (module default, patchable by checks).
+            scratch = root / "scratch-store"
+            os.environ["SKILL_GAP_SESSIONS_DIR"] = str(scratch)
+            try:
+                assert session_dir(a1) == scratch / source_sha(a1)
+            finally:
+                os.environ.pop("SKILL_GAP_SESSIONS_DIR", None)
+            assert session_dir(a1) == sessions_mod.SESSIONS_ROOT / source_sha(a1)
         finally:
             sessions_mod.SESSIONS_ROOT = real_root
-    print("sessions OK: sha-keying, same-input resume, migration deletes retired globals")
+    print("sessions OK: sha-keying, same-input resume, migration deletes retired globals, env isolation")
 
 
 def check_intake_chat() -> None:
@@ -379,7 +395,40 @@ def _wait_status(base: str, want: str, phase: str | None = None, timeout: float 
         if status.get("status") == "error":
             raise AssertionError(f"run errored: {status.get('error')}")
         time.sleep(0.2)
-    raise AssertionError(f"status never reached {want!r}/{phase!r}")
+    raise AssertionError(
+        f"status never reached {want!r}/{phase!r} (last seen: {status})"
+    )
+
+
+def _answer_intake_all(base: str) -> list[str]:
+    """Drive the intake chat to completion with generic answers."""
+    code, turn_body = _get_json(base, "/api/intake/turn")
+    assert code == 200 and turn_body.get("turn"), (code, turn_body)
+    turns_seen: list[str] = []
+    while True:
+        turn = turn_body.get("turn")
+        if not turn:
+            break
+        turns_seen.append(turn["kind"])
+        if turn["kind"] == "phrases":
+            text = "all"
+        elif turn["kind"] == "implied":
+            text = "y"
+        elif turn["kind"] == "depth":
+            text = "3"
+        elif turn["kind"] == "checklist":
+            text = "y,y"
+        elif turn["kind"] == "applied":
+            text = "I applied it with window functions on keys."
+        else:  # pragma: no cover — unknown turn kinds must fail loudly
+            raise AssertionError(f"unexpected turn kind {turn['kind']!r}")
+        code, turn_body = _post(
+            base, "/api/intake/answer", {"turn_id": turn["id"], "text": text}
+        )
+        assert code == 200, (code, turn_body)
+        if turn_body.get("completed"):
+            break
+    return turns_seen
 
 
 def check_end_to_end() -> None:
@@ -588,6 +637,108 @@ def check_end_to_end() -> None:
             (server.OUTPUT_DIR / n).exists()
             for n in LEGACY_FILES
         ), [n for n in LEGACY_FILES if (server.OUTPUT_DIR / n).exists()]
+
+        # 8. Item-level freshness (specs/13-intake.md §Freshness): an
+        #    extraction upgrade re-opens the chat for exactly the new
+        #    phrases — the blanket "completed -> skip" rule that hid 33 new
+        #    phrases in the first live run is gone.
+        session = session_dir(resume)
+        art_path = session / "extracted_skills.json"
+        art = json.loads(art_path.read_text(encoding="utf-8"))
+        old_phrases = resume_mod.flatten_phrases(art)
+        new_phrases = ["Kubernetes orchestration", "Terraform IaC"]
+        resume_mod.save_extracted(
+            {"skills": {"skills": old_phrases + new_phrases}},
+            art_path,
+            source_sha=source_sha(resume),
+            source=resume_mod.extracted_provenance(art_path) or "regex",
+            mode=resume_mod.extracted_mode(art_path),
+        )
+        code, body = _post(
+            base,
+            "/api/run",
+            {"phase": "gaps", "jds": JD_FIXTURES, "top_n": 2, "use_llm": True},
+        )
+        assert code == 202, (code, body)
+        _wait_status(base, "paused", phase="intake")
+        code, turn_body = _get_json(base, "/api/intake/turn")
+        assert code == 200 and turn_body.get("turn"), (code, turn_body)
+        turn = turn_body["turn"]
+        assert turn["kind"] == "phrases", turn
+        asked = set(turn["payload"].get("phrases") or [])
+        assert asked == set(new_phrases), asked  # only the new items
+        turns_seen = _answer_intake_all(base)
+        assert "phrases" in turns_seen, turns_seen
+        _wait_status(base, "paused", phase="gaps")
+        profile = load_profile(resume) or {}
+        assert profile.get("completed"), profile
+        for p in new_phrases:
+            assert profile.get("phrases", {}).get(p) is True, p
+
+        # 9. Nothing new -> no chat, and the skip is surfaced (never silent).
+        code, body = _post(
+            base,
+            "/api/run",
+            {"phase": "gaps", "jds": JD_FIXTURES, "top_n": 2, "use_llm": True},
+        )
+        assert code == 202, (code, body)
+        status = _wait_status(base, "paused", phase="gaps")
+        assert "already complete" in (status.get("intake_note") or ""), status
+
+        # 10. The skip ("use as-is") choice is sticky: a later extraction
+        #     upgrade never re-asks — new items are auto-accepted and the
+        #     skip is surfaced with the reason.
+        resume2 = tmp / "resume2.txt"
+        resume2.write_text("Python and SQL and pipeline work", encoding="utf-8")
+        shutil.rmtree(session_dir(resume2), ignore_errors=True)  # hermetic
+        req = urllib.request.Request(
+            base + "/api/resume",
+            data=resume2.read_bytes(),
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Filename": "resume2.txt",
+                "X-Disclosure-Ack": "1",
+                "X-Extraction-Mode": "rule",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+        assert body.get("stored") is True, body
+        code, body = _post(
+            base,
+            "/api/run",
+            {"phase": "gaps", "jds": JD_FIXTURES, "top_n": 2, "use_llm": True},
+        )
+        assert code == 202, (code, body)
+        _wait_status(base, "paused", phase="intake")
+        code, body = _post(base, "/api/intake/answer", {"skip": True})
+        assert code == 200, (code, body)
+        _wait_status(base, "paused", phase="gaps")
+        session2 = session_dir(resume2)
+        art2_path = session2 / "extracted_skills.json"
+        art2 = json.loads(art2_path.read_text(encoding="utf-8"))
+        added = ["Snowflake warehousing", "dbt modeling"]
+        resume_mod.save_extracted(
+            {"skills": {"skills": resume_mod.flatten_phrases(art2) + added}},
+            art2_path,
+            source_sha=source_sha(resume2),
+            source=resume_mod.extracted_provenance(art2_path) or "regex",
+            mode=resume_mod.extracted_mode(art2_path),
+        )
+        code, body = _post(
+            base,
+            "/api/run",
+            {"phase": "gaps", "jds": JD_FIXTURES, "top_n": 2, "use_llm": True},
+        )
+        assert code == 202, (code, body)
+        status = _wait_status(base, "paused", phase="gaps")
+        assert "use as-is" in (status.get("intake_note") or ""), status
+        prof2 = load_profile(resume2) or {}
+        for p in added:
+            assert prof2.get("phrases", {}).get(p) is True, (p, prof2.get("phrases"))
+        assert prof2.get("completed") is True, prof2
+        shutil.rmtree(session2, ignore_errors=True)
     finally:
         (cli_mod.judge_all_unmatched, cli_mod.synthesize_for_gaps,
          cli_mod.source_oss_for_gaps, judge_mod.judge, synthesis_mod.judge,
@@ -617,7 +768,9 @@ def check_panel_surface() -> None:
     )
     assert "skip" in js.lower(), "panel must offer the skip path"
     assert "pause_phase" in js or "intake" in js, "panel must distinguish the pause"
-    print("panel surface OK: chat region + intake endpoints + skip path wired")
+    assert 'id="intakenote"' in html, "the skipped-chat note element is missing"
+    assert "intake_note" in js, "panel must surface why the chat was skipped"
+    print("panel surface OK: chat region + intake endpoints + skip path + skip note wired")
 
 
 def main() -> None:

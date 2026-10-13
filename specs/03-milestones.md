@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M24; M9 built 2026-10-12)
+## Milestones (linear and global — M1…M26; M9 built 2026-10-12)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -133,7 +133,10 @@ pipeline stage. M22 is store packaging (privacy policy, submission
 register, icons) — likewise not a pipeline stage. M23 is the LinkedIn
 capture posture (assist-not-act) — likewise not a pipeline stage. M24 is
 extraction-contract + setup ordering (mode governs ingestion) — likewise
-not a pipeline stage.
+not a pipeline stage. M25 was a hotfix task (T-M25) recorded inside M24's
+learning (c), not a milestone entry; M26 is local debug logging
+(developer console tooling for extension testing) — likewise not a
+pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -259,6 +262,41 @@ not a pipeline stage.
    JD-relevant unvalidated skills (follow-up option in 13-intake), sweep
    adoption of the conversation (user-deferred), m17 golden-set
    depth-profile fixtures.
+   **Post-build fix (2026-10-12, same day — first live extension run):**
+   the user's real run (paid mode, OpenRouter) generated everything with no
+   conversation. Three real bugs, all found via the server log + session
+   artifacts and fixed with spec amendment (design home: 13-intake.md
+   §Freshness; decision row M9-fix):
+   1. *Blanket skip*: `_build_intake` returned early whenever the session
+      profile read `completed` — silently hiding 33 new phrases after the
+      extraction artifact had been upgraded (47 → 80 phrases). Fixed as
+      item-level freshness: `completed` skips only when nothing is new;
+      changed extraction / new JDs re-open the chat for exactly the new
+      items.
+   2. *Stale completion gate*: the answer handler trusted the profile's
+      `completed` cache instead of the turn machine, so a re-opened chat
+      ended after one answer. Completion is now derived from the turn
+      machine (`completed` is a cache, never a gate); "use as-is" is
+      terminal at the machine level (depth deliberately unknown).
+   3. *Class mismatch in extraction*: the graph half extracted with
+      `use_llm` from the run body while the chat half honored the M24
+      ingestion mode — with mode "rule" + LLM analysis the resume could
+      leave the machine and the artifact flip-flopped between cache
+      classes. Both halves now use `(mode != "rule") and use_llm`.
+   Also: the live session revealed **test pollution** — the earlier scripted
+   validation run had shared the real session store (same resume SHA) and
+   completed the user's profile with fake answers (depth 3 everywhere,
+   `method: "self-report"`). Mitigation is operational and structural:
+   `SKILL_GAP_SESSIONS_DIR` env override isolates validation stores
+   (documented rule in 13-intake.md §Freshness), and a skipped chat is now
+   always surfaced (`intake_note` in `/api/status` + panel) — never silent.
+   Remediation for the polluted real session: delete
+   `output/sessions/<sha>/profile.json` (or any affected session dir) once;
+   the next Analyze re-asks with the real provider. Verified after the fix:
+   `m9_check` FULL PASS (8-turn e2e + 3 new freshness scenarios),
+   `ruff` clean, `pytest` 52 passed, full check sweep green (m13/m15
+   fixtures updated to write valid `source_sha256` profiles — the
+   anti-cross-profile rule correctly discarded their empty-SHA ones).
 10. **OSS issue sourcing (GFI thin slice).** ✅ Built 2026-09-28
     (mechanics in S6 `09-practice-planner.md`). New `oss.py`
     consumed from `rank_gaps()` `Gap` objects: 2-attempt search loop
@@ -890,7 +928,83 @@ not a pipeline stage.
         artifact" step and m24's own fallback scenario both needed the
         artifact *removed* or the request *mode-switched* before the
         intended path could even trigger — when a harness can't reach its
-        assertion's premise, the premise is what's wrong.
+        assertion's premise, the premise is what's wrong. (c) **Live pass
+      2026-10-12 found a latent gate crash (fixed same day, T-M25):**
+      `_profile_gate_overrides` compared `(confidence, edge_dict)` tuples
+      with `max()` — on equal-confidence ties Python falls through to the
+      second element and died with `TypeError: '>' not supported between
+      instances of 'dict' and 'dict'` right after judging. It hid from
+      every harness because stub edges carried *identical* dicts and
+      tuple comparison skips `==`-equal elements — only real judge data
+      (distinct rationales) trips it. Fix compares plain floats (the dict
+      was never read afterwards); regression `check_profile_ties()` in
+      `m7_check` (red→green verified against the pre-fix code). All
+      other `max`/`sort` sites audited: `judge.py`/`oss.py`/
+      `synthesis.py` sort tuples of scalars, `ranking.py` and
+      `cli._top_edge_data` use keys — none tie-unsafe.
+
+26. **Local debug mode — stage logs for extension testing.** ✅ Built
+    2026-10-13 (design home: [14-observability.md](14-observability.md)
+    §Local debug mode). Developer console tooling around the built
+    pipeline, not a new stage (M25 was consumed by the T-M25 hotfix
+    recorded in M24's learning (c), so numbering continues at 26).
+    `server.py --debug [--debug-payloads]` — reachable as
+    `tools/start-server.bat --debug` through the launcher's argument
+    passthrough — turns on structured logs at every stage boundary of the
+    server and the LangGraph run it drives: request → run → node
+    enter/exit → LLM call summaries, correlated by the run's `thread_id`
+    (also surfaced in `/api/status`). **Local console only, never
+    network** — M17's §Scope boundary holds unchanged. Origin: user
+    request 2026-10-13 — extension testing has no server-side visibility
+    today (only `[m11]` request lines and a few startup prints). Decision
+    rows in [02-decisions.md](02-decisions.md) (M26). Slices:
+    - **26a — Logging core.** New `debuglog.py` (sole owner of logging
+      setup): line format `<level> <time> [run-id] <message>`, level
+      gating, no-op path when off; normal-mode output byte-stable.
+    - **26b — Stage hooks.** Node enter/exit + counts where `cli.py`
+      wires the graph; one call-summary hook at the `llm.py` door
+      (provider, model, ms, tokens, retries); request/run lifecycle +
+      `run-id` in `/api/status` in `server.py`; gate/intake events;
+      tracebacks fold in; `--debug-payloads` gates prompt/response
+      bodies (resume/JD PII).
+    - **26c — Checks + docs.** `m26_check.py` offline (stubbed LLM, no
+      network): silent by default, node coverage, `run-id` correlation,
+      payload gating, `debuglog.py` never imports network/`langsmith`;
+      `test_m26.py` wrapper; one Debug-mode how-to line in
+      `extension/README.md`.
+    - **Done criteria:** see
+      [14-observability.md](14-observability.md) §Local debug mode.
+    - **Explicit non-goals:** network export (locked — §Scope boundary),
+      extension JS logging (Chrome DevTools covers it), log files on disk
+      (payload PII; restore trigger in the design section), log rotation
+      or extra levels, `--debug` on `cli.py`/`sweep.py` (trivial
+      follow-up, no design change needed).
+    - **Verification record (2026-10-13):** `python scripts/verify.py
+      --task T-M26` ALL CHECKS PASS — `ruff check .`, `pytest` (59),
+      `m26_check` (off-by-default, line format + run-id, payload gating,
+      stage decorator, node hooks, llm summary, server lifecycle, a real
+      two-phase rule-based graph run covering all 8 nodes incl. the pause
+      interrupt + gate overrides line, local-only import boundary), and
+      the m7 + m10–m24 regressions (`board/verify-T-M26.md`). Live smoke
+      same day: `python -m skill_gap_agent.server --debug --port 8123` +
+      one real HTTP request printed `req: GET /api/status received` /
+      `-> 200 in 0.8ms` on the debug channel while `/api/status` carried
+      `run_id` and stdout stayed the normal banner. The panel half of
+      done-criterion (1) is the human's step (§Open).
+    - **Learnings:** (a) pytest's logging plugin mirrors its capture
+      handlers onto **every** logger — including `propagate=False` ones —
+      so a "one console handler" assertion must count the handlers the
+      module owns, not the logger's total (which the framework grows
+      under test). (b) The run-triggering request's `received` line
+      precedes the run's existence and truthfully shows `[-]` —
+      correlation starts at `run: start`, while that request's `-> 202`
+      line already carries the run-id. (c) Auto mode runs the gate node
+      only when profile decisions exist (`cli.gate_needed`), and the
+      pause node only in two-phase mode — covering all 8 nodes offline
+      took a seeded intent profile plus the two-phase interrupt/resume
+      flow, not a plain run. (d) An expected LangGraph `interrupt()` must
+      not log as a node failure: the stage hook names it `interrupt`
+      (class-name check keeps `debuglog.py` stdlib-only).
 
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
@@ -918,13 +1032,20 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
-- **M24 live pass (done criterion 5).** The automated suite is green
-  (2026-10-11); one live pass is the human's step: reload the extension,
-  walk the new Setup order (AI access → mode → resume), confirm a
-  Rule-based upload extracts locally (fast, "nothing leaves this
-  machine") and that switching to Paid re-extracts with the LLM (the
-  mode-aware cache upgrades a rule artifact instead of reusing it).
-  Record the result in the M24 entry above, then delete this item.
+- **M26 live panel pass.** The debug flow is verified offline
+  (`board/verify-T-M26.md`) plus a live `--debug` server smoke (request
+  lines + `run_id` in `/api/status`); one extension panel run under
+  `tools\start-server.bat --debug` is the human's final look at the
+  per-node trail. Delete this item once done.
+
+- **M24 live pass (done criterion 5).** Live pass run 2026-10-12 got
+  through key save + paid mode + resume upload + capture + judging all 14
+  targets, then crashed on a latent gate-profiling bug (equal-confidence
+  tie — fixed in T-M25, learning (c) in the M24 entry). Retest pending
+  the human: walk the Setup order, confirm a Rule-based upload extracts
+  locally and switching to Paid re-extracts (mode-aware cache), then
+  Analyze gaps should now proceed past the gate to the gap table. Record
+  the result in the M24 entry above, then delete this item.
 - **Extraction latency (S1/S2).** The M8 resume-extraction LLM call (one
   call, full resume text, hierarchical JSON out) took ~19 minutes via
   DeepSeek V4 Flash on OpenRouter (2026-09-23), vs. ~3–10s for
