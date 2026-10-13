@@ -69,6 +69,7 @@ on purpose — absent ACAO means even allowed cross-origin callers cannot
 *read* responses. Server binds 127.0.0.1 only.
 
 Run: python -m skill_gap_agent.server [--port 8000] [--skills <file>]
+     [--debug [--debug-payloads]]  (M26 local stage logs, stderr only)
 Then open http://localhost:8000/ — bookmarklet-saved JDs appear in the list.
 """
 
@@ -86,8 +87,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import debuglog, secrets
 from . import llm as llm_mod
-from . import secrets
 from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -153,6 +154,9 @@ _run: dict = {
     "started_at": None,
     "finished_at": None,
     "error": None,
+    # M26: debug-mode correlation id — the run's LangGraph thread_id,
+    # surfaced here so panel symptoms map to console log lines.
+    "run_id": None,
     # M15 LLM presence policy: the run's mode and any loud degradations.
     "llm_mode": None,
     "degraded_reasons": [],
@@ -209,6 +213,31 @@ STAGE_LABELS = {
 def _set_stage(name: str) -> None:
     with _lock:
         _run["stage"] = name
+
+
+def _run_elapsed_ms() -> float:
+    """M26: ms since this run started (stage-log lifecycle lines)."""
+    with _lock:
+        started = _run.get("started_at")
+    return (time.time() - started) * 1000.0 if started else -1.0
+
+
+def _run_options(options: dict) -> str:
+    """M26: compact scalar-only view of a run body (jds lists stay out)."""
+    return ",".join(
+        f"{k}={v}"
+        for k, v in sorted(options.items())
+        if isinstance(v, (bool, int, float, str))
+    )
+
+
+def _run_model_hint(options: dict) -> str:
+    """M26: the model a run starts with (free rotation shows per LLM line)."""
+    if not _resolve_use_llm(options):
+        return "-"
+    if options.get("free_tier"):
+        return llm_mod.FREE_MODELS[0]
+    return PROVIDERS.get(_resolve_provider(options), {}).get("model", "-")
 
 
 def _jd_files() -> list[str]:
@@ -519,6 +548,7 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
         else:
             note = "intake chat skipped: 'use as-is' profile (nothing new)"
         print(note)
+        debuglog.dbg("intake", note)
         return None, note
     # Item-level freshness: ask exactly what the profile hasn't answered.
     first = sess.next_turn()
@@ -528,9 +558,13 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
             "(answers reused)"
         )
         print(note)
+        debuglog.dbg("intake", note)
         return None, note
     # Loud visibility (why the chat pauses — server console + panel):
     print(f"Intake: pausing at the chat for a {first.kind!r} turn ({first.id})")
+    debuglog.dbg(
+        "intake", f"pause session={session.name} turn={first.kind} id={first.id}"
+    )
     return sess, None
 
 
@@ -546,6 +580,7 @@ def _run_pipeline(options: dict) -> None:
 
     os.chdir(REPO_ROOT)
     set_stage_listener(_set_stage)
+    debuglog.set_run_id(_run.get("run_id"))
     _drop_paused()
     source = _resolve_skills(options)
     provider = _resolve_provider(options)
@@ -558,6 +593,7 @@ def _run_pipeline(options: dict) -> None:
         except LLMError as e:
             with _lock:
                 _run.update(status="error", finished_at=time.time(), error=str(e))
+            debuglog.err(f"run failed: {e}")
             return
 
     from . import sessions
@@ -585,6 +621,7 @@ def _run_pipeline(options: dict) -> None:
         traceback.print_exc()
         with _lock:
             _run.update(status="error", finished_at=time.time(), error=str(e))
+        debuglog.err(f"run failed: {e}")
         return
     with _lock:
         _run.update(intake_note=intake_note)
@@ -599,6 +636,7 @@ def _run_pipeline(options: dict) -> None:
                 status="paused", stage="intake", pause_phase="intake",
                 finished_at=time.time(), error=None,
             )
+        debuglog.dbg("run", f"paused phase=intake in {_run_elapsed_ms():.0f}ms")
         return
     _run_graph_part(options, session, jds_path, jd_files)
 
@@ -652,6 +690,7 @@ def _run_graph_part(
             traceback.print_exc()
             with _lock:
                 _run.update(status="error", finished_at=time.time(), error=str(e))
+            debuglog.err(f"run failed: {e}")
             return
 
     state: AgentState = {
@@ -675,7 +714,16 @@ def _run_graph_part(
     if two_phase:
         state["two_phase"] = True
         checkpointer = InMemorySaver()
-    config = {"configurable": {"thread_id": f"server-{time.time_ns()}"}}
+    # M26: the run-id minted at POST /api/run is the graph's thread_id, so
+    # console lines and /api/status correlate through one value.
+    with _lock:
+        run_id = _run.get("run_id")
+    if not run_id:
+        run_id = f"server-{time.time_ns()}"
+        with _lock:
+            _run["run_id"] = run_id
+    debuglog.set_run_id(run_id)
+    config = {"configurable": {"thread_id": run_id}}
     try:
         app = build_app(checkpointer=checkpointer)
         app.invoke(state, config=config)
@@ -687,17 +735,20 @@ def _run_graph_part(
                 )
                 _paused["app"] = app
                 _paused["config"] = config
+            debuglog.dbg("run", f"paused phase=gaps in {_run_elapsed_ms():.0f}ms")
             return
     except Exception as e:  # noqa: BLE001 — surfaced via /api/status
         traceback.print_exc()
         with _lock:
             _run.update(status="error", finished_at=time.time(), error=str(e))
+        debuglog.err(f"run failed: {e}")
         return
     finally:
         set_stage_listener(None)
     _sync_run_state(app, config, "done")
     with _lock:
         _run.update(stage=None, pause_phase=None, finished_at=time.time(), error=None)
+    debuglog.dbg("run", f"done in {_run_elapsed_ms():.0f}ms")
 
 
 def _copy_captured_to_session(session: Path) -> None:
@@ -744,12 +795,15 @@ def _resume_pipeline(options: dict) -> None:
             )
         return
     set_stage_listener(_set_stage)
+    debuglog.set_run_id(config["configurable"]["thread_id"])
+    debuglog.dbg("run", "resume phase=plan")
     try:
         app.invoke(Command(resume={"phase": "plan"}), config=config)
     except Exception as e:  # noqa: BLE001 — surfaced via /api/status
         traceback.print_exc()
         with _lock:
             _run.update(status="error", finished_at=time.time(), error=str(e))
+        debuglog.err(f"run failed: {e}")
         return
     finally:
         set_stage_listener(None)
@@ -757,6 +811,7 @@ def _resume_pipeline(options: dict) -> None:
     _sync_run_state(app, config, "done")
     with _lock:
         _run.update(stage=None, finished_at=time.time(), error=None)
+    debuglog.dbg("run", f"done in {_run_elapsed_ms():.0f}ms")
 
 
 INDEX_HTML = """<!doctype html><html><head><meta charset="utf-8">
@@ -1085,7 +1140,13 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self._json(400, {"error": err})
                 return
+        # M26: the debug-mode run-id is the graph's thread_id (surfaced in
+        # /api/status); the plan phase continues the paused run's id.
         with _lock:
+            if phase == "plan" and _paused["config"] is not None:
+                run_id = _paused["config"]["configurable"]["thread_id"]
+            else:
+                run_id = f"server-{time.time_ns()}"
             _run.update(
                 status="running", stage=None, phase=phase, started_at=time.time(),
                 finished_at=None, error=None, intake_note=None,
@@ -1093,7 +1154,16 @@ class Handler(BaseHTTPRequestHandler):
                 degraded_reasons=[],
                 free_tier=bool(options.get("free_tier", False)),
                 llm_model=None,
+                run_id=run_id,
             )
+        debuglog.set_run_id(run_id)
+        debuglog.dbg(
+            "run",
+            f"start phase={phase} mode={(_resume.get('mode') or 'paid')} "
+            f"llm={_resolve_use_llm(options)} provider={_resolve_provider(options)} "
+            f"free_tier={bool(options.get('free_tier', False))} "
+            f"model={_run_model_hint(options)} options={{{_run_options(options)}}}",
+        )
         worker = _resume_pipeline if phase == "plan" else _run_pipeline
         t = threading.Thread(target=worker, args=(options,), daemon=True)
         t.start()
@@ -1191,6 +1261,7 @@ class Handler(BaseHTTPRequestHandler):
         jd_files = _INTAKE.get("jd_files") or {}
         session = Path(_run.get("session_dir") or OUTPUT_DIR)
         _INTAKE.update(sess=None, options=None)
+        debuglog.dbg("intake", f"resume session={session.name}")
         with _lock:
             _run.update(
                 status="running", stage="ingest", pause_phase=None, error=None,
@@ -1380,6 +1451,24 @@ class Handler(BaseHTTPRequestHandler):
         _invalidate_key_status("openrouter")  # M18: re-validate the new key
         self._json(200, {"ok": True, "key_set": True, "stored": "keyring"})
 
+    def parse_request(self) -> bool:
+        # M26 request lifecycle: "received" line once the request parses.
+        ok = super().parse_request()
+        if ok:
+            self._m26_t0 = time.perf_counter()
+            debuglog.dbg("req", f"{self.command} {self.path} received")
+        return ok
+
+    def log_request(self, code: object = "-", size: object = "-") -> None:
+        super().log_request(code, size)  # keeps the normal-mode [m11] line
+        started = getattr(self, "_m26_t0", None)
+        ms = (time.perf_counter() - started) * 1000.0 if started else -1.0
+        debuglog.dbg(
+            "req",
+            f"{getattr(self, 'command', '?')} {getattr(self, 'path', '?')} "
+            f"-> {code} in {ms:.1f}ms",
+        )
+
     def log_message(self, fmt: str, *args: object) -> None:
         safe = (fmt % args).encode("ascii", "replace").decode("ascii")
         print(f"[m11] {html.escape(safe)}")
@@ -1397,7 +1486,18 @@ def main() -> None:
         default=None,
         help="skills JSON or resume file for runs (default data/skillsdataset.json)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="M26: local stage logs on the console (stderr; never network)",
+    )
+    parser.add_argument(
+        "--debug-payloads",
+        action="store_true",
+        help="M26: also log full LLM prompts/responses (resume/JD text)",
+    )
     args = parser.parse_args()
+    debuglog.configure(debug=args.debug, payloads=args.debug_payloads)
     if args.skills:
         global DEFAULT_SKILLS
         DEFAULT_SKILLS = Path(args.skills)

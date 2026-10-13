@@ -38,6 +38,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from . import debuglog
 from .gate import DEFAULT_THRESHOLD, gate_summary, review_targets
 from .graph import SkillGraph
 from .ingest import build_seed_graph
@@ -251,6 +252,7 @@ def _ask_or_interrupt(prompt: str, checkpointer, config: dict) -> str:
 # --- nodes -----------------------------------------------------------------
 
 
+@debuglog.stage("ingest")
 def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
     _stage("ingest")
     taxonomy = load_taxonomy()
@@ -329,6 +331,7 @@ def _save_merged_judge_report(results: list, out_dir: Path) -> None:
     path.write_text(json.dumps(list(merged.values()), indent=2), encoding="utf-8")
 
 
+@debuglog.stage("judge")
 def node_judge(state: AgentState, config: RunnableConfig) -> dict:
     _stage("judge")
     sg: SkillGraph = _runtime(config)["sg"]
@@ -434,16 +437,20 @@ def _top_confidence(sg: SkillGraph, target: str) -> float | None:
     return max(confs) if confs else None
 
 
+@debuglog.stage("gate")
 def node_gate(state: AgentState, config: RunnableConfig) -> dict:
     _stage("gate")
     sg: SkillGraph = _runtime(config)["sg"]
     profile = _profile(state)
+    overrides = _profile_gate_overrides(sg, profile)
+    # M26 human-in-loop event: how many persisted gate overrides apply.
+    debuglog.dbg("gate", f"overrides={len(overrides)}")
     decisions = review_targets(
         sg,
         threshold=DEFAULT_THRESHOLD,
         auto=state["auto"],
         ask_fn=ask_via_interrupt,
-        overrides=_profile_gate_overrides(sg, profile),
+        overrides=overrides,
         on_save=lambda saved: _save_profile_key(state, "gate", saved),
     )
     print(gate_summary(decisions))
@@ -460,6 +467,7 @@ def _write_gaps_json(gaps: list, out_dir: Path) -> Path:
     return p
 
 
+@debuglog.stage("rank")
 def node_rank(state: AgentState, config: RunnableConfig) -> dict:
     _stage("rank")
     unjudged = {
@@ -475,6 +483,7 @@ def node_rank(state: AgentState, config: RunnableConfig) -> dict:
     return {"gaps": gaps}
 
 
+@debuglog.stage("pause")
 def node_pause(state: AgentState, config: RunnableConfig) -> dict:
     """M13 two-phase pause: hold the run after ranking until phase 2.
 
@@ -516,6 +525,7 @@ def after_synthesize(state: AgentState) -> str:
     return "output" if state.get("skip_oss") else "oss"
 
 
+@debuglog.stage("synthesize")
 def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     _stage("synthesize")
     if not state.get("use_llm", True):
@@ -536,6 +546,7 @@ def node_synthesize(state: AgentState, config: RunnableConfig) -> dict:
     return out
 
 
+@debuglog.stage("oss")
 def node_oss(state: AgentState, config: RunnableConfig) -> dict:
     """M10 node: good-first-issue sourcing for the top actionable gaps."""
     _stage("oss")
@@ -556,6 +567,7 @@ def node_oss(state: AgentState, config: RunnableConfig) -> dict:
     return {"oss_by_gap": oss_by_gap, "degraded_reasons": degraded}
 
 
+@debuglog.stage("output")
 def node_output(state: AgentState, config: RunnableConfig) -> dict:
     _stage("output")
     sg: SkillGraph = _runtime(config)["sg"]

@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M24; M9 built 2026-10-12)
+## Milestones (linear and global — M1…M26; M9 built 2026-10-12)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -133,7 +133,10 @@ pipeline stage. M22 is store packaging (privacy policy, submission
 register, icons) — likewise not a pipeline stage. M23 is the LinkedIn
 capture posture (assist-not-act) — likewise not a pipeline stage. M24 is
 extraction-contract + setup ordering (mode governs ingestion) — likewise
-not a pipeline stage.
+not a pipeline stage. M25 was a hotfix task (T-M25) recorded inside M24's
+learning (c), not a milestone entry; M26 is local debug logging
+(developer console tooling for extension testing) — likewise not a
+pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -940,6 +943,69 @@ not a pipeline stage.
       `synthesis.py` sort tuples of scalars, `ranking.py` and
       `cli._top_edge_data` use keys — none tie-unsafe.
 
+26. **Local debug mode — stage logs for extension testing.** ✅ Built
+    2026-10-13 (design home: [14-observability.md](14-observability.md)
+    §Local debug mode). Developer console tooling around the built
+    pipeline, not a new stage (M25 was consumed by the T-M25 hotfix
+    recorded in M24's learning (c), so numbering continues at 26).
+    `server.py --debug [--debug-payloads]` — reachable as
+    `tools/start-server.bat --debug` through the launcher's argument
+    passthrough — turns on structured logs at every stage boundary of the
+    server and the LangGraph run it drives: request → run → node
+    enter/exit → LLM call summaries, correlated by the run's `thread_id`
+    (also surfaced in `/api/status`). **Local console only, never
+    network** — M17's §Scope boundary holds unchanged. Origin: user
+    request 2026-10-13 — extension testing has no server-side visibility
+    today (only `[m11]` request lines and a few startup prints). Decision
+    rows in [02-decisions.md](02-decisions.md) (M26). Slices:
+    - **26a — Logging core.** New `debuglog.py` (sole owner of logging
+      setup): line format `<level> <time> [run-id] <message>`, level
+      gating, no-op path when off; normal-mode output byte-stable.
+    - **26b — Stage hooks.** Node enter/exit + counts where `cli.py`
+      wires the graph; one call-summary hook at the `llm.py` door
+      (provider, model, ms, tokens, retries); request/run lifecycle +
+      `run-id` in `/api/status` in `server.py`; gate/intake events;
+      tracebacks fold in; `--debug-payloads` gates prompt/response
+      bodies (resume/JD PII).
+    - **26c — Checks + docs.** `m26_check.py` offline (stubbed LLM, no
+      network): silent by default, node coverage, `run-id` correlation,
+      payload gating, `debuglog.py` never imports network/`langsmith`;
+      `test_m26.py` wrapper; one Debug-mode how-to line in
+      `extension/README.md`.
+    - **Done criteria:** see
+      [14-observability.md](14-observability.md) §Local debug mode.
+    - **Explicit non-goals:** network export (locked — §Scope boundary),
+      extension JS logging (Chrome DevTools covers it), log files on disk
+      (payload PII; restore trigger in the design section), log rotation
+      or extra levels, `--debug` on `cli.py`/`sweep.py` (trivial
+      follow-up, no design change needed).
+    - **Verification record (2026-10-13):** `python scripts/verify.py
+      --task T-M26` ALL CHECKS PASS — `ruff check .`, `pytest` (59),
+      `m26_check` (off-by-default, line format + run-id, payload gating,
+      stage decorator, node hooks, llm summary, server lifecycle, a real
+      two-phase rule-based graph run covering all 8 nodes incl. the pause
+      interrupt + gate overrides line, local-only import boundary), and
+      the m7 + m10–m24 regressions (`board/verify-T-M26.md`). Live smoke
+      same day: `python -m skill_gap_agent.server --debug --port 8123` +
+      one real HTTP request printed `req: GET /api/status received` /
+      `-> 200 in 0.8ms` on the debug channel while `/api/status` carried
+      `run_id` and stdout stayed the normal banner. The panel half of
+      done-criterion (1) is the human's step (§Open).
+    - **Learnings:** (a) pytest's logging plugin mirrors its capture
+      handlers onto **every** logger — including `propagate=False` ones —
+      so a "one console handler" assertion must count the handlers the
+      module owns, not the logger's total (which the framework grows
+      under test). (b) The run-triggering request's `received` line
+      precedes the run's existence and truthfully shows `[-]` —
+      correlation starts at `run: start`, while that request's `-> 202`
+      line already carries the run-id. (c) Auto mode runs the gate node
+      only when profile decisions exist (`cli.gate_needed`), and the
+      pause node only in two-phase mode — covering all 8 nodes offline
+      took a seeded intent profile plus the two-phase interrupt/resume
+      flow, not a plain run. (d) An expected LangGraph `interrupt()` must
+      not log as a node failure: the stage hook names it `interrupt`
+      (class-name check keeps `debuglog.py` stdlib-only).
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -965,6 +1031,12 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 16 | **PII minimization** ~~+ manual no-cloud extraction toggle~~ (strip names/contact details before LLM calls) | M21's disclosure-only contract: accurate copy + named destinations + first-use consent; the regex fallback still runs automatically when no key is set | User decision 2026-10-11 — T-M21 is disclosure-only. ~~The no-cloud toggle is superseded by M24 (2026-10-11): Rule-based mode now governs extraction — the restore trigger is met.~~ Restore triggers (PII half): store review pushes for data minimization, or users report discomfort sending contact details to providers (skill extraction never needs them). |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
+
+- **M26 live panel pass.** The debug flow is verified offline
+  (`board/verify-T-M26.md`) plus a live `--debug` server smoke (request
+  lines + `run_id` in `/api/status`); one extension panel run under
+  `tools\start-server.bat --debug` is the human's final look at the
+  per-node trail. Delete this item once done.
 
 - **M24 live pass (done criterion 5).** Live pass run 2026-10-12 got
   through key save + paid mode + resume upload + capture + judging all 14

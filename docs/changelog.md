@@ -12,6 +12,13 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M26: Local debug mode for extension testing — `server.py --debug
+  [--debug-payloads]` (also `start-server.bat --debug`) adds local-only
+  stage logs (request → run → all 8 LangGraph nodes → LLM call summaries)
+  correlated by the run's `thread_id` (in `/api/status`); prompt/response
+  bodies (resume/JD PII) behind `--debug-payloads`; normal output
+  byte-stable (spec: [14-observability.md](../specs/14-observability.md)
+  §Local debug mode)
 - T-M9-fix-intake: Item-level intake freshness — a `completed` profile no
   longer silently skips the chat (it hid new items after an extraction
   change, and a scripted validation run had polluted the real session);

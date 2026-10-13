@@ -46,7 +46,13 @@ a hands-on plan (with live good-first-issues) in a side panel. Design:
    The console window that stays open *is* the server — close it to stop.
    Restart it after pulling code changes (a stale process otherwise keeps
    answering on port 8000). The `--skills` / `--port` flags still work but
-   are optional — the panel handles the resume.
+   are optional — the panel handles the resume. **Debugging a panel run?**
+   Start the server with `--debug` (e.g. `tools\start-server.bat --debug`):
+   the console gains stage-by-stage logs (each request, run, pipeline node
+   and LLM call, correlated by a `run-id` that also shows in
+   `/api/status`). Add `--debug-payloads` to also print full LLM prompts
+   and responses — they contain resume/JD text. Logs go to this console
+   only and never leave the machine.
 
 2. **Load the extension:**
    - open `chrome://extensions`, enable **Developer mode** (top right)

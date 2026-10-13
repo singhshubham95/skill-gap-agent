@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any
 
+from . import debuglog
 from .secrets import get_secret
 
 # OpenAI-compatible endpoints. Primary: DeepSeek V4 Flash via OpenRouter
@@ -283,6 +284,11 @@ def last_model() -> str | None:
 def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
     """Single completion -> raw text.
 
+    M26 (specs/14-observability.md §Local debug mode): this wrapper is the
+    single LLM-call summary hook — one `debuglog.llm_call` line per logical
+    call (provider, model, ms, attempts, tokens; prompt/response bodies only
+    under `--debug-payloads`). The attempt loop lives in `_chat_attempts`.
+
     M16 retry policy: transient failures (429/5xx/timeout/connection) retry
     with jittered capped backoff honoring Retry-After; non-transient errors
     (401/403/400/404) fail on the first attempt. In free mode the attempt
@@ -292,6 +298,36 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
     before the call fails.
     """
     cfg = cfg or LLMConfig()
+    # Hook telemetry for the one debuglog.llm_call below (T-M26).
+    rec: dict[str, Any] = {"attempts": 0, "rotations": 0, "model": None, "usage": None}
+    started = time.perf_counter()
+    response: str | None = None
+    error: str | None = None
+    try:
+        response = _chat_attempts(prompt, system, cfg, rec)
+        return response
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+        raise
+    finally:
+        debuglog.llm_call(
+            provider=cfg.provider,
+            model=rec["model"],
+            ms=(time.perf_counter() - started) * 1000.0,
+            attempts=rec["attempts"],
+            rotations=rec["rotations"],
+            usage=rec["usage"],
+            error=error,
+            prompt=prompt,
+            system=system,
+            response=response,
+        )
+
+
+def _chat_attempts(
+    prompt: str, system: str, cfg: LLMConfig, rec: dict[str, Any]
+) -> str:
+    """The M16 attempt loop behind `chat()`; `rec` collects hook telemetry."""
     client, p = _client(cfg)
     messages = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt}
@@ -311,6 +347,9 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
         model = _free_model_for(cfg, rotation) if cfg.free_tier else (
             cfg.model or p["model"]
         )
+        rec["attempts"] = attempt + 1
+        rec["rotations"] = rotation
+        rec["model"] = model
         try:
             resp = client.chat.completions.create(
                 model=model,
@@ -319,6 +358,7 @@ def chat(prompt: str, system: str = "", cfg: LLMConfig | None = None) -> str:
             )
             global _last_model
             _last_model = model
+            rec["usage"] = getattr(resp, "usage", None)
             return resp.choices[0].message.content or ""
         except Exception as e:
             last_err = e

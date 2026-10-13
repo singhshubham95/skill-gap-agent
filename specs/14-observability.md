@@ -1,17 +1,22 @@
 # C4 — Observability + Judge Evaluation
 
-Tooling around the built pipeline, not a pipeline stage. Opt-in LangSmith
-tracing answers *what happened inside a run*; a golden-set evaluation of
-the transferability judge answers *is the judge right*. Planned code:
-`tracing.py`, `judge_eval.py`, `evals/judge_golden.jsonl`, plus the repo's
-first test/eval CI workflow.
+Tooling around the built pipeline, not a pipeline stage. *What happened
+inside a run* is answered two ways — **local debug logs** for testing the
+Chrome extension (M26, §Local debug mode) and **opt-in LangSmith
+tracing** for judge/LLM introspection (M17, §Design); a golden-set
+evaluation of the transferability judge answers *is the judge right*.
+Code: `debuglog.py` (✅ built, M26); planned: `tracing.py`,
+`judge_eval.py`, `evals/judge_golden.jsonl`, plus the repo's first
+test/eval CI workflow.
 
-**Status: 🎯 Designed** (M17, no code yet). Build order and slices
-17a–17d: [03-milestones.md](03-milestones.md) M17. Decision rows:
-[02-decisions.md](02-decisions.md) M17 rows. Per-runner hook notes live in
-[05-ai-caller.md](05-ai-caller.md) §Tracing hook and
-[10-flow-runner.md](10-flow-runner.md) (`--trace` flag) — this file is the
-design home.
+**Status: M26 debug mode ✅ Built 2026-10-13** (hooks in `cli.py` /
+`llm.py` / `server.py`); **M17 tracing + eval 🎯 Designed** (no code
+yet). Build order and slices: [03-milestones.md](03-milestones.md) M17
+(17a–17d) and M26 (26a–26c). Decision rows:
+[02-decisions.md](02-decisions.md) M17 + M26 rows. Per-runner hook notes
+live in [05-ai-caller.md](05-ai-caller.md) §Tracing hook and
+[10-flow-runner.md](10-flow-runner.md) (`--trace` / `--debug` flags) —
+this file is the design home.
 
 ## Scope boundary — developer tooling only (🔒 locked 2026-10-12)
 
@@ -216,4 +221,99 @@ schema valid, metric math on a fixture. (4) CI offline tier green on a PR.
 §Scope boundary mechanically: `server.py` has no tracing-enablement path,
 `tools/start-server.bat` passes no trace flags, the `LANGSMITH_*` env scrub
 exists, and `/api/key` refuses LangSmith.
+
+## Local debug mode — stage logs for extension testing (✅ Built, M26)
+
+**Purpose.** Testing the Chrome extension runs a two-process loop: the
+side panel is a thin client, and every real step happens inside the
+`server.py` process. But the server console today shows only HTTP request
+lines (`[m11] ...`) and a few startup prints — when a panel run misbehaves
+there is no way to see which LangGraph node ran, what the judge decided,
+where a run stalled, or how long an LLM call took. M26 adds an opt-in
+**debug mode**: structured log lines at each stage boundary of the
+background server and the graph run it drives. Origin: user request
+2026-10-13 (extension testing has no server-side visibility).
+
+**Local-only, and never tracing.** Debug logs go to the server's own
+console and nowhere else — no network service, no key, no export. This is
+a different tool from M17's LangSmith tracing and loosens nothing in
+§Scope boundary above: `server.py` still never enables tracing and still
+scrubs `LANGSMITH_*` at startup, and the new `debuglog.py` imports no
+network or `langsmith` module. `m26_check.py` re-asserts this next to the
+M17 boundary checks.
+
+**Flag surface.** `python -m skill_gap_agent.server --debug
+[--debug-payloads]` — `tools/start-server.bat --debug` reaches it through
+the launcher's existing argument passthrough. `--debug-payloads` implies
+`--debug`. Off by default: with neither flag the console output is
+byte-for-byte what it is today (normal mode is what end users watch).
+
+| Mode | Adds over the previous level | Payload risk |
+|---|---|---|
+| normal (default) | today's output unchanged (`[m11]` request lines, startup banner) | none |
+| `--debug` | stage log (metadata only) | none |
+| `--debug-payloads` | full LLM prompt/response bodies | resume + JD text (PII) on the console |
+
+**The stage log — one ASCII line per event**, format
+`<level> <time> [run-id] <message>`. The `run-id` is the run's existing
+LangGraph `thread_id` (e.g. `server-1760340000123456789`), also surfaced
+in `/api/status` responses so a panel symptom can be matched to its log
+lines. Lines logged before a run exists — e.g. the triggering request's
+`received` line, before `run: start` mints the id — carry `[-]`; from
+`run: start` on, every line carries the id. Events, in the order a run
+produces them:
+
+- **Request lifecycle** (server): method + path received; response
+  status + total ms.
+- **Run lifecycle:** started (mode free/paid/rule, provider, model,
+  options) and finished/failed with total ms.
+- **Graph nodes** — enter/exit per LangGraph stage (`ingest`, `judge`,
+  `gate`, `rank`, `pause`, `synthesize`, `oss`, `output`) with per-node
+  ms and counts (targets judged, candidates pruned, gaps ranked,
+  projects synthesized). An expected LangGraph `interrupt()` (gate
+  question, two-phase pause) logs as `interrupt`, never `fail` — the node
+  re-executes on resume.
+- **LLM calls** — one hook at the `llm.py` door: provider, model, ms,
+  token usage, retry/fallback events. Bodies only under
+  `--debug-payloads`.
+- **Human-in-loop:** gate overrides applied; intake chat pause/resume
+  (session id).
+- **Errors:** full tracebacks (today's error-handler prints fold into
+  this channel).
+
+**Implementation shape — one owner.** `debuglog.py` owns the logging
+setup and the `dbg()` / stage-timing helpers (stdlib `logging`, one
+console handler — writing to **stderr**, so normal-mode stdout stays
+byte-stable even in debug mode); no other module configures logging.
+Hook points are
+thin calls: node enter/exit wrappers where `cli.py` defines the graph
+nodes, one call-summary hook inside `llm.py`'s single door, request/run
+lifecycle in `server.py`. With the flags off the hooks are no-ops (one
+module-level boolean check) and normal-mode output stays byte-stable —
+the existing checks that assert on current prints must stay green.
+
+**Explicit non-goals (recorded, not oversights):** shipping logs to any
+network service (§Scope boundary, and the M21 "the developer receives
+nothing" claim keeps holding — logs never leave the machine); logging
+extension JS (Chrome DevTools is the client-side console); log files on
+disk (payload PII would land in `output/`, and console scrollback is the
+developer's to save — restore trigger: a live debugging session where the
+console scrolls too fast to follow); log rotation or extra levels; a
+`--debug` flag on `cli.py` / `sweep.py` (the hooks already live in shared
+code, so adding the flags later needs no design change).
+
+**Done criteria:** (1) `tools/start-server.bat --debug` + one extension
+panel run prints request → run → per-node → per-LLM-call lines sharing
+one `run-id`; the same run without `--debug` produces exactly today's
+output. (2) `--debug` never prints resume/JD text; `--debug-payloads`
+prints prompt/response bodies and implies `--debug`. (3) The `run-id` is
+visible in `/api/status` responses. (4) `m26_check.py` asserts offline
+(stubbed LLM, no network): hooks silent by default, node boundaries
+covered, shared `run-id` correlation, payload text gated behind the
+second flag, `debuglog.py` imports no network/`langsmith` module.
+(5) `ruff check .` and `pytest` (incl. `test_m26.py`) clean.
+**All met 2026-10-13** ([03-milestones.md](03-milestones.md) M26
+verification record; `board/verify-T-M26.md`) — except the panel half of
+(1), one live extension run under `--debug`, which stays the human's step
+([03-milestones.md](03-milestones.md) §Open).
 

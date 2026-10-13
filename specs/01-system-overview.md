@@ -111,7 +111,7 @@ flowchart TB
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
 | C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16) |
 | C3 intake + validation | In-panel intake chat + evidence-backed skill depth (depth-aware judge) | `intake.py`, `validate.py`, `sessions.py` | [13-intake.md](13-intake.md) | ✅ Built (M9, 2026-10-12) |
-| C4 observability + judge evaluation | LangSmith tracing + judge golden-set eval | `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | 🎯 Designed (M17) |
+| C4 observability + judge evaluation | Debug logging + LangSmith tracing + judge golden-set eval | `debuglog.py` (M26), `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | ✅ Built (M26 debug mode); 🎯 Designed (M17) |
 
 ## Pipeline (stage order = data flow)
 
