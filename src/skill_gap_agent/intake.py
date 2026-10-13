@@ -132,6 +132,14 @@ class IntakeSession:
 
     def next_turn(self) -> Turn | None:
         """The first unanswered question, or None when the profile is done."""
+        if self.profile.get("skipped"):
+            # "Use my resume as-is" is terminal (specs/13-intake.md): phrases
+            # and implied are auto-accepted, depth stays unknown — nothing is
+            # ever asked again, so the machine reports done.
+            return Turn(
+                id="complete", kind="complete", prompt="Profile ready.",
+                skippable=False,
+            )
         t = self._phrases_turn()
         if t:
             return t
@@ -241,13 +249,20 @@ class IntakeSession:
         if handler is None:
             return {"ok": False, "error": f"unknown turn {turn_id}", "next": self.next_turn()}
         msg = handler(turn_id, text)
-        self._save()
+        self._save()  # durability: the answer lands before anything else
         nxt = self.next_turn()
+        done = nxt is None or nxt.kind == "complete"
+        # `completed` is a cache of the turn machine, never its gate: a
+        # re-opened conversation (new items after an extraction change)
+        # must read incomplete while turns remain (specs/13-intake.md
+        # §Freshness).
+        self.profile["completed"] = done
+        self._save()
         return {
             "ok": msg is None,
             "error": msg,
             "next": nxt,
-            "completed": nxt is not None and nxt.kind == "complete",
+            "completed": done,
         }
 
     def _answer_phrases(self, turn_id: str, text: str) -> str | None:

@@ -666,6 +666,12 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
         validator=validator,
         use_llm=not args.no_llm,
     )
+    # Item-level freshness (specs/13-intake.md §Freshness): the chat asks
+    # only what the profile hasn't answered — say so when there is nothing
+    # new instead of going quiet.
+    first = sess.next_turn()
+    if first is None or first.kind == "complete":
+        print("Intake: nothing new to ask - profile complete for this session.")
     if args.intake_json:
         # utf-8-sig: tolerate a BOM (PowerShell's Set-Content -Encoding utf8
         # writes one).

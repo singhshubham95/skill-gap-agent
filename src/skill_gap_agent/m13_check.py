@@ -264,13 +264,13 @@ def check_two_phase_flow() -> None:
     # pre-complete the fixture's profile so the run flows straight through
     # (the chat itself is covered by m9_check). The session starts empty so
     # judge-reuse cannot pick up stub edges from a previous check run.
-    from .sessions import save_profile, session_dir
+    from .sessions import save_profile, session_dir, source_sha
 
     shutil.rmtree(session_dir(skills), ignore_errors=True)
     save_profile(skills, {
-        "version": 1, "source_sha256": "", "phrases": {}, "implied": {},
-        "depth": {}, "intent": {}, "proficiency": {}, "progress": {},
-        "completed": True, "skipped": True, "updated_at": "",
+        "version": 1, "source_sha256": source_sha(skills), "phrases": {},
+        "implied": {}, "depth": {}, "intent": {}, "proficiency": {},
+        "progress": {}, "completed": True, "skipped": True, "updated_at": "",
     })
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)

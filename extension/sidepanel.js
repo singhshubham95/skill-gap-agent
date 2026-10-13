@@ -818,6 +818,16 @@ async function poll() {
     return;
   }
   showDegraded(s); // M15: banner tracks live degradations
+  // M9: a skipped intake chat is always explained (specs/13-intake.md
+  // §Freshness — never a silently skipped conversation).
+  const note = $("intakenote");
+  if (s.intake_note) {
+    note.textContent = s.intake_note;
+    note.hidden = false;
+  } else {
+    note.textContent = "";
+    note.hidden = true;
+  }
   if (s.status === "running") {
     setStatus("Running — " + (STAGE_LABELS[s.stage] || s.stage || "working") + "…");
     setTimeout(poll, 2500);

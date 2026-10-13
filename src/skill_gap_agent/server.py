@@ -147,6 +147,9 @@ _run: dict = {
     "stage": None,
     "phase": None,
     "pause_phase": None,  # M9: "intake" (chat) | "gaps" (M13 preview) | None
+    # M9: why the intake chat was skipped (None = asked or not reached).
+    # A silently skipped conversation is never acceptable (13-intake.md).
+    "intake_note": None,
     "started_at": None,
     "finished_at": None,
     "error": None,
@@ -439,26 +442,29 @@ go back to the Skill-Gap Agent side panel.</p>
 </body></html>"""
 
 
-def _build_intake(source: Path, session: Path, jds_path: str, options: dict):
+def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> tuple:
     """M9 intake prep at Analyze gaps (placement revision 2026-10-12).
 
     Extraction runs here (rule-only at upload since M9), the phrase/implied
-    proposals and JD-aware triage feed the conversation, and an incomplete
-    profile pauses the run at the intake chat. Returns the IntakeSession to
-    pause on, or None when the profile is already complete (re-analysis asks
-    nothing — same-input sessions resume).
+    proposals and JD-aware triage feed the conversation, and a profile with
+    unanswered items pauses the run at the intake chat. Returns
+    `(session_to_pause, note)`: the IntakeSession to pause on (or None), and
+    a human-readable note when the chat is skipped (surfaced via
+    /api/status `intake_note` — a silently skipped conversation is never
+    acceptable, specs/13-intake.md §Freshness).
+
+    Freshness is item-level, never run-level: `completed` short-circuits
+    only when the current run has nothing new to ask — a changed extraction
+    or new captured JDs re-open the chat for exactly the new items. The
+    skip ("use as-is") choice is sticky: never re-asked, new extraction
+    items auto-accepted under the same skip.
     """
-    from . import sessions
     from .implied import detect_implied
     from .ingest import jd_target_weights
     from .intake import IntakeSession
     from .normalize import canonical_term
     from .resume import extract_to_artifact, flatten_phrases
     from .validate import Validator, triage_skills
-
-    profile = sessions.load_profile(source)
-    if profile and profile.get("completed"):
-        return None
 
     mode = (_resume.get("mode") or "paid").strip().lower()
     provider = _resolve_provider(options)
@@ -494,8 +500,38 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict):
         validator=validator,
         use_llm=use_llm,
     )
+    # Sticky skip ("just use my resume as-is"): never re-ask anything —
+    # auto-accept new extraction items under the same skip and continue.
+    # Checked before next_turn() so no question is ever authored for a
+    # user who chose not to converse.
+    if sess.profile.get("skipped"):
+        new_items = [p for p in phrases if p not in sess.profile["phrases"]]
+        new_items += [
+            i["skill"] for i in implied_list
+            if i["skill"] not in sess.profile["implied"]
+        ]
+        if new_items:
+            sess.skip()
+            note = (
+                "intake chat skipped: 'use as-is' profile - "
+                f"{len(new_items)} new extraction item(s) accepted automatically"
+            )
+        else:
+            note = "intake chat skipped: 'use as-is' profile (nothing new)"
+        print(note)
+        return None, note
+    # Item-level freshness: ask exactly what the profile hasn't answered.
     first = sess.next_turn()
-    return None if first is None or first.kind == "complete" else sess
+    if first is None or first.kind == "complete":
+        note = (
+            "intake chat skipped: profile already complete for this resume "
+            "(answers reused)"
+        )
+        print(note)
+        return None, note
+    # Loud visibility (why the chat pauses — server console + panel):
+    print(f"Intake: pausing at the chat for a {first.kind!r} turn ({first.id})")
+    return sess, None
 
 
 def _run_pipeline(options: dict) -> None:
@@ -544,12 +580,14 @@ def _run_pipeline(options: dict) -> None:
         _copy_captured_to_session(session)
 
     try:
-        sess = _build_intake(source, session, jds_path, options)
+        sess, intake_note = _build_intake(source, session, jds_path, options)
     except Exception as e:  # noqa: BLE001 — surfaced via /api/status
         traceback.print_exc()
         with _lock:
             _run.update(status="error", finished_at=time.time(), error=str(e))
         return
+    with _lock:
+        _run.update(intake_note=intake_note)
     if sess is not None:
         # Pause at the intake chat: the panel asks turns via /api/intake/*;
         # the completing answer continues this run (see _intake_answer).
@@ -590,13 +628,20 @@ def _run_graph_part(
         from . import sessions as _sessions
         from .resume import resume_to_skills_json
 
+        # M24 (specs/12-extension.md §M24): extraction follows the
+        # INGESTION MODE, not the analysis toggle — "rule" means the
+        # resume never leaves the machine even when judging runs on the
+        # LLM. This must match _build_intake's class exactly, or the chat
+        # reviews one extraction while the graph consumes another.
+        mode = (_resume.get("mode") or "paid").strip().lower()
+        extract_llm = (mode != "rule") and use_llm
         profile = _sessions.load_profile(source_path) or {}
         try:
             skills_path = str(
                 resume_to_skills_json(
                     source_path,
                     artifact_path=session / "extracted_skills.json",
-                    use_llm=use_llm,
+                    use_llm=extract_llm,
                     auto=True,
                     ask_fn=None,
                     cfg=LLMConfig(provider=provider, free_tier=free_tier),
@@ -743,7 +788,7 @@ async function poll(){
   const el = document.getElementById('status');
   const labels = {ingest:'reading skills + JDs', judge:'judging transferability (LLM, minutes)', gate:'confidence gate', rank:'ranking gaps', pause:'gaps ready - awaiting Generate plan', synthesize:'synthesizing projects (LLM, minutes)', oss:'sourcing good-first-issues', output:'writing plan'};
   const stage = s.stage ? (' — ' + (labels[s.stage] || s.stage)) : '';
-  el.textContent = s.status + stage + (s.error ? (': ' + s.error) : '');
+  el.textContent = s.status + stage + (s.intake_note ? (' — ' + s.intake_note) : '') + (s.error ? (': ' + s.error) : '');
   if (s.status === 'running') { setTimeout(poll, 3000); }
   if (s.status === 'done') {
     document.getElementById('planlink').style.display = '';
@@ -1043,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
         with _lock:
             _run.update(
                 status="running", stage=None, phase=phase, started_at=time.time(),
-                finished_at=None, error=None,
+                finished_at=None, error=None, intake_note=None,
                 llm_mode="llm" if _resolve_use_llm(options) else "rule-based",
                 degraded_reasons=[],
                 free_tier=bool(options.get("free_tier", False)),
@@ -1121,12 +1166,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": str(e)})
             return
 
-        completed = bool(sess.profile.get("completed"))
-        nxt = None if completed else sess.next_turn()
-        if nxt is not None and nxt.kind == "complete":
-            completed = True
-            sess.mark_completed()
+        # Completion is derived from the turn machine, never read from the
+        # profile's `completed` cache (specs/13-intake.md §Freshness): a
+        # re-opened conversation inherits a completed profile and must not
+        # end after its first answer.
+        nxt = sess.next_turn()
+        completed = nxt is None or nxt.kind == "complete"
         if completed:
+            sess.mark_completed()
             self._continue_after_intake()
         self._json(200, {
             "ok": True,

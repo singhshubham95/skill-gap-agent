@@ -12,6 +12,14 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M9-fix-intake: Item-level intake freshness — a `completed` profile no
+  longer silently skips the chat (it hid new items after an extraction
+  change, and a scripted validation run had polluted the real session);
+  re-opened chats derive completion from the turn machine (never the stale
+  flag); "use as-is" is sticky + terminal; extraction class unified across
+  chat/graph halves (M24 rule-mode respected); skipped chats surface
+  `intake_note`; `SKILL_GAP_SESSIONS_DIR` isolates validation runs
+  (spec: [13-intake.md](../specs/13-intake.md) §Freshness)
 - T-M25: Fix gate-profiling crash on equal-confidence ties — `max()` over
   `(confidence, edge_dict)` tuples compared dicts on ties (TypeError right
   after judging; found by the M24 live pass 2026-10-12); compares plain

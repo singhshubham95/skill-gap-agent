@@ -29,9 +29,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 SESSIONS_ROOT = Path("output/sessions")
+# Validation/scripted runs point the store at a scratch dir instead of the
+# real one (specs/13-intake.md §Freshness — a validation run sharing the
+# real store once completed a real user's profile with scripted answers).
+SESSIONS_ROOT_ENV = "SKILL_GAP_SESSIONS_DIR"
+
+
+def sessions_root() -> Path:
+    """Effective sessions root: env override (validation isolation) first."""
+    override = os.environ.get(SESSIONS_ROOT_ENV)
+    return Path(override) if override else SESSIONS_ROOT
 
 # The retired global decision files (never created/read again anywhere).
 LEGACY_FILES = (
@@ -52,7 +63,7 @@ def source_sha(path: str | Path) -> str:
 def session_dir(source: str | Path, create: bool = False) -> Path:
     """Session directory for a skills source (keyed by the file's SHA-256)."""
     key = source if isinstance(source, str) and len(source) == 64 and "/" not in source and "\\" not in source else source_sha(source)
-    d = SESSIONS_ROOT / key
+    d = sessions_root() / key
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d

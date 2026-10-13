@@ -259,6 +259,41 @@ not a pipeline stage.
    JD-relevant unvalidated skills (follow-up option in 13-intake), sweep
    adoption of the conversation (user-deferred), m17 golden-set
    depth-profile fixtures.
+   **Post-build fix (2026-10-12, same day — first live extension run):**
+   the user's real run (paid mode, OpenRouter) generated everything with no
+   conversation. Three real bugs, all found via the server log + session
+   artifacts and fixed with spec amendment (design home: 13-intake.md
+   §Freshness; decision row M9-fix):
+   1. *Blanket skip*: `_build_intake` returned early whenever the session
+      profile read `completed` — silently hiding 33 new phrases after the
+      extraction artifact had been upgraded (47 → 80 phrases). Fixed as
+      item-level freshness: `completed` skips only when nothing is new;
+      changed extraction / new JDs re-open the chat for exactly the new
+      items.
+   2. *Stale completion gate*: the answer handler trusted the profile's
+      `completed` cache instead of the turn machine, so a re-opened chat
+      ended after one answer. Completion is now derived from the turn
+      machine (`completed` is a cache, never a gate); "use as-is" is
+      terminal at the machine level (depth deliberately unknown).
+   3. *Class mismatch in extraction*: the graph half extracted with
+      `use_llm` from the run body while the chat half honored the M24
+      ingestion mode — with mode "rule" + LLM analysis the resume could
+      leave the machine and the artifact flip-flopped between cache
+      classes. Both halves now use `(mode != "rule") and use_llm`.
+   Also: the live session revealed **test pollution** — the earlier scripted
+   validation run had shared the real session store (same resume SHA) and
+   completed the user's profile with fake answers (depth 3 everywhere,
+   `method: "self-report"`). Mitigation is operational and structural:
+   `SKILL_GAP_SESSIONS_DIR` env override isolates validation stores
+   (documented rule in 13-intake.md §Freshness), and a skipped chat is now
+   always surfaced (`intake_note` in `/api/status` + panel) — never silent.
+   Remediation for the polluted real session: delete
+   `output/sessions/<sha>/profile.json` (or any affected session dir) once;
+   the next Analyze re-asks with the real provider. Verified after the fix:
+   `m9_check` FULL PASS (8-turn e2e + 3 new freshness scenarios),
+   `ruff` clean, `pytest` 52 passed, full check sweep green (m13/m15
+   fixtures updated to write valid `source_sha256` profiles — the
+   anti-cross-profile rule correctly discarded their empty-SHA ones).
 10. **OSS issue sourcing (GFI thin slice).** ✅ Built 2026-09-28
     (mechanics in S6 `09-practice-planner.md`). New `oss.py`
     consumed from `rank_gaps()` `Gap` objects: 2-attempt search loop

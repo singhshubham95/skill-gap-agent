@@ -210,6 +210,10 @@ in-product claim that contradicts it — the copy is the contract.
    asks short profile questions (skill review, depth, calibration); your
    **answers** are sent to the same AI provider for grading/analysis —
    named here alongside the resume-derived text, never a new silent flow.
+   Surface note: when the chat is skipped (nothing new, or a sticky
+   "use as-is" profile), the panel shows the reason (`intake_note` in
+   `GET /api/status`) — a conversation is never silently skipped
+   ([13-intake.md](13-intake.md) §Freshness).
 3. The hosted privacy policy
    ([../docs/privacy-policy.md](../docs/privacy-policy.md), served from
    GitHub Pages) mirrors this destination list — it is the same register,
@@ -696,9 +700,11 @@ In-page gap marking on the JD text
 JD pages (content-script matches are LinkedIn-only, like the bookmarklet),
 run history, hosting, multi-user auth, Chrome Web Store packaging,
 native-messaging server auto-launch ([03-milestones.md](03-milestones.md)
-§Deferred #14), conversational intake
+§Deferred #14), ~~conversational intake
 ([03-milestones.md](03-milestones.md) §Deferred #13 — the interaction model
-stays this panel).
+stays this panel)~~ *(superseded 2026-10-12: M9 restored conversational
+intake inside this panel — [13-intake.md](13-intake.md); the "no second
+surface" intent is kept)*.
 
 ## Done criteria (met at M13 — verification record in roadmap M13)
 
@@ -727,5 +733,6 @@ stays this panel).
   + learnings), M14 (self-serve setup, Built), M16 (free LLM access,
   Built), M18 (panel simplification, Designed — §M18 above).
 - Deferred: [03-milestones.md](03-milestones.md) §Deferred #12 (in-page gap
-  marking), #13 (conversational intake), #14 (native-messaging launcher).
+  marking), #13 (conversational intake — restored and built as M9
+  2026-10-12), #14 (native-messaging launcher).
 - Install / load-unpacked instructions: [../extension/README.md](../extension/README.md).
