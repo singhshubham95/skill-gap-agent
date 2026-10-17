@@ -862,6 +862,7 @@ async function poll() {
 // run automatically into the analysis.
 
 let intakeTurn = null;
+let intakeBusy = false;
 
 function renderIntakeTurn(turn) {
   intakeTurn = turn;
@@ -874,9 +875,23 @@ function renderIntakeTurn(turn) {
   const items = [];
   if (turn && turn.payload) {
     const p = turn.payload;
-    (p.phrases || []).forEach((x, i) => items.push(`${i + 1}. ${x}`));
+    const labels = p.group_labels || [];
+    let lastLabel = null;
+    (p.phrases || []).forEach((x, i) => {
+      const label = labels[i] || "";
+      if (label && label !== lastLabel) {
+        items.push("— " + label + " —");
+        lastLabel = label;
+      }
+      items.push(`${i + 1}. ${x}`);
+    });
     (p.concepts || []).forEach((x, i) => items.push(`${i + 1}. ${x} (y/n)`));
     if (p.evidence) items.push("evidence: " + p.evidence);
+    if (p.hidden && !p.expanded) {
+      items.push(
+        `(+${p.hidden} more kept automatically — type 'show background')`
+      );
+    }
     if (p.remaining && p.remaining.length > 1) {
       items.push("more to review: " + (p.remaining.length - 1));
     }
@@ -886,8 +901,29 @@ function renderIntakeTurn(turn) {
     li.textContent = text; // textContent only — never innerHTML (M21 rule)
     ul.appendChild(li);
   }
+  intakeBusy = false;
   $("intakeanswer").disabled = !turn;
   $("intakesend").disabled = !turn;
+  $("intakeanswer").hidden = !turn;
+  $("intakesend").hidden = !turn;
+  $("intakepending").hidden = true;
+}
+
+function setIntakeBusy(busy) {
+  // §Phrase review D: immediate feedback on send — the input and button
+  // disable at once and a pending hint shows; a live blue button during a
+  // multi-second LLM wait is indistinguishable from a missed click (and
+  // invites the double-Enter that caused stale-turn 400s).
+  intakeBusy = busy;
+  $("intakeanswer").disabled = busy || !intakeTurn;
+  $("intakesend").disabled = busy || !intakeTurn;
+  $("intakepending").hidden = !busy;
+}
+
+function showIntakeError(message) {
+  const el = $("intakeerror");
+  el.textContent = message;
+  el.hidden = false;
 }
 
 async function showIntake() {
@@ -909,7 +945,9 @@ async function showIntake() {
 }
 
 async function sendIntakeAnswer(text) {
-  if (!intakeTurn) return;
+  if (!intakeTurn || intakeBusy) return; // single-flight: Enter + click race
+  $("intakeerror").hidden = true;
+  setIntakeBusy(true);
   try {
     const r = await fetch(server + "/api/intake/answer", {
       method: "POST",
@@ -918,6 +956,9 @@ async function sendIntakeAnswer(text) {
     });
     const body = await r.json();
     if (!r.ok) {
+      // Inline next to the input (not only the status line), and the typed
+      // answer stays put so the user can edit and resend.
+      showIntakeError(body.error || "HTTP " + r.status);
       setStatus("Hmm: " + (body.error || "HTTP " + r.status), true);
       return;
     }
@@ -930,11 +971,21 @@ async function sendIntakeAnswer(text) {
       renderIntakeTurn(body.turn);
     }
   } catch (e) {
+    showIntakeError("Profile questions failed: " + e.message);
     setStatus("Profile questions failed: " + e.message, true);
+  } finally {
+    if ($("intake").hidden) {
+      setIntakeBusy(false);
+    } else {
+      setIntakeBusy(false);
+      $("intakeanswer").focus();
+    }
   }
 }
 
 async function skipIntake() {
+  if (intakeBusy) return;
+  setIntakeBusy(true);
   try {
     const r = await fetch(server + "/api/intake/answer", {
       method: "POST",
@@ -947,6 +998,7 @@ async function skipIntake() {
     setTimeout(poll, 1500);
   } catch (e) {
     setStatus("Profile questions failed: " + e.message, true);
+    setIntakeBusy(false);
   }
 }
 
@@ -981,7 +1033,10 @@ $("intakesend").addEventListener("click", () =>
 );
 $("intakeskip").addEventListener("click", skipIntake);
 $("intakeanswer").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendIntakeAnswer($("intakeanswer").value);
+  if (e.key === "Enter" && !intakeBusy) {
+    e.preventDefault();
+    sendIntakeAnswer($("intakeanswer").value);
+  }
 });
 $("plan").addEventListener("click", generatePlan);
 $("reopen").addEventListener("click", () => {

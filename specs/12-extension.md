@@ -214,6 +214,13 @@ in-product claim that contradicts it — the copy is the contract.
    "use as-is" profile), the panel shows the reason (`intake_note` in
    `GET /api/status`) — a conversation is never silently skipped
    ([13-intake.md](13-intake.md) §Freshness).
+   **Send contract (2026-10-17, [13-intake.md](13-intake.md)
+   §Phrase review D):** the chat's Send gives immediate feedback —
+   input + button disable at once with a pending hint, requests are
+   single-flight (a second Enter while one is in flight is ignored), and
+   a rejected answer is shown inline next to the input and re-enables it.
+   The phrase-review question itself is triaged + grouped with a closed
+   answer grammar ([13-intake.md](13-intake.md) §Phrase review).
 3. The hosted privacy policy
    ([../docs/privacy-policy.md](../docs/privacy-policy.md), served from
    GitHub Pages) mirrors this destination list — it is the same register,

@@ -48,9 +48,11 @@ extraction and analysis" step happens at analyze.
 
 Turns, in order:
 
-1. **Extracted phrases** — review what extraction found ("I found these
-   skills — keep all, or edit the list"). Replaces the y/n/a flow of
-   `review_extracted`; retires `extracted_approvals.json`.
+1. **Extracted phrases** — review what extraction found, **focus first,
+   background automatic** (design revision 2026-10-17, replacing the
+   original "keep all, or edit the list" wording — see §Phrase review
+   below). Replaces the y/n/a flow of `review_extracted`; retires
+   `extracted_approvals.json`.
 2. **Implied skills** — proposals with evidence, keep/drop each. Replaces
    `propose_implied`'s y/n/a flow; retires `implied_skills.json`.
 3. **Depth + intent** — the gate's self-assessment questions (depth 1–5 +
@@ -99,6 +101,76 @@ extension capture JDs ([12-extension.md](12-extension.md)), and
 `resume_to_skills_json()` does resume extraction
 ([04-reader.md](04-reader.md) S1) — with its `ask_fn` seam now fed by the
 chat instead of stdin.
+
+## Phrase review — focus first, background automatic (revised 2026-10-17)
+
+Origin: first live M9 run (2026-10-13) — the phrase turn listed all 80
+extracted phrases in one question and accepted bare `none`/"`n`"/"`no`"
+as "drop everything". The user answered "none" meaning "drop nothing" and
+the run silently reduced the graph to 0 skills (post-mortem learnings in
+roadmap M9). Two defects share one cause: a high-stakes parse on an
+ambiguous one-word input, presented with more information than a person
+can hold in one pass. The redesign fixes both.
+
+**A. The list is triaged, not dumped.** The turn shows only the
+**focus phrases** — the extracted phrases that can affect the gap table:
+
+- phrases whose canonical term is a **target skill** of the captured JDs,
+  or a **pruned candidate source** for one (`judge.prune_candidates` — the
+  same keyword-overlap + lexicon-hints filter the judge itself uses), or
+  an **alternative-group member** of some target
+  (`requirements.group_for` — alt-bridged rows read these);
+- everything else is **background**: structurally incapable of changing
+  any gap row in this run (it enters the graph but no target draws a
+  transfer from it). Background phrases are **kept automatically** — the
+  safe default: keeping a skill can only add transfer evidence, never
+  create a gap — and the turn states how many were auto-kept.
+  `show background` lists them (grouped, numbered, same grammar) for the
+  user who wants to review everything. Exception: when **no** focus phrase
+  is pending (e.g. a re-run whose extraction only added background
+  items), everything pending is listed instead — new items are never
+  hidden when there is no focus list to show them against (same spirit as
+  §Freshness: nothing new is ever silently absorbed).
+
+**B. The focus list is grouped**, under the extraction's own conceptual
+categories (the skills-JSON hierarchy's top-level keys — e.g. "Machine
+Learning", "Data Engineering"): the user scans ~5 group headers, not 80
+flat lines. Numbering stays global across groups so the answer grammar's
+indices are unambiguous.
+
+**C. The answer grammar is closed — no bare destructive word exists.**
+Exactly these forms, everything else (including `none`, `n`, `no`, `y`,
+`yes`, prose) is rejected with a hint restating them:
+
+| Answer | Meaning |
+|---|---|
+| `keep all` (or `all`) | include every listed phrase (drop none) |
+| `drop all` | include none of the listed phrases (the only whole-set destructive form — must be typed in full) |
+| `drop: 3,5` | drop just those numbers, keep the rest |
+| `keep: 3,5` | keep just those numbers, drop the rest |
+| `add: <skill>` | add a missing skill |
+| `show background` | list the auto-kept background phrases too |
+
+The prompt states the three intents in the user's words — **include all**
+(keep all), **include some** (`drop:`/`keep:` with numbers), **include
+none** (`drop all`) — so the destructive reading is never a guess.
+`drop all`/`keep all` apply to the **listed** set only; auto-kept
+background phrases are never dropped without `show background` first.
+
+**D. The panel gives immediate feedback (client contract).** On Send the
+input and button disable at once and a pending hint appears ("sending…")
+— a silent multi-second gap with a live blue button is indistinguishable
+from a missed click and invites the double-Enter that produced stale-turn
+400s in the first run. The Send path is single-flight (a second Enter
+while a request is in flight is ignored); answers that the server rejects
+re-render inline next to the input, not only in the status line, and
+re-enable the input.
+
+**Parser hardening (same root cause, other turns).** Depth answers must
+be a bare `1`–`5` (optionally followed by `n`); checklist answers must be
+per-concept `y`/`n` tokens. Pasted prose is rejected with a format hint —
+a regex scraping the first digit or letter out of a paragraph silently
+grades the wrong thing, which is worse than a rejected answer.
 
 ## Skill validation
 

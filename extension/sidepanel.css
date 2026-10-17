@@ -130,6 +130,10 @@ code {
   color: var(--danger);
 }
 
+#intakeerror {
+  color: var(--danger);
+}
+
 .banner {
   margin: 8px 0;
   padding: 8px 10px;

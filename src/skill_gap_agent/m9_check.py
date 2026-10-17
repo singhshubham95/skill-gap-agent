@@ -237,6 +237,233 @@ def check_intake_chat() -> None:
     print("intake chat OK: turn order, panel-close resume, profile grades, skip path")
 
 
+def check_phrase_review_safety() -> None:
+    """T-M9-fix-ux regressions (specs/13-intake.md §Phrase review).
+
+    Encodes the 2026-10-13 incident: bare 'none' silently dropped all 80
+    phrases, the graph ran with 0 skills, and every gap row degraded to
+    "Rule-based"/"LLM (cached)". The closed grammar, the focus/background
+    split, the strict parsers, and the stale-source edge reuse fix must all
+    hold.
+    """
+    from .intake import focus_phrases
+    from .resume import phrase_groups
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        src = root / "resume.json"
+        src.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src), ignore_errors=True)  # hermetic
+
+        def fresh(phrases, focus=None, groups=None):
+            return IntakeSession(
+                source_sha=source_sha(src), source_path=src,
+                phrases=list(phrases), implied=[], triaged=[],
+                validator=FakeValidator(), use_llm=True,
+                focus=focus, groups=groups,
+            )
+
+        # 1. The incident: bare ambiguous words are REJECTED, never a
+        #    destructive "drop everything".
+        sess = fresh(["Alpha", "Beta", "Gamma"])
+        t = sess.next_turn()
+        assert t.kind == "phrases", t
+        for bad in ("none", "n", "no", "y", "yes", "a", "whatever they are"):
+            r = sess.answer(t.id, bad)
+            assert not r["ok"], (bad, r)
+            assert sess.profile["phrases"] == {}, (bad, sess.profile["phrases"])
+        # The rejection hint must name the explicit destructive form.
+        assert "drop all" in (r.get("error") or ""), r
+
+        # 2. Explicit intents behave as labeled.
+        r = sess.answer(t.id, "keep all")
+        assert r["ok"], r
+        assert sess.profile["phrases"] == {
+            "Alpha": True, "Beta": True, "Gamma": True,
+        }, sess.profile["phrases"]
+
+        src2 = root / "resume2.json"
+        src2.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src2), ignore_errors=True)
+        sess2 = IntakeSession(
+            source_sha=source_sha(src2), source_path=src2,
+            phrases=["Alpha", "Beta", "Gamma"], implied=[], triaged=[],
+            validator=FakeValidator(), use_llm=True,
+        )
+        t2 = sess2.next_turn()
+        r = sess2.answer(t2.id, "drop all")  # destructive, but explicit
+        assert r["ok"], r
+        assert sess2.profile["phrases"] == {
+            "Alpha": False, "Beta": False, "Gamma": False,
+        }, sess2.profile["phrases"]
+
+        src3 = root / "resume3.json"
+        src3.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src3), ignore_errors=True)
+        sess3 = IntakeSession(
+            source_sha=source_sha(src3), source_path=src3,
+            phrases=["Alpha", "Beta", "Gamma"], implied=[], triaged=[],
+            validator=FakeValidator(), use_llm=True,
+        )
+        t3 = sess3.next_turn()
+        r = sess3.answer(t3.id, "drop: 2")
+        assert r["ok"], r
+        assert sess3.profile["phrases"] == {
+            "Alpha": True, "Beta": False, "Gamma": True,
+        }, sess3.profile["phrases"]
+
+        # 3. Focus/background split: background is hidden and auto-kept (§A);
+        #    'show background' expands the listing (durable).
+        src4 = root / "resume4.json"
+        src4.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src4), ignore_errors=True)
+        sess4 = IntakeSession(
+            source_sha=source_sha(src4), source_path=src4,
+            phrases=["Focus skill", "Background skill"],
+            implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
+            focus={"Focus skill"},
+        )
+        t4 = sess4.next_turn()
+        assert t4.payload["phrases"] == ["Focus skill"], t4.payload
+        assert t4.payload["hidden"] == 1, t4.payload
+        r = sess4.answer(t4.id, "show background")
+        assert r["ok"], r
+        t4b = sess4.next_turn()
+        assert t4b.kind == "phrases" and set(t4b.payload["phrases"]) == {
+            "Focus skill", "Background skill",
+        }, t4b.payload
+        assert t4b.payload["hidden"] == 0 and t4b.payload["expanded"], t4b.payload
+        r = sess4.answer(t4b.id, "keep all")
+        assert r["ok"], r
+        assert sess4.profile["phrases"] == {
+            "Focus skill": True, "Background skill": True,
+        }, sess4.profile["phrases"]
+        # The expanded view survives a panel close (durability rule).
+        sess4b = IntakeSession(
+            source_sha=source_sha(src4), source_path=src4,
+            phrases=["Focus skill", "Background skill"],
+            implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
+            focus={"Focus skill"},
+        )
+        assert sess4b._show_background, "phrases_expanded must persist"
+
+        # Background auto-keep without expansion: hidden items are kept.
+        src5 = root / "resume5.json"
+        src5.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src5), ignore_errors=True)
+        sess5 = IntakeSession(
+            source_sha=source_sha(src5), source_path=src5,
+            phrases=["Focus skill", "Background skill"],
+            implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
+            focus={"Focus skill"},
+        )
+        t5 = sess5.next_turn()
+        r = sess5.answer(t5.id, "drop all")  # drops the LISTED focus only
+        assert r["ok"], r
+        assert sess5.profile["phrases"] == {
+            "Focus skill": False, "Background skill": True,
+        }, sess5.profile["phrases"]
+
+        # 4. Grouping (§B): labels come from the extraction hierarchy's
+        #    top-level keys and ride along in the payload.
+        data = {"skills": {
+            "Machine Learning": {"NLP": ["Transformers", "Word2vec"]},
+            "Data Engineering": {"Pipelines": ["Airflow"]},
+        }}
+        groups = phrase_groups(data)
+        assert groups == {
+            "Transformers": "Machine Learning",
+            "Word2vec": "Machine Learning",
+            "Airflow": "Data Engineering",
+        }, groups
+        src6 = root / "resume6.json"
+        src6.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src6), ignore_errors=True)
+        sess6 = IntakeSession(
+            source_sha=source_sha(src6), source_path=src6,
+            phrases=["Transformers", "Word2vec", "Airflow"],
+            implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
+            groups=groups,
+        )
+        t6 = sess6.next_turn()
+        assert t6.payload["group_labels"] == [
+            "Machine Learning", "Machine Learning", "Data Engineering",
+        ], t6.payload
+
+        # 5. Focus filter (§A): targets, pruned candidates, and alt-group
+        #    members are focus; the rest is background. (The candidate list
+        #    must exceed k=5 with genuine matches so the zero-overlap item
+        #    is not a top-k fill.)
+        phrases = [
+            "Kafka streaming", "Data streaming", "Streaming data ops",
+            "Real-time streaming", "Streaming platforms", "Event streaming",
+            "Knitting",
+        ]
+        focus = focus_phrases(phrases, {"Streaming data": 3})
+        assert "Kafka streaming" in focus, focus
+        assert "Knitting" not in focus, focus
+
+        # 6. Strict depth/checklist parsers (§Phrase review D tail): pasted
+        #    prose is rejected, not scraped for a digit or letter.
+        src7 = root / "resume7.json"
+        src7.write_text("{}", encoding="utf-8")
+        shutil.rmtree(session_dir(src7), ignore_errors=True)
+        sess7 = IntakeSession(
+            source_sha=source_sha(src7), source_path=src7,
+            phrases=["Python"], implied=[], triaged=["Python"],
+            validator=FakeValidator(), use_llm=True,
+        )
+        assert sess7.answer(sess7.next_turn().id, "keep all")["ok"]
+        td_turn = sess7.next_turn()
+        assert td_turn.kind == "depth", td_turn
+        r = sess7.answer(td_turn.id, "I would say around 3 or 4 years of it")
+        assert not r["ok"], r
+        r = sess7.answer(td_turn.id, "3 n")
+        assert r["ok"], r
+        assert sess7.profile["depth"]["Python"] == "3"
+        assert sess7.profile["intent"]["Python"] == "declared-gap"
+        cl_turn = sess7.next_turn()
+        assert cl_turn.kind == "checklist", cl_turn
+        r = sess7.answer(cl_turn.id, "yes I know both of these concepts well")
+        assert not r["ok"], r
+        r = sess7.answer(cl_turn.id, "y,n")
+        assert r["ok"], r
+
+    # 7. Stale-source edge reuse (cli._copy_previous_transfers): an edge
+    #    whose SOURCE skill was dropped this run must not replay as an
+    #    "LLM (cached)" row citing the dropped skill.
+    from .cli import _copy_previous_transfers
+    from .graph import Skill, SkillSource
+
+    with tempfile.TemporaryDirectory() as td:
+        session = Path(td) / "session"
+        session.mkdir()
+        prev = SkillGraph()
+        prev.add_skill(Skill(name="Dropped skill", source=SkillSource.CURRENT))
+        prev.add_skill(Skill(name="Kept skill", source=SkillSource.CURRENT))
+        prev.add_skill(Skill(name="Target", source=SkillSource.TARGET))
+        prev.add_transfers_to("Dropped skill", "Target", 0.6, "stale")
+        prev.g["skill:Dropped skill"]["skill:Target"]["depth_val"] = "3"
+        prev.add_transfers_to("Kept skill", "Target", 0.5, "good")
+        prev.g["skill:Kept skill"]["skill:Target"]["depth_val"] = "3"
+        prev.save(str(session / "graph.json"))
+
+        sg = SkillGraph()
+        sg.add_skill(Skill(name="Kept skill", source=SkillSource.CURRENT))
+        sg.add_skill(Skill(name="Target", source=SkillSource.TARGET))
+        reused = _copy_previous_transfers(
+            sg, session, {"Kept skill": "3", "Dropped skill": "3"}
+        )
+        assert reused == 1, reused
+        assert not sg.g.has_edge("skill:Dropped skill", "skill:Target")
+        assert sg.g.has_edge("skill:Kept skill", "skill:Target")
+    print(
+        "phrase review safety OK: closed grammar, explicit drop all, focus/"
+        "background + show background, grouping, strict parsers, stale-source "
+        "reuse refused"
+    )
+
+
 def check_validation_protocol() -> None:
     # Triage is JD-aware: candidates of the highest-weight targets only.
     weights = {"Streaming data": 3, "Data governance": 1}
@@ -666,14 +893,20 @@ def check_end_to_end() -> None:
         turn = turn_body["turn"]
         assert turn["kind"] == "phrases", turn
         asked = set(turn["payload"].get("phrases") or [])
-        assert asked == set(new_phrases), asked  # only the new items
+        # §Phrase review A: the chat asks exactly the new items that are
+        # focus (gap-relevant) — the rest of the new items are auto-kept
+        # background, never mixed into old answered items.
+        assert asked and asked <= set(new_phrases), (asked, new_phrases)
         turns_seen = _answer_intake_all(base)
         assert "phrases" in turns_seen, turns_seen
         _wait_status(base, "paused", phase="gaps")
         profile = load_profile(resume) or {}
         assert profile.get("completed"), profile
         for p in new_phrases:
-            assert profile.get("phrases", {}).get(p) is True, p
+            # Focus items kept by the answer; background auto-kept (§A).
+            assert profile.get("phrases", {}).get(p) is True, (
+                p, profile.get("phrases"),
+            )
 
         # 9. Nothing new -> no chat, and the skip is surfaced (never silent).
         code, body = _post(
@@ -770,13 +1003,24 @@ def check_panel_surface() -> None:
     assert "pause_phase" in js or "intake" in js, "panel must distinguish the pause"
     assert 'id="intakenote"' in html, "the skipped-chat note element is missing"
     assert "intake_note" in js, "panel must surface why the chat was skipped"
-    print("panel surface OK: chat region + intake endpoints + skip path + skip note wired")
+    # T-M9-fix-ux (specs/13-intake.md §Phrase review D): send feedback.
+    assert 'id="intakepending"' in html, "send pending hint element is missing"
+    assert 'id="intakeerror"' in html, "inline answer error element is missing"
+    assert "intakeBusy" in js and "setIntakeBusy" in js, (
+        "panel must guard the send path single-flight (double-Enter 400s)"
+    )
+    assert "group_labels" in js, "panel must render the grouped phrase list"
+    print(
+        "panel surface OK: chat region + intake endpoints + skip path + skip "
+        "note + send pending state/single-flight + grouped list wired"
+    )
 
 
 def main() -> None:
     retire_legacy_files()
     check_sessions()
     check_intake_chat()
+    check_phrase_review_safety()
     check_validation_protocol()
     check_depth_judge_and_gate()
     check_end_to_end()
