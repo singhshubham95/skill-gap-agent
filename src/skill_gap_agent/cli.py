@@ -301,7 +301,10 @@ def _copy_previous_transfers(sg: SkillGraph, out_dir: Path, depths: dict[str, st
     prev = SkillGraph.load(str(prev_path))
     reused = 0
     for u, v, d in prev.g.edges(data=True):
-        if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(v):
+        # Both endpoints must survive the review: an edge whose source skill
+        # was dropped this run must not replay (its "LLM (cached)" row would
+        # cite a skill the user just rejected — T-M9-fix-ux).
+        if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(u) and sg.g.has_node(v):
             source = u.removeprefix("skill:")
             if str(d.get("depth_val", "")) != str(depths.get(source, "")):
                 continue  # stale depth stamp -> re-judge
@@ -641,9 +644,9 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
     """
     from .implied import detect_implied
     from .ingest import jd_target_weights
-    from .intake import IntakeSession, drive
+    from .intake import IntakeSession, drive, focus_phrases
     from .normalize import canonical_term
-    from .resume import extract_to_artifact, flatten_phrases
+    from .resume import extract_to_artifact, flatten_phrases, phrase_groups
     from .validate import Validator, triage_skills
 
     if src_path.suffix.lower() == ".json":
@@ -677,6 +680,8 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
         triaged=triaged,
         validator=validator,
         use_llm=not args.no_llm,
+        focus=focus_phrases(phrases, weights),
+        groups=phrase_groups(data),
     )
     # Item-level freshness (specs/13-intake.md §Freshness): the chat asks
     # only what the profile hasn't answered — say so when there is nothing

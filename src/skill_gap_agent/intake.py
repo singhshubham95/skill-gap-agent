@@ -43,6 +43,7 @@ def new_profile(source_sha: str) -> dict:
         "version": PROFILE_VERSION,
         "source_sha256": source_sha,
         "phrases": {},  # phrase -> bool (kept?)
+        "phrases_expanded": False,  # 'show background' asked (view preference)
         "implied": {},  # skill -> bool (add?)
         "depth": {},  # skill -> "1".."5"
         "intent": {},  # skill -> "count" | "declared-gap"
@@ -77,9 +78,6 @@ class Turn:
     skippable: bool = True
 
 
-_DEPTH_RE = re.compile(r"\b([1-5])\b")
-
-
 def _parse_indices(text: str, n: int) -> set[int]:
     """'3,5-7' -> {3,5,6,7} (1-based indices)."""
     out: set[int] = set()
@@ -93,6 +91,31 @@ def _parse_indices(text: str, n: int) -> set[int]:
             if 1 <= i <= n:
                 out.add(i)
     return out
+
+
+def focus_phrases(phrases: list[str], jd_weights: dict[str, int]) -> set[str]:
+    """Phrases that can affect a gap row this run (specs/13-intake.md §Phrase
+    review A): a target skill of the captured JDs, a pruned candidate source
+    for one, or an alternative-group member of one. Everything else is
+    background — no target draws a transfer from it, so it cannot change any
+    score. No JDs -> nothing to triage against -> everything is focus.
+    """
+    if not jd_weights:
+        return set(phrases)
+    from .judge import prune_candidates
+    from .normalize import canonical_term
+    from .requirements import group_for
+
+    canonical = sorted({canonical_term(p) for p in phrases} - {""})
+    wanted: set[str] = set()
+    for target in jd_weights:
+        wanted.add(canonical_term(target))
+        wanted.update(prune_candidates(target, canonical))
+        group = group_for(target)
+        if group is not None:
+            wanted.update(group.members)
+    wanted_low = {w.lower() for w in wanted}
+    return {p for p in phrases if canonical_term(p).lower() in wanted_low}
 
 
 class IntakeSession:
@@ -112,6 +135,8 @@ class IntakeSession:
         triaged: list[str],
         validator=None,
         use_llm: bool = True,
+        focus: set[str] | None = None,
+        groups: dict[str, str] | None = None,
     ) -> None:
         self.source_sha = source_sha
         self.source_path = source_path
@@ -120,7 +145,16 @@ class IntakeSession:
         self.triaged = list(triaged)
         self.validator = validator
         self.use_llm = use_llm
+        # §Phrase review A/B: `focus` = phrases that can affect a gap row
+        # (None -> everything is focus); `groups` = phrase -> conceptual
+        # category label for grouped display. Both optional: tests and
+        # non-JD runs get the flat, unfiltered listing.
+        self.focus = set(focus) if focus is not None else set(self.phrases)
+        self.groups = dict(groups or {})
         self.profile = load_or_create_profile(source_sha, source_path)
+        # Durable view flag: once 'show background' is asked, later runs keep
+        # listing everything (panel-close safe, like every other answer).
+        self._show_background = bool(self.profile.get("phrases_expanded"))
 
     # -- persistence -------------------------------------------------------
 
@@ -157,19 +191,52 @@ class IntakeSession:
                     return t
         return Turn(id="complete", kind="complete", prompt="Profile ready.", skippable=False)
 
-    def _phrases_turn(self) -> Turn | None:
+    def _phrase_split(self) -> tuple[list[str], list[str]]:
+        """(listed, hidden) for the phrases turn (specs/13-intake.md §Phrase
+        review A): focus phrases are listed; background phrases are hidden
+        (auto-kept once the visible list is fully decided). When nothing
+        focus-relevant is pending, everything pending is listed — new items
+        are never hidden when there is no focus list to show them against.
+        """
         pending = [p for p in self.phrases if p not in self.profile["phrases"]]
-        if not pending:
+        if self._show_background:
+            return pending, []
+        focus_pending = [p for p in pending if p in self.focus]
+        if not focus_pending:
+            return pending, []
+        return focus_pending, [p for p in pending if p not in self.focus]
+
+    def _phrases_turn(self) -> Turn | None:
+        listed, hidden = self._phrase_split()
+        if not listed:
             return None
+        bg_note = ""
+        if hidden:
+            bg_note = (
+                f"\n{len(hidden)} other extracted skill(s) are kept automatically "
+                "(they cannot change your gap scores) - type 'show background' "
+                "to review them too."
+            )
         return Turn(
             id="phrases",
             kind="phrases",
             prompt=(
-                f"I extracted {len(pending)} skill phrase(s) from your resume. "
-                "Keep all, or tell me what to drop: 'all', 'none', 'drop: 3,5', "
-                "'keep: 1,2', or 'add: <skill>'."
+                f"I extracted {len(listed)} skill phrase(s) that matter for your "
+                "target jobs (listed below). Which should be INCLUDED in your "
+                "skill profile?\n"
+                "  include all (drop none)       -> 'keep all'\n"
+                "  include some, drop the rest   -> 'keep: 3,5' (keep only 3 and 5)\n"
+                "  drop some, keep the rest      -> 'drop: 3,5' (drop only 3 and 5)\n"
+                "  include none (drop all)       -> 'drop all'\n"
+                "  add a missing skill           -> 'add: <skill>'"
+                + bg_note
             ),
-            payload={"phrases": pending},
+            payload={
+                "phrases": listed,
+                "group_labels": [self.groups.get(p, "") for p in listed],
+                "hidden": len(hidden),
+                "expanded": self._show_background,
+            },
         )
 
     def _implied_turn(self) -> Turn | None:
@@ -266,30 +333,48 @@ class IntakeSession:
         }
 
     def _answer_phrases(self, turn_id: str, text: str) -> str | None:
-        pending = [p for p in self.phrases if p not in self.profile["phrases"]]
+        """Closed grammar (specs/13-intake.md §Phrase review C).
+
+        The destructive whole-set reading exists only as the explicit two-word
+        'drop all' — bare 'none'/'n'/'no'/prose is rejected with a hint. That
+        ambiguity silently emptied a user's whole skill graph in the first
+        live M9 run (roadmap M9 learnings).
+        """
+        listed, hidden = self._phrase_split()
         low = text.lower().strip()
-        if low in ("all", "a", "y", "yes", "keep"):
-            for p in pending:
-                self.profile["phrases"][p] = True
+        if low in ("show background", "show all", "background"):
+            if not hidden:
+                return "nothing else is hidden - every extracted skill is listed"
+            self._show_background = True
+            self.profile["phrases_expanded"] = True
             return None
-        if low in ("none", "n", "no"):
-            for p in pending:
-                self.profile["phrases"][p] = False
-            return None
-        m = re.match(r"(drop|keep|add)\s*:?\s*(.*)$", text, re.IGNORECASE)
-        if not m:
-            return "say 'all', 'none', 'drop: 3,5', 'keep: 1,2', or 'add: <skill>'"
-        verb, rest = m.group(1).lower(), m.group(2).strip()
-        if verb == "add":
-            if not rest:
-                return "add needs a skill name"
-            self.profile["phrases"][rest] = True
-            return None
-        idxs = _parse_indices(rest, len(pending))
-        if not idxs:
-            return "no valid indices"
-        for i, p in enumerate(pending, 1):
-            self.profile["phrases"][p] = (i in idxs) if verb == "keep" else (i not in idxs)
+        if low in ("keep all", "all", "keep: all", "keep everything"):
+            keep = set(listed)
+        elif low in ("drop all", "drop: all", "drop everything"):
+            keep = set()
+        else:
+            m = re.match(r"(drop|keep|add)\s*:?\s*(.+)$", text, re.IGNORECASE)
+            if not m:
+                return (
+                    "say 'keep all' (include all), 'keep: 3,5' (include only "
+                    "those), 'drop: 3,5' (drop just those), 'drop all' (include "
+                    "none), 'add: <skill>', or 'show background'"
+                )
+            verb, rest = m.group(1).lower(), m.group(2).strip()
+            if verb == "add":
+                self.profile["phrases"][rest] = True
+                return None
+            idxs = _parse_indices(rest, len(listed))
+            if not idxs:
+                return "no valid indices"
+            chosen = {p for i, p in enumerate(listed, 1) if i in idxs}
+            keep = chosen if verb == "keep" else set(listed) - chosen
+        for p in listed:
+            self.profile["phrases"][p] = p in keep
+        # §Phrase review A: background skills cannot change a gap score, so
+        # they are kept (the safe direction) once the visible list is decided.
+        for p in hidden:
+            self.profile["phrases"][p] = True
         return None
 
     def _answer_implied(self, turn_id: str, text: str) -> str | None:
@@ -309,23 +394,32 @@ class IntakeSession:
 
     def _answer_depth(self, turn_id: str, text: str) -> str | None:
         skill = turn_id.split(":", 1)[1] if ":" in turn_id else ""
-        m = _DEPTH_RE.search(text)
+        # Strict parse (specs/13-intake.md §Phrase review D): pasted prose is
+        # rejected — scraping the first 1-5 digit out of a paragraph silently
+        # records a depth the user never said.
+        m = re.fullmatch(r"\s*([1-5])\s*([nN])?\s*", text)
         if not m:
-            return "answer 1-5 (optionally followed by n to not count the area)"
+            return "answer just a number 1-5 (optionally followed by n), e.g. '3'"
         self.profile["depth"][skill] = m.group(1)
         self.profile["intent"][skill] = (
-            INTENT_DECLARED if re.search(r"\bn\b", text.lower()) else INTENT_COUNT
+            INTENT_DECLARED if m.group(2) else INTENT_COUNT
         )
         return None
 
     def _answer_checklist(self, turn_id: str, text: str) -> str | None:
         skill = turn_id.split(":", 1)[1] if ":" in turn_id else ""
         prog = self.profile["progress"].setdefault(skill, {})
-        flags = re.findall(r"[yn]", text.lower())
         concepts = prog.get("question", {}).get("concepts", [])
-        if len(flags) < len(concepts):
-            return f"answer per concept, e.g. 'y,n,y,n' ({len(concepts)} items)"
-        prog["checklist"] = flags[: len(concepts)]
+        # Strict parse: each concept gets one y/n token ('y,n,y' style) —
+        # letters scraped from prose are not answers.
+        tokens = [t for t in re.split(r"[^a-z]+", text.lower()) if t]
+        flags = [
+            1 if t in ("y", "yes") else 0 if t in ("n", "no") else None
+            for t in tokens
+        ]
+        if None in flags or len(flags) < len(concepts):
+            return f"answer per concept with y/n, e.g. 'y,n,y,n' ({len(concepts)} items)"
+        prog["checklist"] = [f for f in flags if f is not None][: len(concepts)]
         prog["checklist_done"] = True
         self._save()
         return None

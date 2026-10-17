@@ -12,6 +12,19 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M9-fix-ux: Phrase-review UX + safety — the phrase question no longer
+  dumps every extracted phrase in one 80-line prompt: gap-relevant phrases
+  are listed first under the extractor's own category headers, the rest
+  kept automatically (`show background` reviews them). Answer grammar is
+  closed: bare `none`/`n`/`no`/prose is rejected with a hint, whole-set
+  dropping requires the explicit `drop all` (a bare "none" silently emptied
+  a user's 80-phrase skill graph in the live run). Panel send gives
+  immediate feedback (pending hint, single-flight, inline errors); depth
+  and checklist answers reject pasted prose instead of scraping digits
+  out of it; cached transfer edges whose source skill was dropped no
+  longer replay as "LLM (cached)" rows; `--debug` now logs why an intake
+  answer was rejected and the kept/dropped counts (spec:
+  [13-intake.md](../specs/13-intake.md) §Phrase review)
 - T-M26: Local debug mode for extension testing — `server.py --debug
   [--debug-payloads]` (also `start-server.bat --debug`) adds local-only
   stage logs (request → run → all 8 LangGraph nodes → LLM call summaries)

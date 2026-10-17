@@ -490,9 +490,9 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
     """
     from .implied import detect_implied
     from .ingest import jd_target_weights
-    from .intake import IntakeSession
+    from .intake import IntakeSession, focus_phrases
     from .normalize import canonical_term
-    from .resume import extract_to_artifact, flatten_phrases
+    from .resume import extract_to_artifact, flatten_phrases, phrase_groups
     from .validate import Validator, triage_skills
 
     mode = (_resume.get("mode") or "paid").strip().lower()
@@ -528,6 +528,10 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
         triaged=triaged,
         validator=validator,
         use_llm=use_llm,
+        # §Phrase review A/B: ask only gap-relevant phrases, grouped by the
+        # extractor's own categories.
+        focus=focus_phrases(phrases, weights),
+        groups=phrase_groups(data),
     )
     # Sticky skip ("just use my resume as-is"): never re-ask anything —
     # auto-accept new extraction items under the same skip and continue.
@@ -1215,8 +1219,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if body.get("skip"):
                 sess.skip()
+                debuglog.dbg("intake", "answer: skip (use as-is)")
             elif isinstance(body.get("answers"), dict):
                 drive(sess, answers=body["answers"])
+                debuglog.dbg(
+                    "intake", f"answer: scripted x{len(body['answers'])}"
+                )
             else:
                 turn = sess.next_turn()
                 if turn is None or turn.kind == "complete":
@@ -1224,14 +1232,36 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     turn_id = str(body.get("turn_id") or turn.id)
                     if turn_id != turn.id:
+                        debuglog.dbg(
+                            "intake",
+                            f"answer rejected: turn {turn_id} is not current "
+                            f"({turn.id})",
+                        )
                         self._json(400, {
                             "error": f"turn {turn_id!r} is not current ({turn.id})",
                         })
                         return
                     result = sess.answer(turn.id, str(body.get("text") or ""))
                     if not result["ok"]:
+                        # Why an answer bounced (parse/format) — metadata only,
+                        # never the answer text itself.
+                        debuglog.dbg(
+                            "intake",
+                            f"answer rejected turn={turn.kind}: "
+                            f"{result.get('error') or 'bad answer'}",
+                        )
                         self._json(400, {"error": result.get("error") or "bad answer"})
                         return
+                    if turn.kind == "phrases":
+                        decided = sess.profile.get("phrases", {})
+                        kept = sum(1 for v in decided.values() if v)
+                        debuglog.dbg(
+                            "intake",
+                            f"phrases decided kept={kept} "
+                            f"dropped={len(decided) - kept}",
+                        )
+                    else:
+                        debuglog.dbg("intake", f"answer ok turn={turn.kind}")
         except (KeyError, ValueError) as e:
             self._json(400, {"error": str(e)})
             return

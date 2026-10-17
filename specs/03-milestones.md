@@ -297,6 +297,46 @@ pipeline stage.
    `ruff` clean, `pytest` 52 passed, full check sweep green (m13/m15
    fixtures updated to write valid `source_sha256` profiles — the
    anti-cross-profile rule correctly discarded their empty-SHA ones).
+   **Post-build fix #2 (2026-10-17 — phrase review + send feedback;
+   T-M9-fix-ux):** the second live run answered all questions yet the gap
+   table showed every row as "Rule-based"/"LLM (cached)". Root cause: the
+   phrase turn's bare `none`/`n`/`no` meant "drop everything", the prompt
+   read as "drop none = keep all", and one such answer silently emptied
+   the 80-phrase graph (kept 0 / dropped 80) — every target then hit
+   "no candidates" (structural 0 → `Rule-based`) while
+   `_copy_previous_transfers` replayed 20 stale edges from the previous
+   run's `graph.json`, including edges whose source phrase had just been
+   dropped ("LLM (cached)"). One ambiguity, three symptoms. Fixes
+   (design home: 13-intake.md §Phrase review, revised in place):
+   1. *Closed answer grammar*: whole-set dropping exists only as the
+      explicit `drop all`; bare ambiguous words are rejected with a hint
+      that names both readings. The prompt states the three intents
+      (include all / some / none) in the user's words.
+   2. *Focus-first listing*: only gap-relevant phrases (targets, pruned
+      candidates, alt-group members) are asked; the rest is background,
+      kept automatically (safe direction — background cannot change a
+      score), `show background` expands (durable). Listing is grouped by
+      the extraction's own categories — 80 flat lines became ~5 headers.
+   3. *Strict parsers*: depth answers must be a bare `1-5`(+`n`);
+      checklist answers per-concept `y/n` tokens — pasted prose is
+      rejected, never scraped for a digit/letter.
+   4. *Stale-source reuse refused*: `_copy_previous_transfers` requires
+      both edge endpoints to exist in the current graph.
+   5. *Panel send feedback* (the small UX concern): pending hint +
+      single-flight Send (the double-Enter race was producing the run's
+      mid-chat 400s) + inline errors that keep the typed answer.
+   Learnings: (a) a destructive default on an ambiguous one-word input is
+   a bug even when documented — the fix is a closed grammar, not better
+   wording; (b) provenance labels were honest but the run was degenerate:
+   "LLM (cached)" rows cited skills the same run had dropped — cache
+   reuse must check the source survives the review, not just the target;
+   (c) the M26 debug mode landed in between and the fix adds the missing
+   intake-answer rejection line + kept/dropped counts (`--debug`), so the
+   next incident of this class is diagnosable from the console alone.
+   Verified: `m9_check` FULL PASS (new `check_phrase_review_safety`: the
+   incident encoded as regressions), `m26_check` PASS, `ruff` clean,
+   `pytest` 59 passed. Live session remediated (phrases map reset with a
+   `.bak` sidecar; depth/implied/proficiency answers preserved).
 10. **OSS issue sourcing (GFI thin slice).** ✅ Built 2026-09-28
     (mechanics in S6 `09-practice-planner.md`). New `oss.py`
     consumed from `rank_gaps()` `Gap` objects: 2-attempt search loop

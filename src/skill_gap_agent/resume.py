@@ -468,6 +468,34 @@ def extract_to_artifact(
 flatten_phrases = _flatten_phrases
 
 
+def phrase_groups(data: dict) -> dict[str, str]:
+    """Phrase -> top-level category label from the skills-JSON hierarchy.
+
+    The extraction artifact organizes phrases as
+    `{"skills": {category: {subcategory: [phrases]}}}` — the labels are the
+    extractor's own conceptual grouping, reused for the intake chat's
+    grouped listing (specs/13-intake.md §Phrase review B). Missing labels
+    fall back to "" (flat listing).
+    """
+    out: dict[str, str] = {}
+
+    def walk(obj, label: str) -> None:
+        if isinstance(obj, str):
+            out.setdefault(obj, label)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                walk(v, label)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item, label)
+
+    skills = data.get("skills", data)
+    if isinstance(skills, dict):
+        for cat, v in skills.items():
+            walk(v, str(cat))  # top-level key = the conceptual group
+    return out
+
+
 def resume_to_skills_json(
     resume_path: str | Path,
     artifact_path: str | Path = EXTRACTED_PATH,
