@@ -235,12 +235,13 @@ background server and the graph run it drives. Origin: user request
 2026-10-13 (extension testing has no server-side visibility).
 
 **Local-only, and never tracing.** Debug logs go to the server's own
-console and nowhere else — no network service, no key, no export. This is
-a different tool from M17's LangSmith tracing and loosens nothing in
-§Scope boundary above: `server.py` still never enables tracing and still
-scrubs `LANGSMITH_*` at startup, and the new `debuglog.py` imports no
-network or `langsmith` module. `m26_check.py` re-asserts this next to the
-M17 boundary checks.
+console — and, since 2026-10-18, mirror to one local log file
+(§Log-file mirror below) — and nowhere else: no network service, no key,
+no export. This is a different tool from M17's LangSmith tracing and
+loosens nothing in §Scope boundary above: `server.py` still never enables
+tracing and still scrubs `LANGSMITH_*` at startup, and the new
+`debuglog.py` imports no network or `langsmith` module. `m26_check.py`
+re-asserts this next to the M17 boundary checks.
 
 **Flag surface.** `python -m skill_gap_agent.server --debug
 [--debug-payloads]` — `tools/start-server.bat --debug` reaches it through
@@ -284,7 +285,9 @@ produces them:
 **Implementation shape — one owner.** `debuglog.py` owns the logging
 setup and the `dbg()` / stage-timing helpers (stdlib `logging`, one
 console handler — writing to **stderr**, so normal-mode stdout stays
-byte-stable even in debug mode); no other module configures logging.
+byte-stable even in debug mode — plus, in debug mode, one file handler
+mirroring the same lines, §Log-file mirror); no other module configures
+logging.
 Hook points are
 thin calls: node enter/exit wrappers where `cli.py` defines the graph
 nodes, one call-summary hook inside `llm.py`'s single door, request/run
@@ -295,12 +298,25 @@ the existing checks that assert on current prints must stay green.
 **Explicit non-goals (recorded, not oversights):** shipping logs to any
 network service (§Scope boundary, and the M21 "the developer receives
 nothing" claim keeps holding — logs never leave the machine); logging
-extension JS (Chrome DevTools is the client-side console); log files on
-disk (payload PII would land in `output/`, and console scrollback is the
-developer's to save — restore trigger: a live debugging session where the
-console scrolls too fast to follow); log rotation or extra levels; a
-`--debug` flag on `cli.py` / `sweep.py` (the hooks already live in shared
-code, so adding the flags later needs no design change).
+extension JS (Chrome DevTools is the client-side console); ~~log files on
+disk~~ **restored 2026-10-18** — the recorded trigger fired ("a live
+debugging session where the console scrolls too fast to follow": terminal
+scrollback truncated the start of a real run), see §Log-file mirror;
+log rotation or extra levels (still out); a `--debug` flag on `cli.py` /
+`sweep.py` (the hooks already live in shared code, so adding the flags
+later needs no design change).
+
+**Log-file mirror (added 2026-10-18, restore-triggered).** Whenever
+`--debug` (or `--debug-payloads`) is on, every formatted line is also
+appended to `output/logs/server-<YYYYMMDD-HHMMSS>.log` — one file per
+server start, timestamped at startup, whose path is printed as the first
+debug line. The console output is unchanged; without `--debug` no file is
+opened and normal mode stays byte-stable. `output/` is gitignored, and
+under `--debug-payloads` the file carries prompt/response bodies
+(resume/JD text — PII): the file is as local as the console, §Scope
+boundary is unchanged (nothing networked, nothing rotated), and the M21
+"logs never leave the machine" claim keeps holding. `m26_check.py`
+asserts the mirror alongside the console assertions.
 
 **Done criteria:** (1) `tools/start-server.bat --debug` + one extension
 panel run prints request → run → per-node → per-LLM-call lines sharing

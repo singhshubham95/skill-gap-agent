@@ -504,6 +504,9 @@ function updateRunGate() {
   // Free mode without consent cannot run (M16 B consent gate).
   const freeUnconsented = selectedMode() === "free" && !$("privacyack").checked;
   $("analyze").disabled = running || freeUnconsented;
+  // Fresh analysis is not a run and sends nothing to the LLM — it only
+  // waits for the active run to finish (specs/12-extension.md §Fresh analysis).
+  $("clearcache").disabled = running;
 }
 
 function onModeChange() {
@@ -1018,6 +1021,39 @@ async function checkConnection() {
   }
 }
 
+// ---- fresh analysis (clear LLM caches) ------------------------------------
+// specs/12-extension.md §Fresh analysis: drops graph.json/judge_report.json/
+// questions.json for the current session — chat answers and captured JDs
+// survive; the next Analyze re-judges every target with the LLM.
+async function freshAnalysis() {
+  if (!window.confirm(
+    "Clear cached AI judgments? Your chat answers and captured JDs are " +
+    "kept — the next Analyze re-judges with the AI."
+  )) return;
+  const btn = $("clearcache");
+  btn.disabled = true;
+  const out = $("cachestate");
+  out.hidden = false;
+  out.classList.remove("error");
+  out.textContent = "Clearing…";
+  try {
+    const r = await fetch(server + "/api/session/clear-cache", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    const cleared = (data.cleared || []).join(", ") || "nothing to clear";
+    out.textContent = "Cleared: " + cleared + " — next Analyze is fresh.";
+  } catch (e) {
+    out.classList.add("error");
+    out.textContent = "Clear failed: " + e.message;
+  } finally {
+    updateRunGate();
+  }
+}
+
 // ---- wiring ---------------------------------------------------------------
 
 $("themebtn").addEventListener("click", async () => {
@@ -1028,6 +1064,7 @@ $("themebtn").addEventListener("click", async () => {
 });
 $("capture").addEventListener("click", captureJd);
 $("analyze").addEventListener("click", analyze);
+$("clearcache").addEventListener("click", freshAnalysis);
 $("intakesend").addEventListener("click", () =>
   sendIntakeAnswer($("intakeanswer").value)
 );

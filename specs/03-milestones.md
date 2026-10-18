@@ -600,6 +600,48 @@ pipeline stage.
       - **The stale-server gotcha struck a fourth time** (old process
         held port 8000 before the smoke); the documented "restart the
         server after code changes" rule again saved the diagnosis.
+    - **Post-build fix (2026-10-18 — honest judge cache + Fresh analysis
+      + debug log file; T-M15-fix-cache):** the third live run showed
+      every gap row labeled `LLM (cached)` although the same run had just
+      paid 15 fresh judge calls (the M26 `--debug-payloads` log proved
+      both facts). Two defects fixed + two features added (design home:
+      [12-extension.md](12-extension.md) §Judge cache reuse + §Fresh
+      analysis; [14-observability.md](14-observability.md) §Local debug
+      mode):
+      1. *Reuse never skipped* — the M15 learning above, finally fixed
+         as predicted: `node_judge` now sends to the LLM only targets
+         with no reusable edge or with ≥1 stamp-refused edge
+         (`_reuse_pending`); a cached target makes **0 judge calls**, so
+         the M13 "don't re-pay ~20 calls" promise finally holds.
+      2. *The `cached` flag stuck* — networkx `add_edge` on an existing
+         edge updates only the attributes named and silently keeps the
+         rest, so re-judged pairs kept the copied `cached: True` and
+         fresh scores rendered "LLM (cached)". Both edge write sites now
+         set the flag explicitly (copy → `True`, judge → `False`).
+      3. *Fresh analysis* (user request 2026-10-18): the panel's one
+         cache control — `POST /api/session/clear-cache` removes exactly
+         `graph.json`/`judge_report.json`/`questions.json` (chat answers,
+         captured JDs and extraction artifacts survive); the next
+         Analyze re-judges fresh.
+      4. *Debug log file* — the M26 §Local debug mode restore trigger
+         fired (console scrollback truncated the incident's own logs):
+         `--debug` mirrors every line to
+         `output/logs/server-<timestamp>.log`, path printed at startup.
+      Learnings: (a) the M15 harness's deterministic judge stub hid the
+      skip defect — the test asserted labels but never counted judge
+      calls, so a fully re-judged run passed as "cached"; the regression
+      now counts calls (0 on a cached re-run); (b) update-in-place edge
+      writes silently retain attributes — a provenance marker must be
+      written at every write site, never inherited; (c) the incident's
+      "cached" output was half design (same resume SHA → session
+      resumed) and half bug — the design half is now visible as 0-call
+      re-runs plus a user-controlled clear.
+      Verified: `m15_check` PASS (fresh run pays, reuse 0 calls, stale
+      stamps re-judge, clear-cache re-judge), `m9_check` + `m26_check`
+      PASS (new log-file mirror assertions), full mN sweep green,
+      `ruff` clean, `pytest` 59 passed
+      (`board/verify-T-M15-fix-cache.md`). Human live re-test with the
+      extension remains (§Open).
 
 16. **Free-tier LLM access — connect button + free models + retry
     hardening.** ✅ Built 2026-10-06 (designed 2026-10-05; interactive
@@ -1015,9 +1057,12 @@ pipeline stage.
     - **Done criteria:** see
       [14-observability.md](14-observability.md) §Local debug mode.
     - **Explicit non-goals:** network export (locked — §Scope boundary),
-      extension JS logging (Chrome DevTools covers it), log files on disk
-      (payload PII; restore trigger in the design section), log rotation
-      or extra levels, `--debug` on `cli.py`/`sweep.py` (trivial
+      extension JS logging (Chrome DevTools covers it), ~~log files on
+      disk~~ **restored 2026-10-18** — the trigger fired and `--debug`
+      now mirrors to `output/logs/server-<timestamp>.log` (record: M15
+      post-build fix above; design:
+      [14-observability.md](14-observability.md) §Log-file mirror), log
+      rotation or extra levels, `--debug` on `cli.py`/`sweep.py` (trivial
       follow-up, no design change needed).
     - **Verification record (2026-10-13):** `python scripts/verify.py
       --task T-M26` ALL CHECKS PASS — `ruff check .`, `pytest` (59),

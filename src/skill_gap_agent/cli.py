@@ -32,7 +32,7 @@ import operator
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NamedTuple, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -285,7 +285,17 @@ def _save_profile_key(state: AgentState, key: str, value: dict) -> None:
     save_profile(src, profile)
 
 
-def _copy_previous_transfers(sg: SkillGraph, out_dir: Path, depths: dict[str, str]) -> int:
+class ReuseResult(NamedTuple):
+    """What `_copy_previous_transfers` found in the previous graph (M15-fix)."""
+
+    reused: int
+    copied_targets: set[str]  # targets that kept ≥1 reusable edge
+    stale_targets: set[str]  # targets with ≥1 stamp-refused edge
+
+
+def _copy_previous_transfers(
+    sg: SkillGraph, out_dir: Path, depths: dict[str, str]
+) -> ReuseResult:
     """Copy TRANSFERS_TO edges from the last saved graph into this run.
 
     Copied edges are marked cached=True so ranking can label their rows
@@ -293,24 +303,44 @@ def _copy_previous_transfers(sg: SkillGraph, out_dir: Path, depths: dict[str, st
     M9 stamp rule: an edge is reusable only while its source's depth is
     unchanged from when the score was computed (`depth_val`); a changed
     depth re-judges the affected targets (specs/13-intake.md §Depth-aware
-    judge) — never silently replays a stale-depth score.
+    judge) — never silently replays a stale-depth score. The result names
+    both sets so node_judge can SKIP the LLM for reused targets and
+    re-judge only the stale/absent ones (specs/12-extension.md §Judge
+    cache reuse).
     """
     prev_path = out_dir / "graph.json"
     if not prev_path.exists():
-        return 0
+        return ReuseResult(0, set(), set())
     prev = SkillGraph.load(str(prev_path))
     reused = 0
+    copied_targets: set[str] = set()
+    stale_targets: set[str] = set()
     for u, v, d in prev.g.edges(data=True):
         # Both endpoints must survive the review: an edge whose source skill
         # was dropped this run must not replay (its "LLM (cached)" row would
         # cite a skill the user just rejected — T-M9-fix-ux).
         if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(u) and sg.g.has_node(v):
             source = u.removeprefix("skill:")
+            target = v.removeprefix("skill:")
             if str(d.get("depth_val", "")) != str(depths.get(source, "")):
-                continue  # stale depth stamp -> re-judge
+                stale_targets.add(target)  # stale depth stamp -> re-judge
+                continue
             sg.g.add_edge(u, v, **{**d, "cached": True})
+            copied_targets.add(target)
             reused += 1
-    return reused
+    return ReuseResult(reused, copied_targets, stale_targets)
+
+
+def _reuse_pending(unmatched: list[str], reuse: ReuseResult) -> list[str]:
+    """Targets still to judge under `reuse_judged` (M15-fix skip rule).
+
+    A target is skipped only when it kept ≥1 reusable edge AND none of its
+    edges was refused as stale; targets with no reusable edge (never
+    judged, or previously judged with no qualifying transfer) fall through
+    to fresh judging.
+    """
+    cached_ok = reuse.copied_targets - reuse.stale_targets
+    return [t for t in unmatched if t not in cached_ok]
 
 
 def _save_merged_judge_report(results: list, out_dir: Path) -> None:
@@ -353,8 +383,8 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
     if state.get("skip_judge") or state.get("reuse_judged"):
         profile = _profile(state)
         depths = _profile_depths(profile)
-        reused = _copy_previous_transfers(sg, _out(state), depths)
-        print(f"Reused {reused} TRANSFERS_TO edges from {_out(state) / 'graph.json'}")
+        reuse = _copy_previous_transfers(sg, _out(state), depths)
+        print(f"Reused {reuse.reused} TRANSFERS_TO edges from {_out(state) / 'graph.json'}")
         if state.get("skip_judge"):
             # --no-judge measures nothing new: remaining unmatched targets
             # are unjudged, not measured gaps (M15).
@@ -363,19 +393,34 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
                 "judged": False,
                 "unjudged": [{"target": t, "reason": None} for t in targets],
             }
-        # reuse_judged: targets whose edges were stale (depth changed) or
-        # absent fall through to fresh judging below.
-
-    profile = _profile(state)
-    depths = _profile_depths(profile)
-    unmatched = sg.unmatched_target_skills()
-    if not unmatched:
-        return {"judged": False}
-    print(f"Judging {len(unmatched)} unmatched target skills...\n")
-    results = judge_all_unmatched(sg, cfg=_llm_cfg(state), depths=depths)
-    if state.get("reuse_judged"):
+        # reuse_judged is a SKIP, not a relabel (specs/12-extension.md
+        # §Judge cache reuse): a target that kept a reusable edge and lost
+        # none to a stale stamp never reaches the LLM this run — its row
+        # renders "LLM (cached)" for a judgment that was genuinely reused.
+        pending = _reuse_pending(sg.unmatched_target_skills(), reuse)
+        if not pending:
+            print(
+                f"All {len(sg.unmatched_target_skills())} target(s) served "
+                f"from cache — 0 judge calls"
+            )
+            return {"judged": False}
+        print(
+            f"Judging {len(pending)} target skill(s) "
+            f"({len(sg.unmatched_target_skills()) - len(pending)} reused "
+            f"from cache)...\n"
+        )
+        results = judge_all_unmatched(
+            sg, cfg=_llm_cfg(state), only=sorted(pending), depths=depths
+        )
         _save_merged_judge_report(results, _out(state))
     else:
+        profile = _profile(state)
+        depths = _profile_depths(profile)
+        unmatched = sg.unmatched_target_skills()
+        if not unmatched:
+            return {"judged": False}
+        print(f"Judging {len(unmatched)} unmatched target skills...\n")
+        results = judge_all_unmatched(sg, cfg=_llm_cfg(state), depths=depths)
         save_judge_report(results, _out(state) / "judge_report.json")
     out: dict = {"judged": True}
     # M15: a failed judge call must never read as a measured 0-confidence

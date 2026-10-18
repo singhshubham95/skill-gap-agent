@@ -112,3 +112,26 @@ def save_profile(source: str | Path, profile: dict) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
     return p
+
+
+# The LLM judgment caches: what lets a re-run skip LLM work (T-M15-fix-cache).
+JUDGMENT_CACHE_FILES = ("graph.json", "judge_report.json", "questions.json")
+
+
+def clear_judgment_cache(source: str | Path) -> list[str]:
+    """Delete the session's LLM judgment caches; return the removed names.
+
+    Clears exactly the artifacts that let a re-run skip or replay LLM work:
+    `graph.json` (judge TRANSFERS_TO edges), `judge_report.json` (merged
+    judge rows) and `questions.json` (validation question cache). The
+    chat's `profile.json`, `captured_jds/` and extraction artifacts survive
+    — clearing caches is not a session reset (specs/12-extension.md
+    §Fresh analysis). The next analyze re-judges every target.
+    """
+    removed: list[str] = []
+    for name in JUDGMENT_CACHE_FILES:
+        p = session_dir(source) / name
+        if p.exists():
+            p.unlink()
+            removed.append(name)
+    return removed

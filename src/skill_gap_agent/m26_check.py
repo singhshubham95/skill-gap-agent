@@ -198,6 +198,64 @@ def check_payload_gating() -> None:
     print("payload gating OK: bodies only under --debug-payloads (implies --debug)")
 
 
+def check_log_file_mirror() -> None:
+    """--debug mirrors every line to one local file (T-M15-fix-cache,
+    specs/14-observability.md §Log-file mirror) — the restore trigger
+    fired: console scrollback truncated a real debugging session."""
+    import shutil
+
+    tmp = Path(tempfile.mkdtemp(prefix="m26-logs-"))
+    logger = logging.getLogger(debuglog.LOGGER_NAME)
+
+    def _file_handlers() -> list:
+        return [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
+
+    try:
+        # Off: nothing is opened on disk.
+        assert debuglog.configure(log_dir=tmp) is None
+        assert debuglog.log_path() is None
+        assert list(tmp.iterdir()) == [], list(tmp.iterdir())
+
+        with _captured() as cap:
+            path1 = debuglog.configure(debug=True, log_dir=tmp)
+            assert path1 is not None and path1.parent == tmp, path1
+            assert debuglog.log_path() == path1
+            assert len(_file_handlers()) == 1, _file_handlers()
+            debuglog.set_run_id("server-7")
+            debuglog.dbg("run", "mirrored hello")
+            lines = path1.read_text(encoding="utf-8").splitlines()
+            assert lines[0].endswith(f"log: debug log file: {path1}"), lines[0]
+            mirrored = [ln for ln in lines if "mirrored hello" in ln]
+            console = [ln for ln in cap.lines if "mirrored hello" in ln]
+            assert mirrored == console and len(mirrored) == 1, (lines, cap.lines)
+            assert re.fullmatch(
+                r"info \d\d:\d\d:\d\d \[server-7\] run: mirrored hello", mirrored[0]
+            ), mirrored[0]
+            # Re-configure replaces the file handler, never doubles it.
+            path2 = debuglog.configure(debug=False, payloads=True, log_dir=tmp)
+            assert path2 is not None and path2 != path1, (path1, path2)
+            assert len(_file_handlers()) == 1, _file_handlers()
+            # --debug-payloads mirrors bodies too — PII stays local (the
+            # dir under output/ is gitignored; nothing is networked).
+            debuglog.llm_call(
+                provider="p", model="m", ms=1.0, attempts=1, prompt="SECRET-PROMPT"
+            )
+            assert "SECRET-PROMPT" in path2.read_text(encoding="utf-8")
+
+        # Off again (the harness teardown also resets): no handler, no
+        # phantom file, exactly the two files the two starts created.
+        assert debuglog.log_path() is None
+        assert not _file_handlers(), _file_handlers()
+        assert len(list(tmp.iterdir())) == 2, list(tmp.iterdir())
+        print(
+            "log-file mirror OK: one local file per debug start, path first, "
+            "payloads mirror, off opens nothing"
+        )
+    finally:
+        debuglog.configure()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check_stage_decorator() -> None:
     assert debuglog._counts({"gaps": [1, 2, 3], "stats": {"a": 1}, "flag": True}) == (
         "[gaps=3 stats={a=1} flag=True]"
@@ -489,6 +547,7 @@ def check_debuglog_imports() -> None:
 def main() -> None:
     check_off_by_default()
     check_line_format()
+    check_log_file_mirror()
     check_payload_gating()
     check_stage_decorator()
     check_node_hooks_attached()
@@ -497,9 +556,9 @@ def main() -> None:
     check_graph_stage_lines()
     check_debuglog_imports()
     print(
-        "M26 CHECK PASS: off-by-default, line format + run-id, payload "
-        "gating, stage decorator, node hooks, llm summary, server lifecycle, "
-        "graph stages, local-only boundary OK."
+        "M26 CHECK PASS: off-by-default, line format + run-id, log-file "
+        "mirror, payload gating, stage decorator, node hooks, llm summary, "
+        "server lifecycle, graph stages, local-only boundary OK."
     )
 
 

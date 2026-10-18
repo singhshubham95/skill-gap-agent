@@ -12,6 +12,21 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M15-fix-cache: Honest judge cache + Fresh analysis + debug log file —
+  `reuse_judged` re-runs now make **zero** judge LLM calls for targets
+  with a reusable stamped judgment (the M13 promise; previously every
+  target was re-judged anyway) and a fresh judgment clears the `cached`
+  marker explicitly (networkx keeps unmentioned edge attributes, so fresh
+  scores were rendering as "LLM (cached)" after being paid for). New
+  panel control **Fresh analysis** clears just the judgment caches
+  (`graph.json`, `judge_report.json`, `questions.json`) via
+  `POST /api/session/clear-cache` — chat answers and captured JDs
+  survive. `--debug` mirrors the stage log to
+  `output/logs/server-<timestamp>.log` (the console scrollback truncated
+  the incident's own logs). (specs:
+  [12-extension.md](../specs/12-extension.md) §Judge cache reuse + §Fresh
+  analysis, [14-observability.md](../specs/14-observability.md) §Local
+  debug mode)
 - T-M9-fix-ux: Phrase-review UX + safety — the phrase question no longer
   dumps every extracted phrase in one 80-line prompt: gap-relevant phrases
   are listed first under the extractor's own category headers, the rest

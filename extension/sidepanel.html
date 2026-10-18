@@ -130,11 +130,15 @@
     <h2>2. Analyze gaps</h2>
     <p class="hint">Ranks what the collected JDs demand against your
     skills. The first run takes minutes (LLM judge); later runs reuse
-    cached judgments.</p>
+    cached judgments — use Fresh analysis below to re-judge with the
+    AI.</p>
     <p id="modesummary" class="hint"></p>
 
     <div id="degraded" class="banner" hidden></div>
     <button id="analyze">Analyze gaps</button>
+    <button id="clearcache" class="linkish" type="button"
+            title="Drops cached AI judgments. Your chat answers and captured JDs are kept.">Fresh analysis (re-judge with AI)</button>
+    <p id="cachestate" class="hint" hidden></p>
     <p id="status" class="status">idle</p>
     <p id="intakenote" class="hint" hidden></p>
     <div id="intake" hidden>

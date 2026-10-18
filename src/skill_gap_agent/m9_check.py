@@ -451,10 +451,11 @@ def check_phrase_review_safety() -> None:
         sg = SkillGraph()
         sg.add_skill(Skill(name="Kept skill", source=SkillSource.CURRENT))
         sg.add_skill(Skill(name="Target", source=SkillSource.TARGET))
-        reused = _copy_previous_transfers(
+        reuse = _copy_previous_transfers(
             sg, session, {"Kept skill": "3", "Dropped skill": "3"}
         )
-        assert reused == 1, reused
+        assert reuse.reused == 1, reuse
+        assert reuse.copied_targets == {"Target"}, reuse
         assert not sg.g.has_edge("skill:Dropped skill", "skill:Target")
         assert sg.g.has_edge("skill:Kept skill", "skill:Target")
     print(
@@ -538,13 +539,17 @@ def check_depth_judge_and_gate() -> None:
         sg2 = SkillGraph()
         sg2.add_skill(Skill(name="Python", source=SkillSource.CURRENT))
         sg2.add_skill(Skill(name="Spark", source=SkillSource.TARGET))
-        reused = _copy_previous_transfers(sg2, session, {"Python": "3"})
-        assert reused == 1, reused
+        reuse = _copy_previous_transfers(sg2, session, {"Python": "3"})
+        assert reuse.reused == 1, reuse
+        assert reuse.stale_targets == set(), reuse
         sg3 = SkillGraph()
         sg3.add_skill(Skill(name="Python", source=SkillSource.CURRENT))
         sg3.add_skill(Skill(name="Spark", source=SkillSource.TARGET))
-        reused3 = _copy_previous_transfers(sg3, session, {"Python": "5"})
-        assert reused3 == 0, reused3
+        reuse3 = _copy_previous_transfers(sg3, session, {"Python": "5"})
+        assert reuse3.reused == 0, reuse3
+        # The stamp refusal names the affected target so node_judge re-judges
+        # exactly it (T-M15-fix-cache skip rule).
+        assert reuse3.stale_targets == {"Spark"}, reuse3
 
         # No double-count: a stamped sub-threshold edge gets no gate prompt
         # and no multiplier; an unstamped one still prompts.

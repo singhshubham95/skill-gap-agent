@@ -69,7 +69,8 @@ on purpose — absent ACAO means even allowed cross-origin callers cannot
 *read* responses. Server binds 127.0.0.1 only.
 
 Run: python -m skill_gap_agent.server [--port 8000] [--skills <file>]
-     [--debug [--debug-payloads]]  (M26 local stage logs, stderr only)
+     [--debug [--debug-payloads]]  (M26 local stage logs: stderr console
+     + output/logs mirror, 14-observability.md §Log-file mirror)
 Then open http://localhost:8000/ — bookmarklet-saved JDs appear in the list.
 """
 
@@ -1050,7 +1051,7 @@ class Handler(BaseHTTPRequestHandler):
         # even a hypothetical origin-gate bypass cannot smuggle a body in.
         json_endpoints = (
             "/api/run", "/api/key", "/api/oauth/exchange", "/api/oauth/state",
-            "/api/intake/answer",
+            "/api/intake/answer", "/api/session/clear-cache",
         )
         if path == "/api/resume" or path in json_endpoints:
             expected = (
@@ -1066,6 +1067,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/intake/answer":
             self._handle_intake_answer(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/session/clear-cache":
+            self._handle_clear_cache(int(self.headers.get("Content-Length", 0) or 0))
             return
         if path == "/api/key":
             self._handle_key(int(self.headers.get("Content-Length", 0) or 0))
@@ -1192,6 +1196,41 @@ class Handler(BaseHTTPRequestHandler):
                 "payload": turn.payload,
             },
         })
+
+    def _handle_clear_cache(self, length: int) -> None:
+        """POST /api/session/clear-cache — drop the LLM judgment caches.
+
+        specs/12-extension.md §Fresh analysis: removes exactly graph.json,
+        judge_report.json and questions.json from the current resume's
+        session. Chat answers, captured JDs and extraction artifacts
+        survive — clearing is not a session reset; the next analyze
+        re-judges every target with the LLM.
+        """
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise TypeError("body must be a JSON object")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return
+        with _lock:
+            if _run["status"] == "running":
+                self._json(409, {"error": "run already in progress"})
+                return
+        from . import sessions
+
+        # Same skills-input precedence as a run (body skills_path ->
+        # uploaded resume -> server default), so the clear targets exactly
+        # the session the panel's runs use.
+        source = _resolve_skills(body)
+        session = sessions.session_dir(source, create=True)
+        removed = sessions.clear_judgment_cache(source)
+        debuglog.dbg(
+            "cache",
+            f"clear-cache session={session.name} "
+            f"removed={','.join(removed) or '-'}",
+        )
+        self._json(200, {"cleared": removed, "session": session.name})
 
     def _handle_intake_answer(self, length: int) -> None:
         """M9: answer one intake turn.
@@ -1527,7 +1566,11 @@ def main() -> None:
         help="M26: also log full LLM prompts/responses (resume/JD text)",
     )
     args = parser.parse_args()
-    debuglog.configure(debug=args.debug, payloads=args.debug_payloads)
+    debuglog.configure(
+        debug=args.debug,
+        payloads=args.debug_payloads,
+        log_dir=OUTPUT_DIR / "logs",
+    )
     if args.skills:
         global DEFAULT_SKILLS
         DEFAULT_SKILLS = Path(args.skills)

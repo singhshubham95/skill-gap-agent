@@ -81,12 +81,17 @@ class SkillGraph:
     def add_transfers_to(
         self, from_skill: str, to_skill: str, confidence: float, rationale: str
     ) -> None:
+        # `cached: False` is written explicitly (T-M15-fix-cache): networkx
+        # updates only the attributes named on an existing edge and silently
+        # keeps the rest, so a re-judged pair must not inherit the copied
+        # `cached: True` marker — that mislabeled fresh scores as reused.
         self.g.add_edge(
             f"skill:{from_skill}",
             f"skill:{to_skill}",
             type="TRANSFERS_TO",
             confidence=confidence,
             rationale=rationale,
+            cached=False,
         )
 
     def add_closes_gap(self, project_node: str, skill_name: str) -> None:

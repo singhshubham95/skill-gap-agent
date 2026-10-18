@@ -101,12 +101,55 @@ phases must run in one server process — true for the side-panel workflow.
 ## Judge cache reuse for re-analysis (`reuse_judged`)
 
 The M12 insight (see [11-sweep.md](11-sweep.md)) — the judge's score for
-target `T` is a pure function of `T` — means that re-analyzing after adding
-one JD must not re-pay ~20 LLM calls. With `reuse_judged`, the judge node
-first copies `TRANSFERS_TO` edges from `output/graph.json`, then judges only
-targets still unmatched; the judge report merges by target. The CLI default
-stays fresh-judging (the M6 validation semantics); the extension sets the
-flag.
+target `T` is a pure function of `T` (given a fixed depth stamp) — means
+that re-analyzing after adding one JD must not re-pay ~20 LLM calls. The
+CLI default stays fresh-judging (the M6 validation semantics); the
+extension sets the flag.
+
+**Reuse is a skip, not a relabel** (tightened 2026-10-18; the first
+implementation re-judged every target anyway and then mislabeled the
+fresh scores — see the T-M15-fix-cache decision row). With `reuse_judged`,
+the judge node first copies `TRANSFERS_TO` edges from the session's
+`graph.json` — refusing dropped endpoints and stale depth stamps per
+[13-intake.md](13-intake.md) §Depth-aware judge — then sends **only
+targets with no reusable edge, or with at least one refused (stale)
+edge**, to the LLM. A skipped target keeps its whole previous judgment
+as-is; its row renders `LLM (cached)`, which means "reused, not paid for
+this run". A judged target's row renders `LLM`. Reuse granularity is
+**per target**: a target with one reusable edge is not re-scored even if
+the candidate set moved — **Fresh analysis** (below) is the escape hatch.
+The judge report merges by target.
+
+**Edge lifecycle — the flag is written explicitly at both write sites.**
+Copying marks an edge `cached: True`; a fresh judgment writes
+`cached: False` on the pair it scores. (networkx `add_edge` on an existing
+edge updates only the attributes named and silently keeps the rest, so an
+unwritten flag would survive a re-judgment and lie about provenance in
+both directions.) Provenance then means what it says:
+`LLM (cached)` ⇔ not paid for this run.
+
+## Fresh analysis (clear LLM caches)
+
+The reuse cache makes a re-run fast by *not* re-asking the LLM. When the
+user wants fresh judgments instead (suspicious scores, a new model, or the
+per-target granularity above kept a stale whole-target judgment), the
+panel offers one control: **Fresh analysis**.
+
+- **Scope — judgment caches only.** `POST /api/session/clear-cache`
+  (JSON body; origin gate + Content-Type enforcement apply) removes
+  exactly `graph.json`, `judge_report.json` and `questions.json` from its
+  target session — resolved with the same skills-input precedence as a
+  run (body `skills_path` → uploaded resume → server default), so it
+  clears exactly the session the panel's runs use (store:
+  [13-intake.md](13-intake.md) §Session store) — and answers with the
+  removed file names. It never touches `profile.json` (chat answers),
+  `captured_jds/`, or extraction artifacts — clearing is not a session
+  reset. The next Analyze re-judges every target with the LLM (rows
+  render `LLM`).
+- **Panel behavior.** The control sits in step 2 next to Analyze gaps,
+  confirms before posting, is single-flight (like the intake send), and
+  reports the cleared files or the error inline. It neither starts nor
+  cancels a run.
 
 ## Rendering
 
