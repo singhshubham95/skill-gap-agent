@@ -148,6 +148,15 @@ memo("modechips").hidden = false;
 checkedMode = { value: "paid" };
 results.top_n = probe.buildRunBody().top_n === 7;
 
+// M29: version handshake is advisory (missing/older warns; current/newer
+// silent) and never touches the run contract.
+probe.updateCompanionVersion({ app_version: "0.0.1" });
+results.version_old = memo("versionwarn").hidden === false;
+probe.updateCompanionVersion({ app_version: "9.9.9" });
+results.version_current = memo("versionwarn").hidden === true;
+probe.updateCompanionVersion({});
+results.version_missing = memo("versionwarn").hidden === false;
+
 console.log(JSON.stringify(results));
 process.exit(0);
 """
@@ -291,6 +300,7 @@ def check_mode_mapping() -> None:
     expected = [
         "keyed_true", "keyed_false", "free", "free_unconsented",
         "paid", "rule", "no_key_forces_rule", "top_n",
+        "version_old", "version_current", "version_missing",
     ]
     for name in expected:
         assert results.get(name) is True, f"probe scenario failed: {name} ({results})"

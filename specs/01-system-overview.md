@@ -5,14 +5,16 @@ components, where each lives in code, and how data flows through. This page
 is the **map and router** — high-level detail only. Per-stage mechanics live
 in S1–S7 (`04-reader.md` through `10-flow-runner.md`); non-stage components
 own their own files (`11-sweep.md`, `12-extension.md`, `13-intake.md`,
-`14-observability.md`); the Stage Table and the component list below route
-to them. (Folded from
+`14-observability.md`, `15-desktop-companion.md`); the Stage Table and the
+component list below route to them. (Folded from
 `2-architecture.md`, 2026-09-27 — that file's stage stubs duplicated the
 S-files. The M9 design and graph schema that survived that merge have since
 moved to `13-intake.md` and `06-skill-map.md`, their owning files.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M16 built (M9 built
-2026-10-12); M17 designed** (order notes: M13's
+**Status: v1 built and validated** (M1–M6) **; M7–M28 delivered except
+M17 (designed); M29 install path in progress** (29a launcher built; 29b/29c
+in review; 29d designed). Order
+notes: M13's
 extension shell jumped ahead of M9 on user priority 2026-10-03 — the
 capture → analyze → plan flow works on the M8 resume path; M9's skill
 validation improves plan quality but is not a mechanical prerequisite for
@@ -22,7 +24,9 @@ it. 2026-10-04: the conversational half of M9 was deferred;
 chat → profile saved run with the captured-JD context), full C3 in one
 pass; supersession logged in
 [02-decisions.md](02-decisions.md). M14
-[extension self-serve setup](12-extension.md) §M14 was built in between).
+[extension self-serve setup](12-extension.md) §M14 was built in between;
+M28 (2026-10-25) made the extension the only interface with one central
+workspace.
 All pipeline stages are built and validated against a sealed hand-performed
 gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
 §Validation rubric — the acceptance criteria and results live there). The
@@ -109,9 +113,10 @@ flowchart TB
 | Component | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
-| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16) |
+| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16); M29 companion onboarding 🎯 Designed |
 | C3 intake + validation | In-panel intake chat + evidence-backed skill depth (depth-aware judge); one central workspace store | `intake.py`, `validate.py`, `store.py` | [13-intake.md](13-intake.md) | ✅ Built (M9, 2026-10-12; store simplified M28, 2026-10-25) |
 | C4 observability + judge evaluation | Debug logging + LangSmith tracing + judge golden-set eval | `debuglog.py` (M26), `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | ✅ Built (M26 debug mode); 🎯 Designed (M17) |
+| C5 desktop companion + distribution | Tray companion, bundled runtime, Windows installer, release pipeline, consumer onboarding | `desktop.py`, `packaging/`, `.github/workflows/windows-release.yml` | [15-desktop-companion.md](15-desktop-companion.md) | 🎯 Designed (M29); 29a built; 29b/29c in review |
 
 ## Pipeline (stage order = data flow)
 
@@ -190,6 +195,13 @@ link. If you need the mechanics, open the linked file.
   [14-observability.md](14-observability.md). Opt-in LangSmith tracing of
   every run (what happened inside it) plus a golden-set evaluation of the
   judge (is it right) — tooling around the pipeline, not a stage.
+- **C5 desktop companion + distribution (M29, 🎯 Designed; 29a built,
+  29b/29c in review)** — [15-desktop-companion.md](15-desktop-companion.md).
+  A windowed, bundled Python companion (no system Python), per-user Windows
+  installer with login autostart, and a CI-signed release artifact; the
+  end-user path is two installs (companion + Chrome Web Store extension)
+  with no terminal or developer mode. Panel onboarding lives in
+  [12-extension.md](12-extension.md) §M29.
 
 ## Skill graph schema (summary — canonical reference in S3)
 
@@ -214,6 +226,7 @@ skill-gap-agent/
 │   ├── content.js             ← LinkedIn JD extraction (port of the bookmarklet logic)
 │   ├── sidepanel.html/.js/.css← capture list + Analyze gaps / Generate plan + gap table + plan iframe
 │   └── README.md              ← load-unpacked instructions
+├── packaging/                 ← M29: PyInstaller frozen build + Inno Setup installer + release workflow
 ├── tools/
 │   └── linkedin_jd_bookmarklet.js ← S1 helper (pre-extension JD saver)
 ├── src/skill_gap_agent/
@@ -238,6 +251,7 @@ skill-gap-agent/
 │   │                            GET /api/gaps)
 │   ├── sweep.py               ← M12: JD-subset sweep harness (seeded sampling + shared caches)
 │   ├── store.py               ← M28: one central workspace (output/) + saved-session snapshots
+│   ├── desktop.py             ← M29: tray companion entry point + data/log paths (built 2026-10-26)
 │   ├── intake.py              ← M9: intake conversation state machine (phrases→implied→depth→checklist)
 │   ├── validate.py            ← M9: skill validation protocol (author/grade, leakage, JD triage)
 │   ├── m10_check.py           ← milestone-10 verification: oss thin slice (offline stub + cache reuse)
@@ -300,7 +314,7 @@ accurate (workflow rules live in
 - **Why these choices:** [02-decisions.md](02-decisions.md)
 - **Build order + progress + trade-offs + open questions:** [03-milestones.md](03-milestones.md) (roadmap — §§Deferred/Open hold the rest)
 - **Stage mechanics:** S1–S7 files (`04-reader.md` … `10-flow-runner.md`), routed via the Stage Table above
-- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup + M15 LLM mode), [13-intake.md](13-intake.md) (C3 intake + validation, Built M9), [14-observability.md](14-observability.md) (C4 observability + judge evaluation, Designed M17)
+- **Component designs:** [11-sweep.md](11-sweep.md) (C1 sweep harness), [12-extension.md](12-extension.md) (C2 extension shell + M14 self-serve setup + M15 LLM mode + M29 onboarding), [13-intake.md](13-intake.md) (C3 intake + validation, Built M9), [14-observability.md](14-observability.md) (C4 observability + judge evaluation, Designed M17), [15-desktop-companion.md](15-desktop-companion.md) (C5 companion + distribution, Designed M29)
 - **Skill graph schema:** S3 [06-skill-map.md](06-skill-map.md) §Schema
 - **Validation rubric:** S5 [08-gap-measurer.md](08-gap-measurer.md) §Validation rubric
 - **Extension end goal:** S6 [09-practice-planner.md](09-practice-planner.md) §End goal

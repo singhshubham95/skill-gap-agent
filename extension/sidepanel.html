@@ -11,9 +11,23 @@
     <!-- M19: minimal theme override — cycles Auto (system) / Light / Dark. -->
     <button id="themebtn" class="linkish" type="button"
             title="Theme: Auto follows the system setting">Theme: Auto</button>
-    <!-- M18: silent when healthy — shown only when there is a problem. -->
-    <p id="conn" class="conn" hidden></p>
   </header>
+
+  <!-- M29 (specs/12-extension.md §M29): the installed companion should be
+       running; show one actionable line with Retry + the release page
+       instead of developer launch instructions. -->
+  <div id="conn" class="conn" hidden>
+    <span id="conntext"></span>
+    <button id="retry" class="linkish" type="button">Retry</button>
+    <a id="companionlink" class="linkish" href="#" target="_blank"
+       rel="noopener">Get the companion</a>
+  </div>
+  <!-- M29: non-blocking; a run is never refused for a version mismatch. -->
+  <div id="versionwarn" class="banner" hidden>
+    The companion app is older than this extension —
+    <a id="versionlink" href="#" target="_blank" rel="noopener">download
+    the latest installer</a>.
+  </div>
 
   <!-- M24: key + mode come before the resume — they decide whether and
        where resume text is processed (specs/12-extension.md §M24). -->
@@ -204,14 +218,17 @@
 
   <details>
     <summary>Settings</summary>
-    <label>Local agent URL:
-      <input id="serverBase" type="text" spellcheck="false">
-    </label>
-    <p class="hint">If you run the server on another port, update the URL and
-    reload the extension after changing manifest host_permissions.</p>
     <label>Top gaps: <input id="topn" type="number" min="1" max="23" value="5"></label>
     <p class="hint">API keys and analysis mode are configured in Setup
     above ("I already have a key" reveals the paste form).</p>
+    <details id="advanced">
+      <summary>Advanced (developer)</summary>
+      <label>Local agent URL:
+        <input id="serverBase" type="text" spellcheck="false">
+      </label>
+      <p class="hint">Only change this if you run the local agent on another
+      port. The installed app uses the default.</p>
+    </details>
   </details>
 
   <script src="sidepanel.js"></script>

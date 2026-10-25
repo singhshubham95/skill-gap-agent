@@ -15,6 +15,12 @@
 // blocks a run; the server-side M15 pre-flight refusal is the hard gate.
 
 const DEFAULT_SERVER = "http://127.0.0.1:8000";
+// M29 (specs/12-extension.md §M29): companion-aware onboarding. The panel
+// never needs the URL; it only warns (non-blocking) when the manually
+// updated companion is older than this extension.
+const COMPANION_RELEASES_URL =
+  "https://github.com/singhshubham95/skill-gap-agent/releases/latest";
+const MIN_COMPANION_VERSION = "0.1.0";
 const STAGE_LABELS = {
   intake: "confirming your skills (a few questions)",
   ingest: "reading skills + JDs",
@@ -95,6 +101,9 @@ async function loadState() {
   // default instead of being used.
   server = normalizeServer(stored.serverBase).value || DEFAULT_SERVER;
   $("serverBase").value = server;
+  // M29: a developer override is visible when it is active (the advanced
+  // block is closed by default for end users).
+  if (server !== DEFAULT_SERVER) $("advanced").open = true;
   // M16 B: consent is a flag + timestamp + version only, never data.
   freeConsent = stored.freeConsent || null;
   // M21: disclosure consent — the checkbox reflects the stored flag and is
@@ -175,6 +184,8 @@ async function refreshSkills() {
     const r = await fetch(server + "/api/status");
     const s = await r.json();
     showSkills(s.skills);
+    clearOffline();
+    updateCompanionVersion(s);
   } catch (e) {
     /* offline — the connection line already says so */
   }
@@ -576,6 +587,7 @@ async function refreshFreeMode() {
   try {
     const r = await fetch(server + "/api/status");
     const s = await r.json();
+    updateCompanionVersion(s);
     el.textContent = s.llm_model
       ? `Free mode — model: ${s.llm_model}`
       : "Free mode — model chosen at run time from the free list.";
@@ -826,12 +838,8 @@ async function postRun(body) {
     return true;
   } catch (e) {
     setBusy(false);
-    setStatus(
-      "Local agent not reachable (" + e.message +
-        "). Start it: double-click tools/start-server.bat " +
-        "(or run: python -m skill_gap_agent.server).",
-      true,
-    );
+    showOffline();
+    setStatus("Local agent not reachable (" + e.message + ").", true);
     return false;
   }
 }
@@ -844,9 +852,12 @@ async function poll() {
     s = await r.json();
   } catch (e) {
     setBusy(false);
+    showOffline();
     setStatus("Lost contact with the local agent: " + e.message, true);
     return;
   }
+  clearOffline();
+  updateCompanionVersion(s);
   showDegraded(s); // M15: banner tracks live degradations
   // M9: a skipped intake chat is always explained (specs/13-intake.md
   // §Freshness — never a silently skipped conversation).
@@ -1032,19 +1043,76 @@ async function skipIntake() {
   }
 }
 
-async function checkConnection() {
+const OFFLINE_TEXT =
+  "Skill-Gap Agent isn't running. Open it from the Start menu, then " +
+  "choose Retry.";
+
+function compareVersions(a, b) {
+  // Small numeric comparison; a malformed/missing version counts as older
+  // (the banner is advisory only and never gates a run).
+  const pa = String(a || "").split(".");
+  const pb = String(b || "").split(".");
+  const na = pa.map((x) => Number.parseInt(x, 10));
+  const nb = pb.map((x) => Number.parseInt(x, 10));
+  if (!na.length || !nb.length || na.some(Number.isNaN) ||
+      nb.some(Number.isNaN)) {
+    return -1;
+  }
+  for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+    const x = na[i] || 0;
+    const y = nb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+function updateCompanionVersion(status) {
+  const version = status && status.app_version;
+  const old = !version || compareVersions(version, MIN_COMPANION_VERSION) < 0;
+  $("versionwarn").hidden = !old;
+}
+
+function showOffline() {
   const el = $("conn");
+  $("conntext").textContent = OFFLINE_TEXT;
+  $("versionwarn").hidden = true;
+  el.classList.add("offline");
+  el.hidden = false;
+}
+
+function clearOffline() {
+  const el = $("conn");
+  el.hidden = true;
+  el.classList.remove("offline");
+  $("conntext").textContent = "";
+}
+
+async function retryConnection() {
+  const btn = $("retry");
+  btn.disabled = true;
+  try {
+    await checkConnection();
+    if ($("conn").hidden) {
+      await refreshKeyStatus();
+      await refreshSkills();
+      await syncJdsFromServer();
+      await refreshSavedSessions();
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function checkConnection() {
   try {
     const r = await fetch(server + "/api/status");
     if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
     // M18: silent when healthy — the line appears only on problems.
-    el.hidden = true;
+    clearOffline();
+    updateCompanionVersion(s);
   } catch (e) {
-    el.textContent =
-      "Local agent not running — double-click tools/start-server.bat " +
-      "(or run: python -m skill_gap_agent.server)";
-    el.classList.add("offline");
-    el.hidden = false;
+    showOffline();
   }
 }
 
@@ -1340,6 +1408,10 @@ $("serverBase").addEventListener("change", async (e) => {
   refreshKeyStatus();
 });
 
+$("companionlink").href = COMPANION_RELEASES_URL;
+$("versionlink").href = COMPANION_RELEASES_URL;
+$("retry").addEventListener("click", retryConnection);
+
 loadState().then(() => {
   renderJds();
   applyTheme();
@@ -1354,5 +1426,11 @@ loadState().then(() => {
 // node probe exercises the pure mapping/state functions through this
 // surface; nothing else reads it.
 if (typeof globalThis !== "undefined") {
-  globalThis.__skillgap_probe = { buildRunBody, selectedMode, renderKeyState };
+  globalThis.__skillgap_probe = {
+    buildRunBody,
+    selectedMode,
+    renderKeyState,
+    compareVersions,
+    updateCompanionVersion,
+  };
 }

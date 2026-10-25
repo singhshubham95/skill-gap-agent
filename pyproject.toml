@@ -20,6 +20,10 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
 ]
+desktop = [
+    "pystray>=0.19",
+    "Pillow>=10",
+]
 trace = [
     "langsmith>=0.2",
 ]
