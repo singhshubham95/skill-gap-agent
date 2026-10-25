@@ -180,6 +180,33 @@ async function refreshSkills() {
   }
 }
 
+async function syncJdsFromServer() {
+  // The captured JD texts live on the server (they are the run's input).
+  // After a load/reset the panel's list must mirror what is actually there,
+  // otherwise the panel would show JDs a run will not use.
+  try {
+    const r = await fetch(server + "/api/jds/captured");
+    if (!r.ok) return;
+    const data = await r.json();
+    const items = data.jds || [];
+    if (!items.length) {
+      jds = [];
+    } else {
+      // Keep the panel's title/url/text shape; the server returns the
+      // stored title + url and the JD file name.
+      jds = items.map((x) => ({
+        title: x.title || x.stem || "JD",
+        url: x.url || "",
+        text: x.text || "",
+      }));
+    }
+    await saveJds();
+    renderJds();
+  } catch (e) {
+    /* offline — nothing to mirror */
+  }
+}
+
 async function uploadResume() {
   const file = $("resume").files && $("resume").files[0];
   if (!file) return;
@@ -504,6 +531,9 @@ function updateRunGate() {
   // Free mode without consent cannot run (M16 B consent gate).
   const freeUnconsented = selectedMode() === "free" && !$("privacyack").checked;
   $("analyze").disabled = running || freeUnconsented;
+  // Fresh analysis is not a run and sends nothing to the LLM — it only
+  // waits for the active run to finish (specs/12-extension.md §Fresh analysis).
+  $("clearcache").disabled = running;
 }
 
 function onModeChange() {
@@ -1018,6 +1048,195 @@ async function checkConnection() {
   }
 }
 
+// ---- fresh analysis (clear LLM caches) ------------------------------------
+// specs/12-extension.md §Fresh analysis: drops graph.json/judge_report.json/
+// questions.json for the current session — chat answers and captured JDs
+// survive; the next Analyze re-judges every target with the LLM.
+async function freshAnalysis() {
+  if (!window.confirm(
+    "Clear cached AI judgments? Your chat answers and captured JDs are " +
+    "kept — the next Analyze re-judges with the AI."
+  )) return;
+  const btn = $("clearcache");
+  btn.disabled = true;
+  const out = $("cachestate");
+  out.hidden = false;
+  out.classList.remove("error");
+  out.textContent = "Clearing…";
+  try {
+    const r = await fetch(server + "/api/session/clear-cache", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    const cleared = (data.cleared || []).join(", ") || "nothing to clear";
+    out.textContent = "Cleared: " + cleared + " — next Analyze is fresh.";
+  } catch (e) {
+    out.classList.add("error");
+    out.textContent = "Clear failed: " + e.message;
+  } finally {
+    updateRunGate();
+  }
+}
+
+// ---- delete everything ----------------------------------------------------
+
+async function resetAllData() {
+  if (!window.confirm(
+    "Delete ALL of the agent's data for this session? Your resume, captured " +
+    "job descriptions, chat answers and analysis will be removed. Saved " +
+    "sessions are kept."
+  )) return;
+  const btn = $("resetall");
+  btn.disabled = true;
+  const out = $("resetstate");
+  out.hidden = false;
+  out.classList.remove("error");
+  out.textContent = "Deleting…";
+  try {
+    const r = await fetch(server + "/api/data/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    // Mirror the server: the workspace no longer has these JDs either.
+    jds = [];
+    await saveJds();
+    renderJds();
+    $("gapbox").hidden = true;
+    $("planbox").hidden = true;
+    $("setupresume").hidden = false;
+    $("resumeline").hidden = true;
+    out.textContent = "Deleted " + ((data.cleared || []).length) +
+      " item(s). Upload a resume to start again.";
+  } catch (e) {
+    out.classList.add("error");
+    out.textContent = "Delete failed: " + e.message;
+  } finally {
+    btn.disabled = false;
+    updateRunGate();
+  }
+}
+
+// ---- save / load session --------------------------------------------------
+
+async function refreshSavedSessions() {
+  const sel = $("sessionlist");
+  try {
+    const r = await fetch(server + "/api/session/saved");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    sel.replaceChildren();
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "(no saved sessions)";
+      sel.appendChild(opt);
+      return;
+    }
+    for (const s of sessions) {
+      const opt = document.createElement("option");
+      opt.value = s.name;
+      opt.textContent = s.name + " — " + (s.jds || 0) + " JD(s)";
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(agent unreachable)";
+    sel.replaceChildren(opt);
+  }
+}
+
+async function saveCurrentSession() {
+  const name = ($("sessionname").value || "").trim();
+  const out = $("sessionstate");
+  out.hidden = false;
+  out.classList.remove("error");
+  if (!name) {
+    out.classList.add("error");
+    out.textContent = "Give the session a name first.";
+    return;
+  }
+  try {
+    const r = await fetch(server + "/api/session/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    out.textContent = "Saved as \u201c" + data.name + "\u201d.";
+    $("sessionname").value = "";
+    await refreshSavedSessions();
+  } catch (e) {
+    out.classList.add("error");
+    out.textContent = "Save failed: " + e.message;
+  }
+}
+
+async function loadSavedSession() {
+  const name = $("sessionlist").value;
+  const out = $("sessionstate");
+  out.hidden = false;
+  out.classList.remove("error");
+  if (!name) {
+    out.classList.add("error");
+    out.textContent = "Pick a saved session first.";
+    return;
+  }
+  if (!window.confirm(
+    "Load \u201c" + name + "\u201d? This replaces your current session " +
+    "(resume, job descriptions and analysis)."
+  )) return;
+  try {
+    const r = await fetch(server + "/api/session/load", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    out.textContent = "Loaded \u201c" + data.name + "\u201d.";
+    // The panel's JD list mirrors the server, so re-read it.
+    await syncJdsFromServer();
+    await refreshSkills();
+    $("gapbox").hidden = true;
+    $("planbox").hidden = true;
+  } catch (e) {
+    out.classList.add("error");
+    out.textContent = "Load failed: " + e.message;
+  }
+}
+
+async function deleteSavedSession() {
+  const name = $("sessionlist").value;
+  const out = $("sessionstate");
+  out.hidden = false;
+  out.classList.remove("error");
+  if (!name) return;
+  if (!window.confirm("Delete the saved session \u201c" + name + "\u201d?")) return;
+  try {
+    const r = await fetch(server + "/api/session/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    out.textContent = "Deleted \u201c" + name + "\u201d.";
+    await refreshSavedSessions();
+  } catch (e) {
+    out.classList.add("error");
+    out.textContent = "Delete failed: " + e.message;
+  }
+}
+
 // ---- wiring ---------------------------------------------------------------
 
 $("themebtn").addEventListener("click", async () => {
@@ -1028,6 +1247,11 @@ $("themebtn").addEventListener("click", async () => {
 });
 $("capture").addEventListener("click", captureJd);
 $("analyze").addEventListener("click", analyze);
+$("clearcache").addEventListener("click", freshAnalysis);
+$("resetall").addEventListener("click", resetAllData);
+$("sessionsave").addEventListener("click", saveCurrentSession);
+$("sessionload").addEventListener("click", loadSavedSession);
+$("sessiondelete").addEventListener("click", deleteSavedSession);
 $("intakesend").addEventListener("click", () =>
   sendIntakeAnswer($("intakeanswer").value)
 );
@@ -1075,10 +1299,31 @@ for (const radio of document.querySelectorAll('input[name="mode"]')) {
 $("privacyack").addEventListener("change", onPrivacyAck);
 $("disclosureack").addEventListener("change", onDisclosureAck);
 $("clear").addEventListener("click", async () => {
+  if (!window.confirm(
+    "Clear the captured job descriptions? This also deletes them from " +
+    "the local agent's storage."
+  )) return;
   jds = [];
   await saveJds();
   renderJds();
-  setStatus("List cleared.");
+  // The JD texts also live on the server (they are the next run's input),
+  // so clearing only the panel's list would leave them behind.
+  try {
+    const r = await fetch(server + "/api/jds/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      setStatus("List cleared in the panel; server clear failed: " +
+        (data.error || "HTTP " + r.status), true);
+      return;
+    }
+    setStatus("List cleared — job descriptions deleted from the agent.");
+  } catch (e) {
+    setStatus("List cleared in the panel; server unreachable: " + e.message, true);
+  }
 });
 $("serverBase").addEventListener("change", async (e) => {
   // M20: invalid / plaintext-remote values are refused, reverted and never
@@ -1102,6 +1347,7 @@ loadState().then(() => {
   checkConnection();
   refreshKeyStatus();
   refreshSkills();
+  refreshSavedSessions();
 });
 
 // Probe hook (specs/12-extension.md §M18 done criterion 5): the m18_check

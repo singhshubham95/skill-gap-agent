@@ -27,7 +27,7 @@ def ingest_skills_json(
     sg: SkillGraph,
     path: str | Path,
     taxonomy=None,
-    approvals_path: str | Path = Path("output/implied_skills.json"),
+    approvals_path: str | Path | None = None,
     auto_accept_implied: bool = False,
     ask_fn=None,
     implied_decisions: dict[str, bool] | None = None,

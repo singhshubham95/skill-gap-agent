@@ -130,11 +130,18 @@
     <h2>2. Analyze gaps</h2>
     <p class="hint">Ranks what the collected JDs demand against your
     skills. The first run takes minutes (LLM judge); later runs reuse
-    cached judgments.</p>
+    cached judgments — use Fresh analysis below to re-judge with the
+    AI.</p>
     <p id="modesummary" class="hint"></p>
 
     <div id="degraded" class="banner" hidden></div>
     <button id="analyze">Analyze gaps</button>
+    <button id="clearcache" class="linkish" type="button"
+            title="Drops cached AI judgments. Your chat answers and captured JDs are kept.">Fresh analysis (re-judge with AI)</button>
+    <button id="resetall" class="linkish" type="button"
+            title="Deletes your resume, captured JDs, chat answers and all analysis output from the agent.">Delete all data</button>
+    <p id="cachestate" class="hint" hidden></p>
+    <p id="resetstate" class="hint" hidden></p>
     <p id="status" class="status">idle</p>
     <p id="intakenote" class="hint" hidden></p>
     <div id="intake" hidden>
@@ -174,6 +181,25 @@
       <iframe id="planframe" sandbox="allow-popups allow-popups-to-escape-sandbox"
               title="Skill-gap plan"></iframe>
     </div>
+  </section>
+
+  <section>
+    <h2>Save this session</h2>
+    <p class="hint">Everything the agent holds right now — your resume, the
+    captured job descriptions and the analysis — is one working session.
+    Save it under a name to keep a copy, or load a saved one to replace
+    the current session.</p>
+    <p>
+      <input id="sessionname" type="text" spellcheck="false"
+             placeholder="name this session" maxlength="80">
+      <button id="sessionsave" type="button">Save</button>
+    </p>
+    <p>
+      <select id="sessionlist"></select>
+      <button id="sessionload" type="button">Load</button>
+      <button id="sessiondelete" class="linkish" type="button">Delete</button>
+    </p>
+    <p id="sessionstate" class="hint" hidden></p>
   </section>
 
   <details>

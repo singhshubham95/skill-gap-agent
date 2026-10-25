@@ -1,11 +1,13 @@
-"""M9 verification: in-panel intake + session store + depth-aware judge
-(offline — no LLM, no network; localhost only).
+"""M9 verification: in-panel intake + central workspace store + depth-aware
+judge (offline — no LLM, no network; localhost only).
 
 Checks (specs/13-intake.md done criteria):
-1. Session store: SHA-keyed per skills source; same input resumes, different
-   input starts fresh; the retired globals (extracted_approvals.json,
-   implied_skills.json, gate_overrides.json, extracted_skills.json) are
-   deleted by migration and never recreated by any flow.
+1. Workspace store: one central location for every artifact; a profile is
+   reused only when its `source_sha256` matches the current resume, so a
+   different resume starts fresh; the retired globals
+   (extracted_approvals.json, implied_skills.json, gate_overrides.json)
+   are deleted by migration and never recreated by any flow; save/load
+   snapshots round-trip.
 2. Intake conversation: phrase review, implied review, depth/intent,
    validation turns (fake validator); answers persist immediately
    (panel-close safe — a fresh session object resumes); the skip path
@@ -29,7 +31,6 @@ Run: python -m skill_gap_agent.m9_check
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 import threading
@@ -38,15 +39,17 @@ import urllib.request
 from pathlib import Path
 
 from . import server
+from .checksupport import isolated_store
 from .gate import DEFAULT_THRESHOLD, review_targets
 from .graph import SkillGraph
 from .intake import IntakeSession, drive
-from .sessions import (
+from .store import (
     LEGACY_FILES,
+    clear_all,
+    current_dir,
     load_profile,
     retire_legacy_files,
     save_profile,
-    session_dir,
     source_sha,
 )
 from .validate import Validator, check_leakage, triage_skills
@@ -111,67 +114,103 @@ def _fake_judge(prompt: str, system: str = "", cfg=None):
 
 
 def check_sessions() -> None:
-    import skill_gap_agent.sessions as sessions_mod
+    with isolated_store("sg-m9-store-") as scratch:
+        a1 = scratch / "a.json"
+        a1.write_text(json.dumps({"skills": ["Python"]}), encoding="utf-8")
+        a2 = scratch / "a2.json"
+        a2.write_text(json.dumps({"skills": ["Python"]}), encoding="utf-8")
+        b = scratch / "b.json"
+        b.write_text(json.dumps({"skills": ["SQL"]}), encoding="utf-8")
 
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td)
-        out = root / "output"
-        out.mkdir()
-        real_root = sessions_mod.SESSIONS_ROOT
-        sessions_mod.SESSIONS_ROOT = out / "sessions"  # fully isolated
-        try:
-            a1 = root / "a.json"
-            a1.write_text(json.dumps({"skills": ["Python"]}), encoding="utf-8")
-            a2 = root / "a2.json"
-            a2.write_text(json.dumps({"skills": ["Python"]}), encoding="utf-8")
-            b = root / "b.json"
-            b.write_text(json.dumps({"skills": ["SQL"]}), encoding="utf-8")
+        # The resume identity still guards reuse even though there is one
+        # folder: same content -> same hash, different content -> different.
+        assert source_sha(a1) == source_sha(a2)
+        assert source_sha(a1) != source_sha(b)
 
-            # Same content -> same session; different content -> different.
-            assert source_sha(a1) == source_sha(a2)
-            assert source_sha(a1) != source_sha(b)
-            assert session_dir(a1) == session_dir(a2)
-            assert session_dir(a1) != session_dir(b)
+        # One central location for every artifact.
+        assert current_dir() == scratch
 
-            # Same input resumes: a profile written for a1 is seen by a2.
-            save_profile(a1, {"version": 1, "source_sha256": source_sha(a1),
-                              "completed": True, "skipped": True})
-            assert load_profile(a2).get("completed") is True
-            assert load_profile(b) is None
+        # Same resume resumes: a profile written for a1 is still reusable.
+        save_profile({"version": 1, "source_sha256": source_sha(a1),
+                      "completed": True, "skipped": True})
+        from .intake import load_or_create_profile
 
-            # Retired globals: migration deletes them.
-            for name in LEGACY_FILES:
-                (out / name).write_text("{}", encoding="utf-8")
-            removed = retire_legacy_files(out)
-            assert sorted(removed) == sorted(LEGACY_FILES), removed
-            assert not any((out / n).exists() for n in LEGACY_FILES)
+        assert load_or_create_profile(source_sha(a1)).get("completed") is True
+        assert load_or_create_profile(source_sha(b)) == {
+            "version": 1, "source_sha256": source_sha(b), "phrases": {},
+            "phrases_expanded": False, "implied": {}, "depth": {}, "intent": {},
+            "proficiency": {}, "progress": {}, "completed": False,
+            "skipped": False, "updated_at": "",
+        }
 
-            # Validation isolation (specs/13-intake.md §Freshness): the env
-            # override points the store at scratch; without it the real
-            # store is used (module default, patchable by checks).
-            scratch = root / "scratch-store"
-            os.environ["SKILL_GAP_SESSIONS_DIR"] = str(scratch)
-            try:
-                assert session_dir(a1) == scratch / source_sha(a1)
-            finally:
-                os.environ.pop("SKILL_GAP_SESSIONS_DIR", None)
-            assert session_dir(a1) == sessions_mod.SESSIONS_ROOT / source_sha(a1)
-        finally:
-            sessions_mod.SESSIONS_ROOT = real_root
-    print("sessions OK: sha-keying, same-input resume, migration deletes retired globals, env isolation")
+        # A changed resume clears everything derived from the previous one
+        # (the guard that replaces per-SHA folders).
+        from .store import (
+            captured_jds_dir,
+            clear_all,
+            ensure_resume_identity,
+            list_saved,
+            load_session,
+            save_session,
+            write_manifest,
+        )
+
+        write_manifest(resume={"filename": "a.json", "sha256": source_sha(a1)})
+        (current_dir() / "graph.json").write_text("{}", encoding="utf-8")
+        (captured_jds_dir(create=True) / "jd.txt").write_text("jd", encoding="utf-8")
+        result = ensure_resume_identity(b)
+        assert result["changed"] is True, result
+        assert "profile.json" in result["removed"], result
+        assert not (current_dir() / "graph.json").exists(), "judgment cache kept"
+        assert (captured_jds_dir() / "jd.txt").exists(), "JDs are not resume-derived"
+        # Re-binding the same resume is a no-op (caches honored).
+        assert ensure_resume_identity(b)["changed"] is False
+
+        # Retired globals: migration deletes them.
+        for name in LEGACY_FILES:
+            (scratch / name).write_text("{}", encoding="utf-8")
+        removed = retire_legacy_files()
+        assert sorted(removed) == sorted(LEGACY_FILES), removed
+        assert not any((scratch / n).exists() for n in LEGACY_FILES)
+
+        # Save/load snapshots: a named copy round-trips through the workspace.
+        save_profile({"version": 1, "source_sha256": source_sha(a1),
+                      "completed": True})
+        (current_dir() / "plan.md").write_text("plan A", encoding="utf-8")
+        saved = save_session("my run")
+        assert saved["name"] == "my run", saved
+        assert [s["name"] for s in list_saved()] == ["my run"], list_saved()
+
+        clear_all()
+        assert not (current_dir() / "plan.md").exists(), "clear_all left artifacts"
+        load_session("my run")
+        assert (current_dir() / "plan.md").read_text(encoding="utf-8") == "plan A"
+        assert load_profile().get("completed") is True
+
+        # Names are sanitized: a path-like name cannot escape the store.
+        escaped = save_session("../../evil")
+        assert escaped["name"] == "evil", escaped
+        assert not (scratch.parent / "evil").exists(), "name escaped the root"
+    print(
+        "workspace OK: one location, sha-guarded reuse, resume-change "
+        "invalidation, migration deletes retired globals, save/load snapshots"
+    )
 
 
 def check_intake_chat() -> None:
+    with isolated_store("sg-m9-chat-"):
+        _check_intake_chat_body()
+
+
+def _check_intake_chat_body() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         src = root / "resume.json"
         src.write_text(json.dumps({"skills": ["Python programming", "SQL databases"]}),
                        encoding="utf-8")
-        shutil.rmtree(session_dir(src), ignore_errors=True)  # hermetic
         fv = FakeValidator()
         sess = IntakeSession(
             source_sha=source_sha(src),
-            source_path=src,
             phrases=["Python programming", "SQL databases"],
             implied=[{"skill": "Data pipelines", "evidence": "built ETL jobs"}],
             triaged=["Python programming"],
@@ -200,7 +239,6 @@ def check_intake_chat() -> None:
         # and only the remaining question is asked.
         sess2 = IntakeSession(
             source_sha=source_sha(src),
-            source_path=src,
             phrases=["Python programming", "SQL databases"],
             implied=[{"skill": "Data pipelines", "evidence": "built ETL jobs"}],
             triaged=["Python programming"],
@@ -213,7 +251,7 @@ def check_intake_chat() -> None:
         done = sess2.next_turn()
         assert done.kind == "complete", done
 
-        profile = load_profile(src)
+        profile = load_profile()
         assert profile["phrases"] == {"Python programming": True, "SQL databases": False}
         assert profile["implied"] == {"Data pipelines": True}
         assert profile["proficiency"]["Python programming"]["grade"] == 4
@@ -222,15 +260,14 @@ def check_intake_chat() -> None:
 
         # Skip path: phrases + implied accepted, depth unknown.
         src2 = root / "resume2.json"
+        clear_all()
         src2.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src2), ignore_errors=True)  # hermetic
         sess3 = IntakeSession(
-            source_sha=source_sha(src2), source_path=src2,
-            phrases=["Kafka"], implied=[], triaged=["Kafka"],
+            source_sha=source_sha(src2), phrases=["Kafka"], implied=[], triaged=["Kafka"],
             validator=fv, use_llm=True,
         )
         drive(sess3, answers={"_skip": True})
-        p3 = load_profile(src2)
+        p3 = load_profile()
         assert p3["completed"] and p3["skipped"]
         assert p3["phrases"] == {"Kafka": True}
         assert not p3["depth"], p3["depth"]
@@ -238,6 +275,11 @@ def check_intake_chat() -> None:
 
 
 def check_phrase_review_safety() -> None:
+    with isolated_store("sg-m9-review-"):
+        _check_phrase_review_safety_body()
+
+
+def _check_phrase_review_safety_body() -> None:
     """T-M9-fix-ux regressions (specs/13-intake.md §Phrase review).
 
     Encodes the 2026-10-13 incident: bare 'none' silently dropped all 80
@@ -252,13 +294,12 @@ def check_phrase_review_safety() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         src = root / "resume.json"
+        clear_all()
         src.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src), ignore_errors=True)  # hermetic
 
         def fresh(phrases, focus=None, groups=None):
             return IntakeSession(
-                source_sha=source_sha(src), source_path=src,
-                phrases=list(phrases), implied=[], triaged=[],
+                source_sha=source_sha(src), phrases=list(phrases), implied=[], triaged=[],
                 validator=FakeValidator(), use_llm=True,
                 focus=focus, groups=groups,
             )
@@ -283,11 +324,10 @@ def check_phrase_review_safety() -> None:
         }, sess.profile["phrases"]
 
         src2 = root / "resume2.json"
+        clear_all()
         src2.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src2), ignore_errors=True)
         sess2 = IntakeSession(
-            source_sha=source_sha(src2), source_path=src2,
-            phrases=["Alpha", "Beta", "Gamma"], implied=[], triaged=[],
+            source_sha=source_sha(src2), phrases=["Alpha", "Beta", "Gamma"], implied=[], triaged=[],
             validator=FakeValidator(), use_llm=True,
         )
         t2 = sess2.next_turn()
@@ -298,11 +338,10 @@ def check_phrase_review_safety() -> None:
         }, sess2.profile["phrases"]
 
         src3 = root / "resume3.json"
+        clear_all()
         src3.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src3), ignore_errors=True)
         sess3 = IntakeSession(
-            source_sha=source_sha(src3), source_path=src3,
-            phrases=["Alpha", "Beta", "Gamma"], implied=[], triaged=[],
+            source_sha=source_sha(src3), phrases=["Alpha", "Beta", "Gamma"], implied=[], triaged=[],
             validator=FakeValidator(), use_llm=True,
         )
         t3 = sess3.next_turn()
@@ -315,11 +354,10 @@ def check_phrase_review_safety() -> None:
         # 3. Focus/background split: background is hidden and auto-kept (§A);
         #    'show background' expands the listing (durable).
         src4 = root / "resume4.json"
+        clear_all()
         src4.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src4), ignore_errors=True)
         sess4 = IntakeSession(
-            source_sha=source_sha(src4), source_path=src4,
-            phrases=["Focus skill", "Background skill"],
+            source_sha=source_sha(src4), phrases=["Focus skill", "Background skill"],
             implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
             focus={"Focus skill"},
         )
@@ -340,8 +378,7 @@ def check_phrase_review_safety() -> None:
         }, sess4.profile["phrases"]
         # The expanded view survives a panel close (durability rule).
         sess4b = IntakeSession(
-            source_sha=source_sha(src4), source_path=src4,
-            phrases=["Focus skill", "Background skill"],
+            source_sha=source_sha(src4), phrases=["Focus skill", "Background skill"],
             implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
             focus={"Focus skill"},
         )
@@ -349,11 +386,10 @@ def check_phrase_review_safety() -> None:
 
         # Background auto-keep without expansion: hidden items are kept.
         src5 = root / "resume5.json"
+        clear_all()
         src5.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src5), ignore_errors=True)
         sess5 = IntakeSession(
-            source_sha=source_sha(src5), source_path=src5,
-            phrases=["Focus skill", "Background skill"],
+            source_sha=source_sha(src5), phrases=["Focus skill", "Background skill"],
             implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
             focus={"Focus skill"},
         )
@@ -377,11 +413,10 @@ def check_phrase_review_safety() -> None:
             "Airflow": "Data Engineering",
         }, groups
         src6 = root / "resume6.json"
+        clear_all()
         src6.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src6), ignore_errors=True)
         sess6 = IntakeSession(
-            source_sha=source_sha(src6), source_path=src6,
-            phrases=["Transformers", "Word2vec", "Airflow"],
+            source_sha=source_sha(src6), phrases=["Transformers", "Word2vec", "Airflow"],
             implied=[], triaged=[], validator=FakeValidator(), use_llm=True,
             groups=groups,
         )
@@ -406,11 +441,10 @@ def check_phrase_review_safety() -> None:
         # 6. Strict depth/checklist parsers (§Phrase review D tail): pasted
         #    prose is rejected, not scraped for a digit or letter.
         src7 = root / "resume7.json"
+        clear_all()
         src7.write_text("{}", encoding="utf-8")
-        shutil.rmtree(session_dir(src7), ignore_errors=True)
         sess7 = IntakeSession(
-            source_sha=source_sha(src7), source_path=src7,
-            phrases=["Python"], implied=[], triaged=["Python"],
+            source_sha=source_sha(src7), phrases=["Python"], implied=[], triaged=["Python"],
             validator=FakeValidator(), use_llm=True,
         )
         assert sess7.answer(sess7.next_turn().id, "keep all")["ok"]
@@ -451,10 +485,11 @@ def check_phrase_review_safety() -> None:
         sg = SkillGraph()
         sg.add_skill(Skill(name="Kept skill", source=SkillSource.CURRENT))
         sg.add_skill(Skill(name="Target", source=SkillSource.TARGET))
-        reused = _copy_previous_transfers(
+        reuse = _copy_previous_transfers(
             sg, session, {"Kept skill": "3", "Dropped skill": "3"}
         )
-        assert reused == 1, reused
+        assert reuse.reused == 1, reuse
+        assert reuse.copied_targets == {"Target"}, reuse
         assert not sg.g.has_edge("skill:Dropped skill", "skill:Target")
         assert sg.g.has_edge("skill:Kept skill", "skill:Target")
     print(
@@ -465,6 +500,11 @@ def check_phrase_review_safety() -> None:
 
 
 def check_validation_protocol() -> None:
+    with isolated_store("sg-m9-validate-"):
+        _check_validation_protocol_body()
+
+
+def _check_validation_protocol_body() -> None:
     # Triage is JD-aware: candidates of the highest-weight targets only.
     weights = {"Streaming data": 3, "Data governance": 1}
     triaged = triage_skills(weights, ["Python", "Kafka"], top_targets=1, cap=5)
@@ -490,6 +530,11 @@ def check_validation_protocol() -> None:
 
 
 def check_depth_judge_and_gate() -> None:
+    with isolated_store("sg-m9-judge-"):
+        _check_depth_judge_and_gate_body()
+
+
+def _check_depth_judge_and_gate_body() -> None:
     from .judge import judge_target
 
     with tempfile.TemporaryDirectory() as td:
@@ -538,13 +583,17 @@ def check_depth_judge_and_gate() -> None:
         sg2 = SkillGraph()
         sg2.add_skill(Skill(name="Python", source=SkillSource.CURRENT))
         sg2.add_skill(Skill(name="Spark", source=SkillSource.TARGET))
-        reused = _copy_previous_transfers(sg2, session, {"Python": "3"})
-        assert reused == 1, reused
+        reuse = _copy_previous_transfers(sg2, session, {"Python": "3"})
+        assert reuse.reused == 1, reuse
+        assert reuse.stale_targets == set(), reuse
         sg3 = SkillGraph()
         sg3.add_skill(Skill(name="Python", source=SkillSource.CURRENT))
         sg3.add_skill(Skill(name="Spark", source=SkillSource.TARGET))
-        reused3 = _copy_previous_transfers(sg3, session, {"Python": "5"})
-        assert reused3 == 0, reused3
+        reuse3 = _copy_previous_transfers(sg3, session, {"Python": "5"})
+        assert reuse3.reused == 0, reuse3
+        # The stamp refusal names the affected target so node_judge re-judges
+        # exactly it (T-M15-fix-cache skip rule).
+        assert reuse3.stale_targets == {"Spark"}, reuse3
 
         # No double-count: a stamped sub-threshold edge gets no gate prompt
         # and no multiplier; an unstamped one still prompts.
@@ -659,6 +708,11 @@ def _answer_intake_all(base: str) -> list[str]:
 
 
 def check_end_to_end() -> None:
+    with isolated_store("sg-m9-e2e-"):
+        _check_end_to_end_body()
+
+
+def _check_end_to_end_body() -> None:
     import skill_gap_agent.cli as cli_mod
     import skill_gap_agent.judge as judge_mod
     import skill_gap_agent.llm as llm_mod
@@ -757,7 +811,6 @@ def check_end_to_end() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="m9-skills-"))
     resume = tmp / "resume.txt"
     resume.write_text("Python and SQL experience", encoding="utf-8")
-    shutil.rmtree(session_dir(resume), ignore_errors=True)
 
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -765,8 +818,7 @@ def check_end_to_end() -> None:
     with server._lock:
         server._run.update(
             status="idle", stage=None, phase=None, pause_phase=None,
-            started_at=None, finished_at=None, error=None, session_dir=None,
-        )
+            started_at=None, finished_at=None, error=None, )
     server._drop_paused()
     server._INTAKE.update(sess=None, options=None, jds_path=None, jd_files=None)
     saved_resume = dict(server._resume)
@@ -847,8 +899,8 @@ def check_end_to_end() -> None:
         assert code == 200 and b"Project for" in html_doc, html_doc[:400]
 
         # 6. The session profile holds the chat product; depth is stamped.
-        session = session_dir(resume)
-        profile = load_profile(resume) or {}
+        session = current_dir()
+        profile = load_profile() or {}
         assert profile.get("completed"), profile
         assert profile.get("depth"), profile
         graph = SkillGraph.load(str(session / "graph.json"))
@@ -869,7 +921,7 @@ def check_end_to_end() -> None:
         #    extraction upgrade re-opens the chat for exactly the new
         #    phrases — the blanket "completed -> skip" rule that hid 33 new
         #    phrases in the first live run is gone.
-        session = session_dir(resume)
+        session = current_dir()
         art_path = session / "extracted_skills.json"
         art = json.loads(art_path.read_text(encoding="utf-8"))
         old_phrases = resume_mod.flatten_phrases(art)
@@ -900,7 +952,7 @@ def check_end_to_end() -> None:
         turns_seen = _answer_intake_all(base)
         assert "phrases" in turns_seen, turns_seen
         _wait_status(base, "paused", phase="gaps")
-        profile = load_profile(resume) or {}
+        profile = load_profile() or {}
         assert profile.get("completed"), profile
         for p in new_phrases:
             # Focus items kept by the answer; background auto-kept (§A).
@@ -923,7 +975,6 @@ def check_end_to_end() -> None:
         #     skip is surfaced with the reason.
         resume2 = tmp / "resume2.txt"
         resume2.write_text("Python and SQL and pipeline work", encoding="utf-8")
-        shutil.rmtree(session_dir(resume2), ignore_errors=True)  # hermetic
         req = urllib.request.Request(
             base + "/api/resume",
             data=resume2.read_bytes(),
@@ -948,7 +999,7 @@ def check_end_to_end() -> None:
         code, body = _post(base, "/api/intake/answer", {"skip": True})
         assert code == 200, (code, body)
         _wait_status(base, "paused", phase="gaps")
-        session2 = session_dir(resume2)
+        session2 = current_dir()
         art2_path = session2 / "extracted_skills.json"
         art2 = json.loads(art2_path.read_text(encoding="utf-8"))
         added = ["Snowflake warehousing", "dbt modeling"]
@@ -967,7 +1018,7 @@ def check_end_to_end() -> None:
         assert code == 202, (code, body)
         status = _wait_status(base, "paused", phase="gaps")
         assert "use as-is" in (status.get("intake_note") or ""), status
-        prof2 = load_profile(resume2) or {}
+        prof2 = load_profile() or {}
         for p in added:
             assert prof2.get("phrases", {}).get(p) is True, (p, prof2.get("phrases"))
         assert prof2.get("completed") is True, prof2
@@ -981,7 +1032,6 @@ def check_end_to_end() -> None:
         server._resume.clear()
         server._resume.update(saved_resume)
         httpd.shutdown()
-        shutil.rmtree(session_dir(resume), ignore_errors=True)
         shutil.rmtree(tmp, ignore_errors=True)
     print(
         f"end-to-end OK: rule-only upload, intake pause ({len(turns_seen)} turns), "

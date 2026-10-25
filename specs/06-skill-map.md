@@ -40,7 +40,8 @@ The canonical schema reference — same shape later in Neo4j (folded from
 
 Every stage reads/writes here; the object lives in the S7 runtime
 registry (not in LangGraph state — checkpointer cannot serialize
-networkx). Persistence stays `output/graph.json`.
+networkx). Persistence stays `output/graph.json` (the
+session dir; M27 target state — the `output/` root copy is retired).
 
 ## History (links, not copies)
 

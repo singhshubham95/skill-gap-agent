@@ -77,7 +77,7 @@ with M16 — §M16 below).
 
 | `phase` | Behaviour |
 |---|---|
-| `"gaps"` | Write each captured JD to `output/captured_jds/*.txt` (same `title\nurl\n\ntext` shape as the bookmarklet; `ingest.py::ingest_jds` reads the folder unchanged — it replaces `data/jds/` as `jds_path`), then run the `cli.py` graph with `two_phase=True`: the graph pauses at a `pause` node right after `rank` via `interrupt()`; status becomes `paused`. `GET /api/gaps` then serves `output/gaps.json` (written by the rank node). |
+| `"gaps"` | Write each captured JD to the workspace's `captured_jds/*.txt` (`output/captured_jds/`, replaced wholesale each run, same `title\nurl\n\ntext` shape as the bookmarklet; `ingest.py::ingest_jds` reads the folder unchanged — it replaces `data/jds/` as `jds_path`), then run the `cli.py` graph with `two_phase=True`: the graph pauses at a `pause` node right after `rank` via `interrupt()`; status becomes `paused`. `GET /api/gaps` then serves the workspace's `gaps.json` (written by the rank node). |
 | `"plan"` | Resume the paused run (`Command(resume=...)`) through `synthesize` → `oss` → `output`; `GET /plan.html` serves the result. 409 if no run is paused. |
 | (absent — legacy M11) | Full one-shot run, as before. |
 
@@ -101,12 +101,89 @@ phases must run in one server process — true for the side-panel workflow.
 ## Judge cache reuse for re-analysis (`reuse_judged`)
 
 The M12 insight (see [11-sweep.md](11-sweep.md)) — the judge's score for
-target `T` is a pure function of `T` — means that re-analyzing after adding
-one JD must not re-pay ~20 LLM calls. With `reuse_judged`, the judge node
-first copies `TRANSFERS_TO` edges from `output/graph.json`, then judges only
-targets still unmatched; the judge report merges by target. The CLI default
-stays fresh-judging (the M6 validation semantics); the extension sets the
-flag.
+target `T` is a pure function of `T` (given a fixed depth stamp) — means
+that re-analyzing after adding one JD must not re-pay ~20 LLM calls. The
+CLI default stays fresh-judging (the M6 validation semantics); the
+extension sets the flag.
+
+**Reuse is a skip, not a relabel** (tightened 2026-10-18; the first
+implementation re-judged every target anyway and then mislabeled the
+fresh scores — see the T-M15-fix-cache decision row). With `reuse_judged`,
+the judge node first copies `TRANSFERS_TO` edges from the workspace's
+`graph.json` — refusing dropped endpoints and stale depth stamps per
+[13-intake.md](13-intake.md) §Depth-aware judge — then sends **only
+targets with no reusable edge, or with at least one refused (stale)
+edge**, to the LLM. A skipped target keeps its whole previous judgment
+as-is; its row renders `LLM (cached)`, which means "reused, not paid for
+this run". A judged target's row renders `LLM`. Reuse granularity is
+**per target**: a target with one reusable edge is not re-scored even if
+the candidate set moved — **Fresh analysis** (below) is the escape hatch.
+The judge report merges by target.
+
+**Edge lifecycle — the flag is written explicitly at both write sites.**
+Copying marks an edge `cached: True`; a fresh judgment writes
+`cached: False` on the pair it scores. (networkx `add_edge` on an existing
+edge updates only the attributes named and silently keeps the rest, so an
+unwritten flag would survive a re-judgment and lie about provenance in
+both directions.) Provenance then means what it says:
+`LLM (cached)` ⇔ not paid for this run.
+
+## Fresh analysis (clear LLM caches)
+
+The reuse cache makes a re-run fast by *not* re-asking the LLM. When the
+user wants fresh judgments instead (suspicious scores, a new model, or the
+per-target granularity above kept a stale whole-target judgment), the
+panel offers one control: **Fresh analysis**.
+
+- **Scope — judgment caches only.** `POST /api/session/clear-cache`
+  (JSON body; origin gate + Content-Type enforcement apply) removes
+  exactly `graph.json`, `judge_report.json` and `questions.json` from the
+  single central workspace the panel's runs use (store:
+  [13-intake.md](13-intake.md) §Workspace store) — and answers with the
+  removed file names. It never touches `profile.json` (chat answers),
+  `captured_jds/`, or extraction artifacts — clearing is not a reset.
+  The next Analyze re-judges every target with the LLM (rows render
+  `LLM`).
+- **Panel behavior.** The control sits in step 2 next to Analyze gaps,
+  confirms before posting, is single-flight (like the intake send), and
+  reports the cleared files or the error inline. It neither starts nor
+  cancels a run.
+
+## Data controls (M28)
+
+Three controls, three scopes — the panel must never conflate "re-score my
+gaps" with "forget my data":
+
+| Control | Endpoint | Deletes |
+|---|---|---|
+| **Clear list** (step 1) | `POST /api/jds/clear` | the captured JD files in `output/captured_jds/`; the panel also empties `chrome.storage.local` |
+| **Fresh analysis** (step 2) | `POST /api/session/clear-cache` | the three judgment caches |
+| **Delete all data** (step 2) | `POST /api/data/reset` | every workspace artifact, `current.json` and the uploaded resume; keeps `logs/`, `sweeps/` and `saved_sessions/` |
+
+**Clear list deletes server-side.** The JD text lives on the server (it is
+the run's input), so clearing only the panel's list would leave the files
+behind after the user asked for deletion. `GET /api/jds/captured` lets the
+panel mirror the server's set after a load or reset, so what the panel
+shows is what a run will use.
+
+## Saved sessions (M28)
+
+The workspace is one continuing session. To keep a copy, the panel offers
+an explicit save/load section:
+
+- `POST /api/session/save {name}` — snapshot artifacts + resume + captured
+  JDs into `output/saved_sessions/<name>/` (re-saving a name replaces it).
+- `GET /api/session/saved` — `{sessions: [{name, saved_at, has_resume, jds}]}`,
+  newest first.
+- `POST /api/session/load {name}` — clears the workspace, then copies the
+  snapshot in, so nothing from the replaced session survives.
+- `POST /api/session/delete {name}` — removes a snapshot.
+
+Names are sanitized to a directory-safe stem (separators stripped, no
+traversal, no hidden names); an empty or unusable name is `400`, a missing
+snapshot is `404`. These endpoints are the **only** code that reads or
+writes outside the central directory, and none of them touches `logs/`,
+`sweeps/` or `checkpoints.sqlite`.
 
 ## Rendering
 
@@ -123,7 +200,8 @@ are what make `target='_blank'` work inside a sandbox at all (without them
 the popup is silently blocked or inherits the no-script sandbox);
 `allow-scripts` stays off. A **Reopen plan** control re-points the iframe at
 `/plan.html` — the file stays on disk, so recovery costs no re-run. JD links
-resolve against `data/jds/` **and** `output/captured_jds/` (exact-name
+resolve against the workspace's `captured_jds/` folder **and** `data/jds/`
+(exact-name
 matches only), so extension-run links work too.
 
 ## Security posture
@@ -282,13 +360,15 @@ built independently. Decision rows in
   immediately and answers `{ok, filename, skills: n, source: "llm" |
   "regex" | "artifact", warning?}` — `source: "regex"` carries a warning
   that extraction quality is degraded (no key / provider down).
-- **Extraction-cache correctness (required):** today
-  `output/extracted_skills.json` is reused whenever it exists, regardless
-  of which resume produced it — acceptable for one resume per session,
-  wrong once the panel has an upload button. Cache is keyed by the source
-  resume's SHA-256 in a sidecar `output/extracted_skills.sha256`; mismatch
-  ⇒ re-extract. Sidecar, not artifact reshaping: ingest + `m8_check` read
-  the artifact JSON directly.
+- **Extraction-cache correctness (required):** the extraction artifact is
+  reused only when it matches the source resume, never merely because it
+  exists — acceptable for one resume at a time, wrong once the panel has
+  an upload button. The cache is keyed by the source resume's SHA-256 and
+  lives in the workspace (`output/extracted_skills.json` +
+  a `.sha256` sidecar); mismatch ⇒ re-extract. Sidecar, not artifact
+  reshaping: ingest + `m8_check` read the artifact JSON directly. (The
+  retired global `output/extracted_skills.json` + sidecar are never
+  created or read — M9.)
 - Run wiring: `skills_path` resolution precedence for `POST /api/run` =
   explicit body `skills_path` → uploaded resume → `--skills` default.
   `GET /api/status` gains `skills: {filename, count, source}` so the panel

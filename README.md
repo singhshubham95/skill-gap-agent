@@ -58,42 +58,31 @@ No command-line flags: the side panel handles everything.
 Full details (including troubleshooting): [extension/README.md](extension/README.md).
 After pulling code changes, restart the server and reload the extension.
 
-### Path B — CLI
+### Where your data lives
 
-```powershell
-# 1. Install (same as above)
-python -m venv .venv
-.\.venv\Scripts\pip install -e ".[dev]"
+`output/` is the **current session** — one central location, no per-run
+folders:
 
-# 2. Add your key (stored in the OS keyring — never in a file inside the repo)
-.\.venv\Scripts\python -c "from skill_gap_agent.secrets import set_secret; set_secret('OPENROUTER_API_KEY', 'sk-or-YOUR-KEY')"
+- `plan.md` — the ranked plan (start here)
+- `plan.html` — clickable issue links, served by the local UI / extension
+- `graph.json` — the full skill graph
+- `judge_report.json` — audit trail of every judgment
+- `oss_issues.json` — per-gap issue cache (re-runs make zero API calls)
+- `profile.json` — your intake answers, implied-skill decisions, depth and
+  intent (the decisions that persist across re-runs)
+- `extracted_skills.json` — the resume extraction cache
+- `current.json` — which resume this workspace belongs to
+- `uploads/` — your resume
+- `captured_jds/` — the JDs you captured
+- `saved_sessions/` — named snapshots you saved from the panel
 
-# 3. Add your data (see data/README.md for expected formats)
-#    - data/skillsdataset.json (your skills dump)
-#    - data/jds/*.txt         (job descriptions, one file each)
-#    - or pass a resume file:  --skills path\to\resume.pdf
+Uploading a different resume clears the artifacts derived from the previous
+one (profile answers, extraction cache, judgment caches) so one resume's
+depth answers can never reach another's analysis. Clearing the JD list in
+the panel deletes those files here too; **delete everything** wipes the
+session artifacts while keeping `logs/`, `sweeps/` and `saved_sessions/`.
 
-# 4. Run the full pipeline
-.\.venv\Scripts\python -m skill_gap_agent.m5_plan --auto
-```
-
-Without `--auto` you'll be asked to approve **implied skills** the CV only
-hints at, and to self-assess **depth + intent** for ambiguous gap verdicts
-(`--auto` accepts silently). Decisions persist in `output/`, so re-runs only
-ask about what changed.
-
-**Outputs** (in `output/`): `plan.md` (the ranked plan — start here),
-`plan.html` (clickable issue links, served by the local UI / extension),
-`graph.json` (the full skill graph), `judge_report.json` (audit trail of
-every judgment),
-`oss_issues.json` (per-gap issue cache — re-runs make zero API calls),
-`uploads/` (resumes uploaded from the extension panel),
-`vocab_bridge.json` (vocabulary merge
-decisions), `gaps.json` + `captured_jds/` (extension run artifacts),
-`sessions/<sha>/` (per-resume session: `profile.json` holds your intake +
-gate decisions, `extracted_skills.json` the extraction cache — keyed to
-the uploaded resume by SHA-256), and
-`sweeps/<sweep-id>/` (evaluation harness output).
+Root-owned (not session state): `checkpoints.sqlite`, `logs/`, `sweeps/`.
 
 ## What v1 does — and deliberately doesn't
 

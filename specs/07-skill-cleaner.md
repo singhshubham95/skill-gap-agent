@@ -20,8 +20,10 @@ code-exists-unwired (see below).
 
 `ingest.py::ingest_skills_json` → dedup on canonical → `HAS_SKILL`.
 Implied skills (`implied.py`, `IMPLY_PATTERNS` + GKE from M8): detect
-from parentheticals, propose y/n/a with evidence, persist
-`output/implied_skills.json`, enter as `category: implied`.
+from parentheticals, propose y/n/a with evidence, persist the decisions
+in the session's `profile.json` (M9; the retired global
+`output/implied_skills.json` is never created or read), enter as
+`category: implied`.
 
 ## JD side (target skills)
 
@@ -35,8 +37,10 @@ see `03-milestones.md` §Open (modality).
 
 `bridge_vocabulary()` classifies unmatched canonical terms against the
 full existing vocabulary (merge-or-new, batched, conservative);
-`apply_bridge()` rewrites. Decisions persist to
-`output/vocab_bridge.json`. **No caller wires it yet** — `ingest.py` /
+`apply_bridge()` rewrites. Decisions persist to the session's
+`profile.json` (M27 target state — the bridge's current default path
+`output/vocab_bridge.json` is a root-defaulted seam to be re-pointed when
+the bridge is wired). **No caller wires it yet** — `ingest.py` /
 `cli.py` never import it. Wiring is the open work; status flips to
 Built only when a run exercises it end-to-end.
 

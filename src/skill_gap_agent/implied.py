@@ -155,7 +155,7 @@ AskFn = Callable[[str], str]
 
 def propose_implied(
     implied: list[ImpliedSkill],
-    approvals_path: str | Path = Path("output/implied_skills.json"),
+    approvals_path: str | Path | None = None,
     auto_accept: bool = False,
     ask_fn: AskFn | None = None,
     decisions: dict[str, bool] | None = None,
@@ -167,17 +167,20 @@ def propose_implied(
     auto-skipped. 'a' accepts all remaining. Returns the accepted skill set.
     ask_fn lets a caller (e.g. the LangGraph runner) route the prompt through
     interrupt()/resume instead of blocking stdin; defaults to input().
-    M9: `decisions` (the intake chat's session profile) applies answers
-    silently — no prompts, no approval-file writes.
+    M9: `decisions` (the intake chat's profile) applies answers silently —
+    no prompts, no approval-file writes. `approvals_path` exists only for an
+    explicit caller that wants the retired global file; the live path is
+    the workspace profile via `on_save`.
     """
     if decisions is not None:
         return {i.skill for i in implied if decisions.get(i.skill)}
     ask = ask_fn or input
 
-    path = Path(approvals_path)
     saved: dict[str, bool] = {}
-    if path.exists():
-        saved = json.loads(path.read_text(encoding="utf-8"))
+    if approvals_path is not None:
+        path = Path(approvals_path)
+        if path.exists():
+            saved = json.loads(path.read_text(encoding="utf-8"))
     accepted: set[str] = {s for s, ok in saved.items() if ok}
     pending = [i for i in implied if i.skill not in saved]
 
@@ -208,10 +211,10 @@ def propose_implied(
     # Persist decisions
     saved.update({i.skill: (i.skill in accepted) for i in implied})
     if on_save is not None:
-        # M9: persist into the session profile (the retired global
+        # M9: persist into the workspace profile (the retired global
         # implied_skills.json is never created or read).
         on_save(dict(sorted(saved.items())))
-    else:
+    elif approvals_path is not None:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
     return accepted

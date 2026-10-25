@@ -14,7 +14,10 @@ Silent non-LLM output is the bug M15 fixes; these checks pin the fix:
    "Rule-based (LLM unavailable - ...)" — never a measured 0.0 gap — and
    plan.html carries the warning + labels.
 4. check_llm_mode_labels — a working (stubbed) LLM labels rows/sections
-   "LLM"; a cache-reusing re-run labels them "LLM (cached)".
+   "LLM" and pays for every judgment; a cache-reusing re-run makes **zero**
+   judge calls and labels "LLM (cached)"; a stale depth stamp re-judges
+   and "Fresh analysis" (clear-cache endpoint) re-judges — both labeled
+   "LLM" again (T-M15-fix-cache: labels must match what was paid for).
 5. check_extraction_provenance — the extraction sidecar records how the
    artifact was produced, so cache hits label honestly.
 
@@ -38,7 +41,6 @@ import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar
 
 from . import judge as judge_mod
 from . import llm as llm_mod
@@ -130,37 +132,23 @@ def _stub_search(query, token=None, **_kw):
 
 
 class _Preserve:
-    """Save/restore the real output artifacts the stub runs overwrite."""
+    """Redirect the artifact store for the duration of a stub run.
 
-    NAMES: ClassVar[list[str]] = [
-        "judge_report.json",
-        "graph.json",
-        "implied_skills.json",
-        "gaps.json",
-        "plan.md",
-        "plan.html",
-        "synthesis_report.json",
-        "oss_issues.json",
-    ]
+    The flat store has one location, so a check that ran against it would
+    overwrite the user's real gaps/plan/profile. `isolated_store()` points
+    the store at a scratch dir instead, so there is nothing to save or
+    restore.
+    """
 
     def __enter__(self):
-        self._saved: dict[str, bytes | None] = {}
-        for name in self.NAMES:
-            p = OUTPUT_DIR / name
-            self._saved[name] = p.read_bytes() if p.exists() else None
-            if p.exists():
-                p.unlink()
+        from .checksupport import isolated_store
+
+        self._ctx = isolated_store("sg-m15-")
+        self._ctx.__enter__()
         return self
 
     def __exit__(self, *exc):
-        for name, data in self._saved.items():
-            p = OUTPUT_DIR / name
-            if data is None:
-                if p.exists():
-                    p.unlink()
-            else:
-                p.write_bytes(data)
-        return False
+        return self._ctx.__exit__(*exc)
 
 
 # --- http helpers -----------------------------------------------------------
@@ -221,16 +209,19 @@ def _start() -> tuple[ThreadingHTTPServer, str]:
 def _run_body(tmp: Path, use_llm: bool, **extra) -> dict:
     skills = tmp / "skills.json"
     if not skills.exists():
-        # The tmp dir name makes each scenario's content (and thus its
-        # SHA-keyed session — M9) unique: scenarios must not share judge/OSS
-        # caches across the run history.
-        payload = {"skills": list(SKILLS["skills"]) + [f"session variant {tmp.name}"]}
+        # The tmp dir name makes each scenario's content unique, so scenarios
+        # never share judge/OSS caches across the run history.
+        payload = {"skills": list(SKILLS["skills"]) + [f"variant {tmp.name}"]}
         skills.write_text(json.dumps(payload), encoding="utf-8")
         # M9: these runs exercise LLM-presence policy, not the intake chat —
-        # pre-complete the session profile so runs flow straight through.
-        from .sessions import save_profile, source_sha
+        # pre-complete the workspace profile so runs flow straight through.
+        # Bind the manifest first (as a real upload does): the workspace now
+        # belongs to this fixture resume, so the run's own identity check
+        # sees no change and keeps the profile.
+        from .store import ensure_resume_identity, save_profile, source_sha
 
-        save_profile(skills, {
+        ensure_resume_identity(skills)
+        save_profile({
             "version": 1, "source_sha256": source_sha(skills), "phrases": {},
             "implied": {}, "depth": {}, "intent": {}, "proficiency": {},
             "progress": {}, "completed": True, "skipped": True, "updated_at": "",
@@ -298,6 +289,18 @@ def check_vocabulary_and_panel() -> None:
     )
     assert "showDegraded" in js, "degraded banner not wired"
     assert '"/api/run"' in js
+    # T-M15-fix-cache (specs/12-extension.md §Fresh analysis): the panel's
+    # one cache control and the endpoint it calls — confirms before
+    # posting, single-flight (disabled while pending), inline feedback.
+    assert 'id="clearcache"' in panel, "Fresh analysis control missing"
+    assert 'id="cachestate"' in panel, "Fresh analysis feedback missing"
+    assert "/api/session/clear-cache" in js, "clear-cache endpoint not wired"
+    assert re.search(
+        r"function freshAnalysis[\s\S]*?window\.confirm", js
+    ), "Fresh analysis must confirm before clearing"
+    assert re.search(r"freshAnalysis[\s\S]{0,400}?btn\.disabled = true", js), (
+        "Fresh analysis must be single-flight"
+    )
     # The key must never reach extension storage (plaintext in the profile).
     assert not re.search(
         r"chrome\.storage\.local\.set\([^)]*key", js, re.IGNORECASE | re.DOTALL
@@ -409,28 +412,41 @@ def check_loud_degradation() -> None:
 def check_llm_mode_labels() -> None:
     real = (llm_mod.get_secret, judge_mod.judge, synthesis_mod.judge, oss_mod.judge)
     _set_key_present(True)
-    judge_mod.judge = _judge_ok
+    # Count judge calls: "LLM (cached)" may only label judgments the run
+    # did NOT pay for (T-M15-fix-cache — the 2026-10-18 incident paid 15
+    # fresh judge calls whose rows still read "LLM (cached)").
+    judge_calls: list[int] = []
+
+    def _judge_counted(*a, **k):
+        judge_calls.append(1)
+        return _judge_ok(*a, **k)
+
+    judge_mod.judge = _judge_counted
     synthesis_mod.judge = _synth_ok
     oss_mod.judge = _oss_filter_ok
     oss_mod.github_search_issues = _stub_search
     tmp = _tmp()
     httpd, base = _start()
+
+    def _judged_rows() -> list[dict]:
+        _code, gaps_body = _get_json(base, "/api/gaps")
+        gaps = gaps_body.get("gaps") or []
+        judged = [g for g in gaps if g["verdict"] == "partial"]
+        assert judged, gaps
+        assert all(g["top_transfer_skill"] for g in judged), judged
+        return judged
+
     try:
         with _Preserve():
-            # Fresh LLM run -> labels "LLM".
+            # Run 1: fresh judging -> pays for every row, labels "LLM".
             code, body = _post(
                 base, "/api/run", _run_body(tmp, True, reuse_judged=True)
             )
             assert code == 202, (code, body)
             assert _wait_status(base, "paused") == "paused"
-            code, gaps_body = _get_json(base, "/api/gaps")
-            gaps = gaps_body.get("gaps") or []
-            # "partial" rows come from real TRANSFERS_TO edges (held rows
-            # are matched, not judged — they carry Rule-based labels).
-            judged = [g for g in gaps if g["verdict"] == "partial"]
-            assert judged, gaps
-            assert all(g["top_transfer_skill"] for g in judged), judged
-            assert all(g["provenance"] == "LLM" for g in judged), judged
+            calls_fresh = len(judge_calls)
+            assert calls_fresh > 0, "a fresh run must judge"
+            assert all(g["provenance"] == "LLM" for g in _judged_rows())
 
             code, body = _post(base, "/api/run", {"phase": "plan"})
             assert code == 202, (code, body)
@@ -441,24 +457,92 @@ def check_llm_mode_labels() -> None:
             code, status = _get_json(base, "/api/status")
             assert not status.get("degraded_reasons"), status
 
-            # Re-run reusing judge edges + the OSS cache -> "LLM (cached)".
+            # Run 2: reuse is a SKIP — zero judge calls, rows "LLM (cached)".
             code, body = _post(
                 base, "/api/run", _run_body(tmp, True, reuse_judged=True)
             )
             assert code == 202, (code, body)
             assert _wait_status(base, "paused") == "paused"
-            code, gaps_body = _get_json(base, "/api/gaps")
-            gaps = gaps_body.get("gaps") or []
-            judged = [g for g in gaps if g["verdict"] == "partial"]
-            assert judged, gaps
-            assert all(g["provenance"] == "LLM (cached)" for g in judged), judged
+            assert len(judge_calls) == calls_fresh, (
+                "reuse_judged must not re-judge cached targets "
+                f"({len(judge_calls) - calls_fresh} extra judge calls)"
+            )
+            assert all(g["provenance"] == "LLM (cached)" for g in _judged_rows())
 
             code, body = _post(base, "/api/run", {"phase": "plan"})
             assert code == 202, (code, body)
             assert _wait_status(base, "done") == "done"
             code, plan = _get(base, "/plan.html")
             assert b"Source: LLM (cached)</em>" in plan, plan[:800]
-            print("llm labels OK: fresh 'LLM', cache-reuse 'LLM (cached)'")
+
+            # Run 3: a changed depth stamp invalidates every edge sourced
+            # from that skill (specs/13-intake.md §Depth-aware judge) —
+            # the affected targets are re-judged and label "LLM" again.
+            # The stale source is picked from the real graph: candidate
+            # pruning decides which skills actually source edges.
+            from .store import current_dir, load_profile, save_profile
+
+            gdata = json.loads(
+                (current_dir() / "graph.json").read_text(encoding="utf-8")
+            )
+            transfers = [
+                ln for ln in gdata["links"] if ln.get("type") == "TRANSFERS_TO"
+            ]
+            assert transfers, gdata["links"]
+            stale_src = min({ln["source"] for ln in transfers})
+            stale_targets = {
+                ln["target"].removeprefix("skill:")
+                for ln in transfers
+                if ln["source"] == stale_src
+            }
+            prof = load_profile()
+            prof["depth"] = {stale_src.removeprefix("skill:"): "4"}
+            save_profile(prof)
+            before = len(judge_calls)
+            code, body = _post(
+                base, "/api/run", _run_body(tmp, True, reuse_judged=True)
+            )
+            assert code == 202, (code, body)
+            assert _wait_status(base, "paused") == "paused"
+            assert len(judge_calls) > before, (
+                f"stale depth stamps must re-judge (source={stale_src})"
+            )
+            for g in _judged_rows():
+                if g["target"] in stale_targets:
+                    assert g["provenance"] == "LLM", (stale_src, g)
+
+            # Fresh analysis (specs/12-extension.md §Fresh analysis): clears
+            # the judgment caches only — the chat profile survives.
+            code, body = _post(
+                base, "/api/session/clear-cache",
+                {"skills_path": str(tmp / "skills.json")},
+            )
+            assert code == 200, (code, body)
+            assert set(body.get("cleared") or ()) == {
+                "graph.json", "judge_report.json",
+            }, body
+            from .store import current_dir
+
+            assert (current_dir() / "profile.json").exists(), (
+                "chat answers must survive"
+            )
+            assert not (current_dir() / "graph.json").exists()
+
+            # Run 4: no cache left -> re-judged fresh, labels "LLM".
+            before = len(judge_calls)
+            code, body = _post(
+                base, "/api/run", _run_body(tmp, True, reuse_judged=True)
+            )
+            assert code == 202, (code, body)
+            assert _wait_status(base, "paused") == "paused"
+            assert len(judge_calls) > before, "a cleared cache must re-judge"
+            assert all(g["provenance"] == "LLM" for g in _judged_rows())
+
+            print(
+                "llm labels + cache OK: fresh run pays ('LLM'), reuse makes 0 "
+                "judge calls ('LLM (cached)'), stale stamps and Fresh analysis "
+                "re-judge ('LLM')"
+            )
     finally:
         (llm_mod.get_secret, judge_mod.judge, synthesis_mod.judge, oss_mod.judge) = real
         httpd.shutdown()

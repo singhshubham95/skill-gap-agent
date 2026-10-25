@@ -28,6 +28,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 LOGGER_NAME = "skill_gap_agent.debug"
@@ -59,13 +60,52 @@ _handler.setFormatter(_Formatter())
 _log.addHandler(_handler)
 _log.setLevel(logging.CRITICAL + 1)  # off until configure()
 
+_log_file_path: Path | None = None
 
-def configure(debug: bool = False, payloads: bool = False) -> None:
-    """Turn the channel on/off. `--debug-payloads` implies `--debug`."""
-    global _enabled, _payloads
+
+def configure(
+    debug: bool = False,
+    payloads: bool = False,
+    log_dir: str | Path | None = None,
+) -> Path | None:
+    """Turn the channel on/off. `--debug-payloads` implies `--debug`.
+
+    When on *and* `log_dir` is given, every line is mirrored to
+    `log_dir/server-<timestamp>.log` (specs/14-observability.md §Log-file
+    mirror — the console scrollback truncated a real debugging session);
+    the path is the first debug line. `server.py` passes `output/logs`.
+    Without `log_dir` nothing is opened (test seams), and off never touches
+    the filesystem. Returns the log file path (None when there is none).
+    """
+    global _enabled, _payloads, _log_file_path
     _payloads = bool(payloads)
     _enabled = bool(debug or payloads)
     _log.setLevel(logging.DEBUG if _enabled else logging.CRITICAL + 1)
+    for h in list(_log.handlers):
+        if isinstance(h, logging.FileHandler):
+            _log.removeHandler(h)
+            h.close()
+    _log_file_path = None
+    if _enabled and log_dir is not None:
+        d = Path(log_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = d / f"server-{stamp}.log"
+        n = 1
+        while path.exists():  # same-second restarts get a -N suffix
+            path = d / f"server-{stamp}-{n}.log"
+            n += 1
+        fh = logging.FileHandler(path, encoding="utf-8")
+        fh.setFormatter(_Formatter())
+        _log.addHandler(fh)
+        _log_file_path = path
+        dbg("log", f"debug log file: {path}")
+    return _log_file_path
+
+
+def log_path() -> Path | None:
+    """The mirrored log file for this server start (None when not mirroring)."""
+    return _log_file_path
 
 
 def enabled() -> bool:

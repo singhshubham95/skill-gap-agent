@@ -12,6 +12,54 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- M28-central-workspace: One central workspace, extension-only surface —
+  the per-input session store is replaced by a single `output/` workspace
+  (`store.py`), and `output/sessions/` is deleted. The resume identity
+  survives as a **reuse guard** (`profile.source_sha256`, extraction
+  sidecar) plus explicit invalidation on resume change, so one resume's
+  depth answers still cannot reach another's analysis. New endpoints:
+  `POST /api/jds/clear` (Clear list now deletes server-side),
+  `POST /api/data/reset` (Delete all data), and
+  `POST /api/session/{save,load,delete}` + `GET /api/session/{saved}` for
+  user-named snapshots under `output/saved_sessions/`. The CLI interface
+  is retired (`cli.py` keeps only the engine the server imports;
+  `m5_plan`/`m4_gate`/`m3_judge` and the CLI-only checks deleted). Every
+  offline check now runs against `checksupport.isolated_store()`, because
+  a flat store means a check would otherwise overwrite real data.
+  Verified: `pytest` 58 passed, `ruff` clean, all eight kept checks pass
+  and leave `output/` byte-identical. (specs:
+  [13-intake.md](../specs/13-intake.md) §Workspace store,
+  [12-extension.md](../specs/12-extension.md) §Data controls,
+  [03-milestones.md](../specs/03-milestones.md) M28)
+- T-M27-artifact-placement: Diagnosis + design for "one session, one
+  place" — the `output/` root held loose files duplicating the per-session
+  folders. Three causes found: pre-M9 leftovers, root-**defaulted** write
+  paths (the default was the bug, not the caller), and the deliberately
+  shared `output/captured_jds/`. Two live defects reproduced: the README
+  quickstart (`m5_plan --auto`) recreates the retired global
+  `output/implied_skills.json`, and a leftover copy of that file is read
+  back by the **sweep** and by two check harnesses — so one source's
+  answers can be applied to a *different* source's session. The primary
+  CLI and extension paths are unaffected (they delete the file at the
+  start of a run). Target state and the three user decisions recorded; no
+  code changed yet. (spec:
+  [13-intake.md](../specs/13-intake.md) §Artifact placement,
+  [03-milestones.md](../specs/03-milestones.md) M27)
+- T-M15-fix-cache: Honest judge cache + Fresh analysis + debug log file —
+  `reuse_judged` re-runs now make **zero** judge LLM calls for targets
+  with a reusable stamped judgment (the M13 promise; previously every
+  target was re-judged anyway) and a fresh judgment clears the `cached`
+  marker explicitly (networkx keeps unmentioned edge attributes, so fresh
+  scores were rendering as "LLM (cached)" after being paid for). New
+  panel control **Fresh analysis** clears just the judgment caches
+  (`graph.json`, `judge_report.json`, `questions.json`) via
+  `POST /api/session/clear-cache` — chat answers and captured JDs
+  survive. `--debug` mirrors the stage log to
+  `output/logs/server-<timestamp>.log` (the console scrollback truncated
+  the incident's own logs). (specs:
+  [12-extension.md](../specs/12-extension.md) §Judge cache reuse + §Fresh
+  analysis, [14-observability.md](../specs/14-observability.md) §Local
+  debug mode)
 - T-M9-fix-ux: Phrase-review UX + safety — the phrase question no longer
   dumps every extracted phrase in one 80-line prompt: gap-relevant phrases
   are listed first under the extractor's own category headers, the rest

@@ -59,7 +59,7 @@ steps (design: [13-intake.md](13-intake.md)).
 ```mermaid
 flowchart TB
     subgraph L1["Interface layer"]
-        CLI["CLI runners<br/>(cli, m5_plan, server, sweep)"]
+        CLI["Runners<br/>(server, sweep)"]
     end
     subgraph L2["Pipeline nodes (LangGraph wiring = M7)"]
         ING["Ingestion<br/>(skills JSON → graph)"]
@@ -102,7 +102,7 @@ flowchart TB
 | S4 skill cleaner | Dictionary + both-side cleaning + implied + bridge | `normalize.py`, `taxonomy.py`, `implied.py`, `vocab_bridge.py` | [07-skill-cleaner.md](07-skill-cleaner.md) | ⚠️ Split (manual Built; bridge unwired) |
 | S5 gap measurer | Judge + gate + ranking; validation rubric lives here | `judge.py`, `gate.py`, `ranking.py`, `requirements.py` | [08-gap-measurer.md](08-gap-measurer.md) | ✅ Built (M3–M6) |
 | S6 practice planner | Standalone synthesis + OSS issues + rendering | `synthesis.py`, `oss.py` (M10), `output.py` | [09-practice-planner.md](09-practice-planner.md) | ✅ Built (M5 + M10 thin slice) |
-| S7 flow runner + screen | LangGraph wiring, runners, CLI/HTML screens | `cli.py`, `m5_plan.py`, `server.py` | [10-flow-runner.md](10-flow-runner.md) | ✅ Built (M7–M8 + M11) |
+| S7 flow runner + screen | LangGraph wiring + the local HTTP runner | `cli.py` (engine only), `server.py` | [10-flow-runner.md](10-flow-runner.md) | ✅ Built (M7–M8 + M11); CLI surface retired (M28) |
 
 **Non-stage components** (own spec files — same rules as the S-files):
 
@@ -110,7 +110,7 @@ flowchart TB
 |---|---|---|---|---|
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
 | C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16) |
-| C3 intake + validation | In-panel intake chat + evidence-backed skill depth (depth-aware judge) | `intake.py`, `validate.py`, `sessions.py` | [13-intake.md](13-intake.md) | ✅ Built (M9, 2026-10-12) |
+| C3 intake + validation | In-panel intake chat + evidence-backed skill depth (depth-aware judge); one central workspace store | `intake.py`, `validate.py`, `store.py` | [13-intake.md](13-intake.md) | ✅ Built (M9, 2026-10-12; store simplified M28, 2026-10-25) |
 | C4 observability + judge evaluation | Debug logging + LangSmith tracing + judge golden-set eval | `debuglog.py` (M26), `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | ✅ Built (M26 debug mode); 🎯 Designed (M17) |
 
 ## Pipeline (stage order = data flow)
@@ -139,8 +139,9 @@ IN:  data/skillsdataset.json (146 phrases)   data/jds/*.txt (16 JDs)
                      ▼
         confidence gate (M4) → gap ranking (M5) → plan.md (M5)
 
-PERSISTED: output/graph.json (whole graph), output/judge_report.json,
-           output/sessions/<sha>/profile.json (intake + approval record, M9)
+PERSISTED: output/graph.json (whole graph),
+           output/judge_report.json,
+           output/profile.json (intake + approval record, M9/M28)
 ```
 
 _Counts are a fresh ingestion snapshot on the current seed data (2026-10-03):
@@ -231,40 +232,38 @@ skill-gap-agent/
 │   ├── synthesis.py           ← CORE: grounded project synthesis
 │   ├── oss.py                 ← M10: GFI sourcing (Search Issues + S2 filter + cache)
 │   ├── output.py              ← CORE: plan.md renderer (with JD traceability) + plan.html (M10)
-│   ├── cli.py                 ← LangGraph runner (M7): graph wiring + interrupt/resume loop,
+│   ├── cli.py                 ← pipeline engine (M7): graph wiring + interrupt/resume,
 │   │                            two-phase pause (M13), oss node + stage listener (M13 completion)
 │   ├── server.py              ← M11 local UI + M13 run contract (captured JDs, phase gaps|plan,
 │   │                            GET /api/gaps)
 │   ├── sweep.py               ← M12: JD-subset sweep harness (seeded sampling + shared caches)
-│   ├── sessions.py            ← M9: session store (SHA-keyed output/sessions/<sha>/ + profile.json)
+│   ├── store.py               ← M28: one central workspace (output/) + saved-session snapshots
 │   ├── intake.py              ← M9: intake conversation state machine (phrases→implied→depth→checklist)
 │   ├── validate.py            ← M9: skill validation protocol (author/grade, leakage, JD triage)
-│   ├── m5_plan.py             ← sequential full-pipeline runner (v1 entry, still works)
-│   ├── m7_check.py            ← milestone-7 verification: interrupt/resume flow
-│   ├── m8_check.py            ← milestone-8 verification: extraction vs seed comparison
 │   ├── m10_check.py           ← milestone-10 verification: oss thin slice (offline stub + cache reuse)
 │   ├── m11_check.py           ← milestone-11 verification: local UI server (offline stub)
 │   ├── m12_check.py           ← milestone-12 verification: sweep harness (offline stub)
 │   ├── m13_check.py           ← milestone-13 verification: extension server contract (offline stub)
-│   ├── m4_gate.py             ← milestone-4 runner (scaffolding)
-│   ├── m3_judge.py            ← milestone-3 runner (scaffolding)
-│   ├── m2_check.py            ← milestone-2 verification script (scaffolding)
-│   └── smoke_test.py          ← milestone-1 schema test (scaffolding)
-├── output/                    ← pipeline artifacts (gitignored): plan.md, plan.html, graph.json,
-│                                 gaps.json (M13), judge_report.json, oss_issues.json,
-│                                 captured_jds/ (M13 extension run input),
-│                                 sessions/<sha>/ (M9: per-resume session — profile.json,
-│                                 extracted_skills.json, plan.md, …). Legacy global decision
-│                                 files retired at M9 (see 13-intake.md).
+├── output/                    ← pipeline artifacts (gitignored):
+│                                 the CURRENT session, one central location
+│                                 (M28): profile.json, extracted_skills.json,
+│                                 captured_jds/, uploads/, graph.json,
+│                                 judge_report.json, gaps.json, plan.md,
+│                                 plan.html, synthesis_report.json,
+│                                 oss_issues.json, current.json;
+│                                 saved_sessions/<name>/ — user snapshots;
+│                                 root-owned: checkpoints.sqlite, logs/, sweeps/.
+│                                 Legacy global decision files retired at M9
+│                                 (see 13-intake.md).
 └── (no .env file)             ← API keys live in the OS keyring only (secrets.py;
                                   env-var override supported). No .env / .env.example.
 ```
 
-**Scaffolding note:** the `m*_*.py` runners are milestone scripts. Entries:
-`m5_plan.py` (v1 sequential runner), `cli.py` (the M7 LangGraph runner — the
-primary entry, accepts resume files as of M8). The M9 modules (`intake.py`,
-`validate.py`, `sessions.py`) are library modules consumed by the runners
-and `server.py`, not runners themselves. `sweep.py`
+**Scaffolding note:** the extension is the only user surface (M28 retired
+the CLI). `server.py` is the entry point; `cli.py` is the LangGraph engine it
+imports (`AgentState`, `build_app`, the nodes) and no longer has a `main()`.
+The M9 modules (`intake.py`, `validate.py`, `store.py`) are library modules
+consumed by the engine, not runners themselves. `sweep.py`
 (M12) is an evaluation harness, not a runner — it calls the pipeline's stage
 functions once per JD subset (see [11-sweep.md](11-sweep.md)).
 
@@ -283,7 +282,7 @@ accurate (workflow rules live in
   rule-based fallback is labeled with the provenance vocabulary defined
   in `llm.py`; never present rule-based results as LLM results.
 - Human decisions persist in the session profile
-  (`output/sessions/<sha>/profile.json` — M9 session store, see
+  (`output/profile.json` — the workspace store, see
   [13-intake.md](13-intake.md)) and are re-applied silently on re-runs —
   follow this pattern for any new interactive flow. The legacy global
   decision files (`extracted_approvals.json`, `implied_skills.json`,

@@ -40,8 +40,16 @@ from .llm import (
     extraction_cfg,
     judge,
 )
+from .store import current_dir
 
+# Legacy module constant kept for callers that still pass it explicitly;
+# the live path is resolved per call so the env override applies.
 EXTRACTED_PATH = Path("output/extracted_skills.json")
+
+
+def default_extracted_path() -> Path:
+    """Extraction artifact path in the current session (env-override aware)."""
+    return current_dir() / "extracted_skills.json"
 
 # ---------------------------------------------------------------------------
 # Text extraction (library, no LLM)
@@ -208,7 +216,7 @@ def _search(pattern: str, text: str) -> bool:
 
 def save_extracted(
     data: dict,
-    path: str | Path = EXTRACTED_PATH,
+    path: str | Path | None = None,
     source_sha: str | None = None,
     source: str | None = None,
     mode: str | None = None,
@@ -227,7 +235,7 @@ def save_extracted(
     mode (M24): the requested mode class ("llm" / "rule") on the sidecar's
     third line — cache reuse is mode-scoped (specs/12-extension.md §M24).
     """
-    p = Path(path)
+    p = Path(path) if path is not None else default_extracted_path()
     p.parent.mkdir(exist_ok=True)
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     if source_sha is not None:
@@ -237,14 +245,15 @@ def save_extracted(
 
 
 def load_extracted(
-    path: str | Path = EXTRACTED_PATH, expect_sha: str | None = None
+    path: str | Path | None = None, expect_sha: str | None = None
 ) -> dict | None:
     """Load a previously saved extraction artifact, if present.
 
     With expect_sha (M14), only reuse an artifact extracted from a resume
-    with that exact hash — a sidecar mismatch means re-extract.
+    with that exact hash — a sidecar mismatch means re-extract. This guard
+    is what keeps the single flat workspace safe across resume changes.
     """
-    p = Path(path)
+    p = Path(path) if path is not None else default_extracted_path()
     if not p.exists():
         return None
     if expect_sha is not None:
@@ -257,22 +266,22 @@ def load_extracted(
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def extracted_provenance(path: str | Path = EXTRACTED_PATH) -> str | None:
+def extracted_provenance(path: str | Path | None = None) -> str | None:
     """M15: how the saved artifact was produced ("llm" / "regex" / None)."""
-    sidecar = Path(path).with_suffix(".sha256")
+    sidecar = (Path(path) if path is not None else default_extracted_path()).with_suffix(".sha256")
     if not sidecar.exists():
         return None
     lines = sidecar.read_text(encoding="utf-8").splitlines()
     return lines[1].strip() if len(lines) > 1 and lines[1].strip() else None
 
 
-def extracted_mode(path: str | Path = EXTRACTED_PATH) -> str:
+def extracted_mode(path: str | Path | None = None) -> str:
     """M24: the mode class the artifact was produced for ("llm" / "rule").
 
     Sidecar line 3; legacy two-line sidecars predate mode-scoping and are
     read as "llm" (the historical `use_llm=True` default), so existing
     LLM artifacts keep hitting (specs/12-extension.md §M24)."""
-    sidecar = Path(path).with_suffix(".sha256")
+    sidecar = (Path(path) if path is not None else default_extracted_path()).with_suffix(".sha256")
     if not sidecar.exists():
         return "llm"
     lines = sidecar.read_text(encoding="utf-8").splitlines()
@@ -337,7 +346,7 @@ def _prune_rejected(data: dict, rejected: set[str]) -> dict:
 
 def review_extracted(
     data: dict,
-    approvals_path: str | Path = Path("output/extracted_approvals.json"),
+    approvals_path: str | Path | None = None,
     auto_accept: bool = False,
     ask_fn=None,
     decisions: dict[str, bool] | None = None,
@@ -358,10 +367,11 @@ def review_extracted(
         rejected = {p for p in _flatten_phrases(data) if decisions.get(p) is False}
         return _prune_rejected(data, rejected) if rejected else data
     ask = ask_fn or input
-    path = Path(approvals_path)
     saved: dict[str, bool] = {}
-    if path.exists():
-        saved = json.loads(path.read_text(encoding="utf-8"))
+    if approvals_path is not None:
+        path = Path(approvals_path)
+        if path.exists():
+            saved = json.loads(path.read_text(encoding="utf-8"))
 
     phrases = _flatten_phrases(data)
     pending = [p for p in phrases if p not in saved]
@@ -393,7 +403,7 @@ def review_extracted(
         # M9: persist into the session profile (the retired global
         # extracted_approvals.json is never created or read).
         on_save(dict(sorted(saved.items())))
-    else:
+    elif approvals_path is not None:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
 
@@ -425,7 +435,7 @@ def save_upload(data: bytes, filename: str, upload_dir: str | Path) -> Path:
 
 def extract_to_artifact(
     resume_path: str | Path,
-    artifact_path: str | Path = EXTRACTED_PATH,
+    artifact_path: str | Path | None = None,
     use_llm: bool = True,
     cfg: LLMConfig | None = None,
 ) -> tuple[dict, str]:
@@ -435,6 +445,8 @@ def extract_to_artifact(
     its answers live in the session profile. Artifact reuse follows the M14
     SHA sidecar (same resume -> same artifact).
     """
+    if artifact_path is None:
+        artifact_path = default_extracted_path()
     text = extract_text(resume_path)
     source_sha = hashlib.sha256(Path(resume_path).read_bytes()).hexdigest()
     data = load_extracted(artifact_path, expect_sha=source_sha)
@@ -498,8 +510,8 @@ def phrase_groups(data: dict) -> dict[str, str]:
 
 def resume_to_skills_json(
     resume_path: str | Path,
-    artifact_path: str | Path = EXTRACTED_PATH,
-    approvals_path: str | Path = Path("output/extracted_approvals.json"),
+    artifact_path: str | Path | None = None,
+    approvals_path: str | Path | None = None,
     use_llm: bool = True,
     auto: bool = False,
     ask_fn=None,
@@ -521,6 +533,8 @@ def resume_to_skills_json(
 
     Returns (json_path, stats) where stats reports which path was taken.
     """
+    if artifact_path is None:
+        artifact_path = default_extracted_path()
     text = extract_text(resume_path)
     source_sha = hashlib.sha256(Path(resume_path).read_bytes()).hexdigest()
 

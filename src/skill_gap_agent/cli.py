@@ -32,7 +32,7 @@ import operator
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NamedTuple, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -48,7 +48,14 @@ from .oss import source_oss_for_gaps
 from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
 from .resume import resume_to_skills_json
-from .sessions import load_profile, retire_legacy_files, save_profile, session_dir
+from .store import (
+    current_dir,
+    ensure_resume_identity,
+    load_profile,
+    retire_legacy_files,
+    save_profile,
+    source_sha,
+)
 from .synthesis import save_synthesis_report, synthesize_for_gaps
 from .taxonomy import load_taxonomy
 
@@ -112,27 +119,21 @@ class AgentState(TypedDict, total=False):
     # records ({touchpoint, error}) accumulate across nodes and phases.
     unjudged: Annotated[list[dict], operator.add]
     degraded_reasons: Annotated[list[dict], operator.add]
-    # M9 session store (specs/13-intake.md §Session store): every artifact
-    # of the run lives under the skills source's SHA-keyed session dir, and
-    # human decisions live in its profile.json (the retired global
-    # extracted_approvals/implied_skills/gate_overrides files are never
-    # created or read).
-    source_input: str  # the skills source (resume or JSON) — session key
-    session_dir: str  # resolved session directory for this run
+    # M9 decision store: human decisions live in the workspace's
+    # profile.json (the retired global extracted_approvals/implied_skills/
+    # gate_overrides files are never created or read).
+    source_input: str  # the skills source (resume or JSON) — identity for reuse
 
 
 def _out(state: AgentState) -> Path:
-    """Run artifact directory: the session dir (M9), output/ as fallback."""
-    return Path(state.get("session_dir") or "output")
+    """Run artifact directory — always the one central workspace."""
+    return current_dir(create=True)
 
 
 def _profile(state: AgentState) -> dict:
-    """Session profile (chat product), reloaded from disk — its file is the
-    source of truth so answers survive every pause and process restart."""
-    src = state.get("source_input") or ""
-    if not src:
-        return {}
-    return load_profile(src) or {}
+    """Chat profile, reloaded from disk — its file is the source of truth so
+    answers survive every pause and process restart."""
+    return load_profile() or {}
 
 
 def _profile_depths(profile: dict) -> dict[str, str]:
@@ -275,17 +276,24 @@ def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
 
 
 def _save_profile_key(state: AgentState, key: str, value: dict) -> None:
-    """Persist one decision map into the session profile (M9: the retired
+    """Persist one decision map into the workspace profile (M9: the retired
     global approval files are never created or read)."""
-    src = state.get("source_input") or ""
-    if not src:
-        return
-    profile = load_profile(src) or {}
+    profile = load_profile() or {}
     profile[key] = value
-    save_profile(src, profile)
+    save_profile(profile)
 
 
-def _copy_previous_transfers(sg: SkillGraph, out_dir: Path, depths: dict[str, str]) -> int:
+class ReuseResult(NamedTuple):
+    """What `_copy_previous_transfers` found in the previous graph (M15-fix)."""
+
+    reused: int
+    copied_targets: set[str]  # targets that kept ≥1 reusable edge
+    stale_targets: set[str]  # targets with ≥1 stamp-refused edge
+
+
+def _copy_previous_transfers(
+    sg: SkillGraph, out_dir: Path, depths: dict[str, str]
+) -> ReuseResult:
     """Copy TRANSFERS_TO edges from the last saved graph into this run.
 
     Copied edges are marked cached=True so ranking can label their rows
@@ -293,24 +301,44 @@ def _copy_previous_transfers(sg: SkillGraph, out_dir: Path, depths: dict[str, st
     M9 stamp rule: an edge is reusable only while its source's depth is
     unchanged from when the score was computed (`depth_val`); a changed
     depth re-judges the affected targets (specs/13-intake.md §Depth-aware
-    judge) — never silently replays a stale-depth score.
+    judge) — never silently replays a stale-depth score. The result names
+    both sets so node_judge can SKIP the LLM for reused targets and
+    re-judge only the stale/absent ones (specs/12-extension.md §Judge
+    cache reuse).
     """
     prev_path = out_dir / "graph.json"
     if not prev_path.exists():
-        return 0
+        return ReuseResult(0, set(), set())
     prev = SkillGraph.load(str(prev_path))
     reused = 0
+    copied_targets: set[str] = set()
+    stale_targets: set[str] = set()
     for u, v, d in prev.g.edges(data=True):
         # Both endpoints must survive the review: an edge whose source skill
         # was dropped this run must not replay (its "LLM (cached)" row would
         # cite a skill the user just rejected — T-M9-fix-ux).
         if d.get("type") == "TRANSFERS_TO" and sg.g.has_node(u) and sg.g.has_node(v):
             source = u.removeprefix("skill:")
+            target = v.removeprefix("skill:")
             if str(d.get("depth_val", "")) != str(depths.get(source, "")):
-                continue  # stale depth stamp -> re-judge
+                stale_targets.add(target)  # stale depth stamp -> re-judge
+                continue
             sg.g.add_edge(u, v, **{**d, "cached": True})
+            copied_targets.add(target)
             reused += 1
-    return reused
+    return ReuseResult(reused, copied_targets, stale_targets)
+
+
+def _reuse_pending(unmatched: list[str], reuse: ReuseResult) -> list[str]:
+    """Targets still to judge under `reuse_judged` (M15-fix skip rule).
+
+    A target is skipped only when it kept ≥1 reusable edge AND none of its
+    edges was refused as stale; targets with no reusable edge (never
+    judged, or previously judged with no qualifying transfer) fall through
+    to fresh judging.
+    """
+    cached_ok = reuse.copied_targets - reuse.stale_targets
+    return [t for t in unmatched if t not in cached_ok]
 
 
 def _save_merged_judge_report(results: list, out_dir: Path) -> None:
@@ -353,8 +381,8 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
     if state.get("skip_judge") or state.get("reuse_judged"):
         profile = _profile(state)
         depths = _profile_depths(profile)
-        reused = _copy_previous_transfers(sg, _out(state), depths)
-        print(f"Reused {reused} TRANSFERS_TO edges from {_out(state) / 'graph.json'}")
+        reuse = _copy_previous_transfers(sg, _out(state), depths)
+        print(f"Reused {reuse.reused} TRANSFERS_TO edges from {_out(state) / 'graph.json'}")
         if state.get("skip_judge"):
             # --no-judge measures nothing new: remaining unmatched targets
             # are unjudged, not measured gaps (M15).
@@ -363,19 +391,34 @@ def node_judge(state: AgentState, config: RunnableConfig) -> dict:
                 "judged": False,
                 "unjudged": [{"target": t, "reason": None} for t in targets],
             }
-        # reuse_judged: targets whose edges were stale (depth changed) or
-        # absent fall through to fresh judging below.
-
-    profile = _profile(state)
-    depths = _profile_depths(profile)
-    unmatched = sg.unmatched_target_skills()
-    if not unmatched:
-        return {"judged": False}
-    print(f"Judging {len(unmatched)} unmatched target skills...\n")
-    results = judge_all_unmatched(sg, cfg=_llm_cfg(state), depths=depths)
-    if state.get("reuse_judged"):
+        # reuse_judged is a SKIP, not a relabel (specs/12-extension.md
+        # §Judge cache reuse): a target that kept a reusable edge and lost
+        # none to a stale stamp never reaches the LLM this run — its row
+        # renders "LLM (cached)" for a judgment that was genuinely reused.
+        pending = _reuse_pending(sg.unmatched_target_skills(), reuse)
+        if not pending:
+            print(
+                f"All {len(sg.unmatched_target_skills())} target(s) served "
+                f"from cache — 0 judge calls"
+            )
+            return {"judged": False}
+        print(
+            f"Judging {len(pending)} target skill(s) "
+            f"({len(sg.unmatched_target_skills()) - len(pending)} reused "
+            f"from cache)...\n"
+        )
+        results = judge_all_unmatched(
+            sg, cfg=_llm_cfg(state), only=sorted(pending), depths=depths
+        )
         _save_merged_judge_report(results, _out(state))
     else:
+        profile = _profile(state)
+        depths = _profile_depths(profile)
+        unmatched = sg.unmatched_target_skills()
+        if not unmatched:
+            return {"judged": False}
+        print(f"Judging {len(unmatched)} unmatched target skills...\n")
+        results = judge_all_unmatched(sg, cfg=_llm_cfg(state), depths=depths)
         save_judge_report(results, _out(state) / "judge_report.json")
     out: dict = {"judged": True}
     # M15: a failed judge call must never read as a measured 0-confidence
@@ -635,12 +678,12 @@ def build_app(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
-    """M9 in-panel intake conversation (CLI: stdin or scripted JSON).
+def _run_intake(args, src_path: Path, cfg: LLMConfig) -> None:
+    """M9 intake conversation (CLI: stdin or scripted JSON).
 
     Extraction (or the skills JSON itself) feeds the phrase review; the
     captured-JD set feeds validation triage (JD-aware — placement revision
-    2026-10-12). Every answer lands in the session profile immediately.
+    2026-10-12). Every answer lands in the workspace profile immediately.
     """
     from .implied import detect_implied
     from .ingest import jd_target_weights
@@ -649,6 +692,7 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
     from .resume import extract_to_artifact, flatten_phrases, phrase_groups
     from .validate import Validator, triage_skills
 
+    session = current_dir(create=True)
     if src_path.suffix.lower() == ".json":
         data = json.loads(src_path.read_text(encoding="utf-8"))
         source = "json"
@@ -673,8 +717,7 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
         None if args.no_llm else Validator(session / "questions.json", cfg=cfg)
     )
     sess = IntakeSession(
-        source_sha=session.name,
-        source_path=src_path,
+        source_sha=source_sha(src_path),
         phrases=phrases,
         implied=implied_list,
         triaged=triaged,
@@ -762,17 +805,17 @@ def main() -> None:
         conn = sqlite3.connect(str(CHECKPOINT_PATH), check_same_thread=False)
         checkpointer = SqliteSaver(conn)
 
-    # M9 session store (specs/13-intake.md §Session store): every artifact of
-    # this run lives under the skills source's SHA-keyed session dir, and the
-    # retired global decision files are deleted (migration) and never
-    # recreated by any flow.
+    # One central workspace: the retired global decision files are deleted
+    # (migration) and never recreated by any flow. A changed resume clears
+    # the artifacts derived from the previous one.
     retire_legacy_files()
     src_path = Path(args.skills)
-    session = session_dir(src_path, create=True)
+    session = current_dir(create=True)
+    ensure_resume_identity(src_path)
     cfg = LLMConfig(provider=args.provider)
 
     if args.intake or args.intake_json:
-        _run_intake(args, src_path, session, cfg)
+        _run_intake(args, src_path, cfg)
 
     config = {"configurable": {"thread_id": "cli"}}
 
@@ -782,7 +825,7 @@ def main() -> None:
     # takes today's path unchanged.
     skills_path = args.skills
     if Path(skills_path).suffix.lower() != ".json":
-        profile = load_profile(src_path) or {}
+        profile = load_profile() or {}
         json_path, _stats = resume_to_skills_json(
             skills_path,
             artifact_path=session / "extracted_skills.json",
@@ -807,7 +850,6 @@ def main() -> None:
         "provider": args.provider,
         "use_llm": not args.no_llm,
         "source_input": str(src_path),
-        "session_dir": str(session),
     }
     config = {"configurable": {"thread_id": "cli"}}
 

@@ -43,47 +43,19 @@ BANNED_CLAIM = "stays on your machine"
 
 
 class _Preserve:
-    """Save/restore the extraction artifacts + uploads dir the checks use
-    (same shape as m14_check's)."""
-
-    NAMES = (
-        "extracted_skills.json",
-        "extracted_skills.sha256",
-        "extracted_skills.reviewed.json",
-        "extracted_approvals.json",
-    )
+    """Redirect the artifact store for the duration of the upload checks
+    (same shape as m14_check's). The flat store has one location, so these
+    checks must never write into the user's real workspace."""
 
     def __enter__(self):
-        self._output = Path(server.__file__).resolve().parents[2] / "output"
-        self._saved: dict[str, bytes | None] = {}
-        for name in self.NAMES:
-            p = self._output / name
-            self._saved[name] = p.read_bytes() if p.exists() else None
-            if p.exists():
-                p.unlink()
-        self._uploads_existed = server.UPLOAD_DIR.exists()
-        self._uploads = (
-            {f.name for f in server.UPLOAD_DIR.iterdir()}
-            if self._uploads_existed
-            else set()
-        )
+        from .checksupport import isolated_store
+
+        self._ctx = isolated_store("sg-m24-")
+        self._ctx.__enter__()
         return self
 
     def __exit__(self, *exc):
-        for name, data in self._saved.items():
-            p = self._output / name
-            if data is None:
-                if p.exists():
-                    p.unlink()
-            else:
-                p.write_bytes(data)
-        if server.UPLOAD_DIR.exists():
-            for f in server.UPLOAD_DIR.iterdir():
-                if f.name not in self._uploads:
-                    f.unlink()
-            if not self._uploads_existed and not any(server.UPLOAD_DIR.iterdir()):
-                server.UPLOAD_DIR.rmdir()
-        return False
+        return self._ctx.__exit__(*exc)
 
 
 # --- http helpers (same shape as m21_check) --------------------------------

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .llm import LABEL_LLM, LABEL_RULE, rule_unavailable_label
 from .ranking import Gap, format_ranking
+from .store import current_dir
 from .synthesis import SynthesizedProject
 
 VERDICT_EXPLAIN = {
@@ -334,11 +335,11 @@ def write_plan(
     gaps: list[Gap],
     projects: list[SynthesizedProject],
     stats: dict,
-    path: str | Path = Path("output/plan.md"),
+    path: str | Path | None = None,
     oss_by_gap: dict[str, list] | None = None,
     run_info: dict | None = None,
 ) -> Path:
-    p = Path(path)
+    p = Path(path) if path is not None else current_dir() / "plan.md"
     p.parent.mkdir(exist_ok=True)
     p.write_text(
         render_plan(gaps, projects, stats, oss_by_gap, run_info), encoding="utf-8"
@@ -351,11 +352,11 @@ def write_plan_html(
     projects: list[SynthesizedProject],
     stats: dict,
     oss_by_gap: dict[str, list] | None = None,
-    path: str | Path = Path("output/plan.html"),
+    path: str | Path | None = None,
     jd_files: dict[str, str] | None = None,
     run_info: dict | None = None,
 ) -> Path:
-    p = Path(path)
+    p = Path(path) if path is not None else current_dir() / "plan.html"
     p.parent.mkdir(exist_ok=True)
     p.write_text(
         render_plan_html(gaps, projects, stats, oss_by_gap, jd_files, run_info),
