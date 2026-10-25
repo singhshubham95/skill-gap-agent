@@ -154,13 +154,30 @@ code {
 }
 
 .conn {
-  margin: 0;
-  color: var(--ok);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--banner-border);
+  border-radius: 6px;
+  background: var(--banner-bg);
+  color: var(--banner-fg);
   font-size: 12px;
 }
 
 .conn.offline {
-  color: var(--danger);
+  color: var(--banner-fg);
+}
+
+.conn .linkish,
+.banner a {
+  color: inherit;
+}
+
+#advanced {
+  margin-top: 8px;
 }
 
 .count {

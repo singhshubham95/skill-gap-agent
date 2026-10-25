@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M28; M9 built 2026-10-12, M28 built 2026-10-25)
+## Milestones (linear and global — M1…M29; M9 built 2026-10-12, M28 built 2026-10-25, M29 designed 2026-10-26)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -136,7 +136,10 @@ extraction-contract + setup ordering (mode governs ingestion) — likewise
 not a pipeline stage. M25 was a hotfix task (T-M25) recorded inside M24's
 learning (c), not a milestone entry; M26 is local debug logging
 (developer console tooling for extension testing) — likewise not a
-pipeline stage.
+pipeline stage. M27 was a placement diagnosis superseded by M28; M28 is
+the central workspace + extension-only interface; **M29 is the consumer
+install path** (bundled companion, Windows installer, store onboarding) —
+likewise not a pipeline stage.
 
 7. **LangGraph orchestration.** ✅ Done. The v1 nodes are wired into a real
    LangGraph graph (`cli.py`): conditional gate as a branch (skipped when no
@@ -1213,6 +1216,66 @@ live localhost server: save/list/load round-trip, JD clear, data reset
   still be created and still be read) were real and are fixed here by
   removing the root-path defaults entirely.
 
+## M29 — Consumer install path: bundled companion, installer, store onboarding (designed 2026-10-26)
+
+**Status: 🎯 Designed.** User decision 2026-10-26: take the
+companion-installer path instead of porting the pipeline to TypeScript;
+the target end-user setup is **two installs** (companion app + extension)
+with no terminal, no system Python, and no developer mode. Design homes:
+[15-desktop-companion.md](15-desktop-companion.md) (companion app,
+installer, release pipeline, distribution) and
+[12-extension.md](12-extension.md) §M29 (panel connection, offline, and
+version UX). Decision rows: [02-decisions.md](02-decisions.md) (M29).
+
+**Slices / work orders** (29b–29d start after their blockers):
+
+- **29a — Launcher** ([T-M29-desktop-launcher](../specs/tasks/T-M29-desktop-launcher.md)):
+  desktop entry point, tray lifecycle, single instance, start-at-login
+  toggle, runtime data/log paths, `app_version` in `/api/status`, offline
+  `m29_check`. No blockers.
+- **29b — Installer + CI**
+  ([T-M29-installer-ci](../specs/tasks/T-M29-installer-ci.md)):
+  PyInstaller one-dir build, per-user Inno Setup installer, signing hook,
+  GitHub Actions release artifact + checksums. Blocked by 29a.
+- **29c — Panel onboarding**
+  ([T-M29-panel-onboarding](../specs/tasks/T-M29-panel-onboarding.md)):
+  fixed default connection, advanced URL, companion guidance, version
+  banner. Blocked by 29a (the `app_version` contract must exist for live
+  verification).
+- **29d — Docs + store close**
+  ([T-M29-install-docs](../specs/tasks/T-M29-install-docs.md)):
+  two-install README/landing/privacy copy, store reviewer register,
+  milestone verification record and status flips. Blocked by 29b + 29c;
+  29d owns the milestone close.
+
+**Progress:** 29a launcher built 2026-10-26
+([T-M29-desktop-launcher](../specs/tasks/T-M29-desktop-launcher.md);
+`board/verify-T-M29-desktop-launcher.md`). 29b installer/CI and 29c panel
+onboarding are implemented and in review — automated checks plus a local
+Windows host install/update/uninstall pass are green; the clean-VM pass,
+a signed-build check (certificate), and one live panel pass remain. 29d
+remains designed.
+
+**Done criteria:** [15](15-desktop-companion.md) §Done criteria (M29)
+plus [12](12-extension.md) §M29. The verification record and any
+learnings land in this entry when 29d closes; until then the component
+specs stay marked Designed.
+
+**Release gates (owner actions, not code completion):**
+
+- Chrome Web Store developer account, submission, and approval — until
+  the listing is public, the no-developer-mode journey is not available
+  (materials/checklist: [CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md)).
+- A code-signing certificate for the companion executables/installer —
+  CI produces an unsigned test build and signs only when secrets exist.
+- Both are tracked in §Open so the milestone is not called
+  consumer-ready while either is missing.
+
+**Explicit non-goals:** TypeScript/WASM port, hosted backend,
+native-messaging auto-launch, companion auto-update, macOS/Linux
+packaging, MSIX/winget, and any pipeline/API changes; see
+[15](15-desktop-companion.md) §Out of scope and §Deferred #14, #17–#19.
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -1233,28 +1296,37 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 11 | **JD auto-discovery/scraping** | User-supplied JDs | Explicit non-goal of v1; extension prerequisite (browser JD is the input). M13's Capture button covers manual browser-JD input; *automatic* discovery/scraping remains deferred. |
 | 12 | **In-page gap marking** (content script wraps the JD text's matched skills on the page) | Gaps render as a table in the extension side panel only | User decision 2026-10-03 at M13 design time. Restore when the panel flow is trusted and visual marking on the JD page adds value; the capture extraction and gap data it needs already exist. |
 | 13 | **Conversational intake** (M9's chat agent as designed in `13-intake.md`) | ~~Interaction stays the non-conversational extension panel; resume upload + key entry make that panel self-serve (M14)~~ **Restored 2026-10-12 (M9 built)** — the user restored the conversation directly, bypassing the trigger below; the chat lives inside the panel flow as required. | User decision 2026-10-04 — a chat surface doubles the interaction model to build and maintain (multi-turn state, per-question interrupts) for uncertain quality gain; the quality levers (skill validation, judge calibration) can be non-conversational. Restore trigger: the plan/gap-quality brainstorm shows clarifying questions materially improve gap analysis **and** a non-conversational alternative (panel checklist review) is insufficient. Any restored version must live inside the panel flow. *(Superseded 2026-10-12: user restored C3 in full — intake chat + validation + depth-aware judge — as M9; see roadmap M9 + `13-intake.md`.)* |
-| 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | Double-click `tools/start-server.bat` | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. Restore trigger: the .bat friction still hurts after real daily use. |
+| 14 | **Native-messaging server auto-launch** (extension starts `server.py` via a registered host) | ~~Double-click `tools/start-server.bat`~~ (M29, designed: the installed companion starts at login; no extension-driven process start) | Native Messaging is the only way a Chrome extension can start a process, but it needs a registered host + registry entry + a pinned extension ID that breaks when an unpacked folder moves. A store-distributed extension has a stable ID, but the host registration remains. Restore trigger: users report the installed companion not running when the panel needs it, despite login autostart. Design: [15-desktop-companion.md](15-desktop-companion.md) §Companion app. |
 | 15 | **Session-token pairing for the local agent API** (per-session bearer token minted at server start, required on every request) | M20's request-origin gate + Content-Type enforcement + `skills_path` containment only | Same-user processes send no `Origin` and can read `output/` directly anyway — tokens add pairing friction without raising that boundary. Restore trigger: the product starts handling other users' data or running as a service (multi-user machines become a supported target). |
 | 16 | **PII minimization** ~~+ manual no-cloud extraction toggle~~ (strip names/contact details before LLM calls) | M21's disclosure-only contract: accurate copy + named destinations + first-use consent; the regex fallback still runs automatically when no key is set | User decision 2026-10-11 — T-M21 is disclosure-only. ~~The no-cloud toggle is superseded by M24 (2026-10-11): Rule-based mode now governs extraction — the restore trigger is met.~~ Restore triggers (PII half): store review pushes for data minimization, or users report discomfort sending contact details to providers (skill extraction never needs them). |
+| 17 | **Companion auto-update** (background check/download/install of new companion builds) | Manual reinstall from GitHub Releases; tray **Check for updates** opens the release page; the panel shows a non-blocking version-mismatch banner | An updater is its own security surface (signature verification, rollback, partial installs) and M29 already ships the version handshake that makes staleness visible. Restore trigger: extension releases start outpacing companion installs, or mismatch warnings become a recurring support item. Design: [15-desktop-companion.md](15-desktop-companion.md) §Updates. |
+| 18 | **macOS/Linux companion packages** | Windows 10/11 x64 only in M29; other platforms use the developer setup (if they can) | Code signing/notarization, LaunchAgent/systemd integration, and per-platform CI are a separate packaging effort. Restore trigger: observed non-Windows usage after public launch, or a release explicitly targeting those platforms. Design: [15](15-desktop-companion.md) §Companion app. |
+| 19 | **Dynamic port selection + extension discovery** | Fixed `127.0.0.1:8000`; a busy port produces a notification + log entry and the app exits; the panel shows the offline state | Port conflicts are rare, and discovery adds probing/security surface plus a second source of truth for the panel URL. Restore trigger: recurring port-8000 conflict reports, or another product on the same machine needing that port. Design: [15](15-desktop-companion.md) §Network and port. |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
 
-- **M27 live defects (block the M27 implementation, not the diagnosis).**
-  The retired globals are currently neither safe from creation nor from
-  being read — reproduced 2026-10-19. `python -m skill_gap_agent.m5_plan
-  --auto` (the README quickstart) recreates
-  `output/implied_skills.json` in a clean directory; and that file, if
-  left on disk, is read back by the **sweep** (which seeds
-  `output/sweeps/<id>/_shared/` from root `output/`) and by the
-  `m3_judge` / `m26_check` harnesses, so one source's answers can be
-  applied to a *different* source's session without the user being
-  asked. The primary CLI and extension paths are not affected — they
-  call `retire_legacy_files()` first, which deletes the file at the
-  start of the run. Until the M27 slices land, delete any stale
-  `output/implied_skills.json` before a sweep, and do not treat a
-  leftover root global as authoritative. Work order:
-  `specs/tasks/T-M27-artifact-placement.md`; design:
-  [13-intake.md](13-intake.md) §Two live defects.
+- **M29 verification pass.** 29a is built; 29b/29c are implemented with
+  green automated checks and a local Windows host install/update/uninstall
+  pass. Before 29d closes the milestone, record: (a) a clean Windows 10/11
+  x64 VM install/autostart/uninstall pass with no Python, (b) a signed-build
+  check once a certificate is available (the local artifact is unsigned),
+  and (c) one live panel pass against the installed companion, including a
+  forced version mismatch. Delete this item once those results are in the
+  M29 entry. Work orders: `specs/tasks/T-M29-installer-ci.md`,
+  `specs/tasks/T-M29-panel-onboarding.md`; reports:
+  `board/verify-T-M29-installer-ci.md`,
+  `board/verify-T-M29-panel-onboarding.md`.
+
+- **M29 public-release gates (owner actions).** The installable companion
+  path is code-complete when 29a–29d are green, but the *simplified
+  end-user* journey needs two external gates: (a) Chrome Web Store
+  developer account + listing submission/approval (materials and checklist:
+  [CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md)), and (b) a code-signing
+  certificate for the frozen executables/installer (CI signs only when
+  secrets exist). Verification may use an unpacked extension and an
+  unsigned test build in a VM; delete this item only when both gates are
+  done. Design: [15](15-desktop-companion.md) §CI and distribution,
+  §Done criteria (M29).
 
 - **M26 live panel pass.** The debug flow is verified offline
   (`board/verify-T-M26.md`) plus a live `--debug` server smoke (request

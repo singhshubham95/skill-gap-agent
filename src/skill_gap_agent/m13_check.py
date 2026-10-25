@@ -223,6 +223,39 @@ def check_extension_manifest() -> None:
     assert 'id="reopen"' in panel, "sidepanel.html: Reopen plan control missing"
     js = (EXTENSION_DIR / "sidepanel.js").read_text(encoding="utf-8")
     assert "$(\"reopen\")" in js, "sidepanel.js: Reopen plan not wired"
+
+    # M29 (specs/12-extension.md §M29): companion-aware onboarding.
+    for needle in (
+        'id="conntext"',
+        'id="retry"',
+        'id="companionlink"',
+        'id="versionwarn"',
+        'id="versionlink"',
+        'id="advanced"',
+        "Advanced (developer)",
+    ):
+        assert needle in panel, f"sidepanel.html: M29 control missing: {needle}"
+    assert 'id="conn"' in panel and "hidden" in panel, "offline line must start hidden"
+    assert "manifest host_permissions" not in panel, (
+        "end-user settings must not mention manifest edits"
+    )
+    for needle in (
+        "const COMPANION_RELEASES_URL",
+        "const MIN_COMPANION_VERSION",
+        "function updateCompanionVersion",
+        "updateCompanionVersion(s)",
+        "$(\"retry\").addEventListener(\"click\", retryConnection)",
+        "Skill-Gap Agent isn't running. Open it from the Start menu",
+        "href = COMPANION_RELEASES_URL",
+    ):
+        assert needle in js, f"sidepanel.js: M29 wiring missing: {needle}"
+    assert js.count("href = COMPANION_RELEASES_URL") >= 2, (
+        "both offline and version links must use the release constant"
+    )
+    assert "start-server.bat" not in js and "python -m skill_gap_agent.server" not in js, (
+        "end-user panel copy must not contain developer launch instructions"
+    )
+    print("companion onboarding OK: auto-connect, offline Retry, version banner")
     print(f"manifest OK: MV3 side panel + content script ({len(refs)} files)")
 
 

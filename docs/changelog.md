@@ -12,6 +12,16 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-M29-desktop-launcher: Desktop companion tray lifecycle — tray entry
+  point (`python -m skill_gap_agent.desktop`), single-instance mutex,
+  LocalAppData (installed) vs repo `output/` (dev) paths, start-with-Windows
+  toggle, windowed stdout/stderr log redirect, and additive `app_version`
+  in `/api/status`; the server gained shared `prepare_workspace()` /
+  `create_server()` seams without changing the dev launcher. Verified:
+  `m29_check` + pytest (67) + m13/m26, live tray smoke (API up, second
+  launch refused, clean quit), and a real port-busy exit 2. (spec:
+  [15-desktop-companion.md](../specs/15-desktop-companion.md) §Companion
+  app)
 - M28-central-workspace: One central workspace, extension-only surface —
   the per-input session store is replaced by a single `output/` workspace
   (`store.py`), and `output/sessions/` is deleted. The resume identity

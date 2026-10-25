@@ -88,7 +88,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import debuglog, secrets
+from . import __version__, debuglog, secrets
 from . import llm as llm_mod
 from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
 from .store import current_dir, source_sha
@@ -928,6 +928,9 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 payload = dict(_run)
             payload["skills"] = _describe_skills()
+            # M29: the panel's companion version handshake (additive; older
+            # clients ignore it).
+            payload["app_version"] = __version__
             self._json(200, payload)
         elif path == "/api/providers":
             # Key material is never returned — key_set is a boolean only.
@@ -1743,6 +1746,37 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[m11] {html.escape(safe)}")
 
 
+def prepare_workspace() -> dict:
+    """Restore the M28 workspace into process state; return the restored resume.
+
+    Shared by the developer entry point and the M29 desktop companion. The
+    caller must already have pointed the store at the right workspace
+    (`SKILL_GAP_DATA_DIR`); this function only retires legacy globals and
+    re-reads the resume the last run left behind, so a restart keeps the
+    session.
+    """
+    from . import store
+
+    store.retire_legacy_files()
+    resume = store.current_resume()
+    if resume.get("path") and Path(resume["path"]).exists():
+        _resume.update(
+            path=resume.get("path"),
+            filename=resume.get("filename"),
+            count=None,
+            source=None,
+            mode=resume.get("mode"),
+            provider=resume.get("provider"),
+        )
+        return dict(resume)
+    return {}
+
+
+def create_server(port: int = 8000) -> ThreadingHTTPServer:
+    """Bind the loopback API server without blocking or touching the store."""
+    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+
+
 def main() -> None:
     import argparse
 
@@ -1774,23 +1808,13 @@ def main() -> None:
     if args.skills:
         global DEFAULT_SKILLS
         DEFAULT_SKILLS = Path(args.skills)
-    from . import store
 
     # One central workspace: retire the pre-M9 globals and re-read the
     # resume the last run left behind (so a restart keeps the session).
-    store.retire_legacy_files()
-    resume = store.current_resume()
-    if resume.get("path") and Path(resume["path"]).exists():
-        _resume.update(
-            path=resume.get("path"),
-            filename=resume.get("filename"),
-            count=None,
-            source=None,
-            mode=resume.get("mode"),
-            provider=resume.get("provider"),
-        )
+    resume = prepare_workspace()
+    if resume:
         print(f"Resume: {resume.get('filename')} (restored from the workspace)")
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    srv = create_server(args.port)
     print(f"M11 UI: http://localhost:{args.port}/  (JD folder: {JD_DIR})")
     print("Bookmarklet: tools/linkedin_jd_bookmarklet.js -> save JDs into data/jds/")
     print("Extension: load extension/ unpacked (see extension/README.md)")

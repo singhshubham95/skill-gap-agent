@@ -413,6 +413,12 @@ keyring path (`secrets.py`, locked 2026-09-27: OS keyring only).
   process) is deferred — registered host + registry entry + pinned
   extension ID that breaks when an unpacked folder moves. Restore trigger
   in [03-milestones.md](03-milestones.md) §Deferred #14.
+- **M29 changes the end-user launch path** (🎯 Designed 2026-10-26): the
+  installed companion replaces the `.bat` as what an end user uses;
+  `start-server.bat` stays the developer launcher, and the panel's
+  end-user copy stops pointing at it. See
+  [15-desktop-companion.md](15-desktop-companion.md) §Consumer setup and
+  §Companion app.
 
 ### Done criteria (M14 — met 2026-10-04; verification record in roadmap M14)
 
@@ -780,14 +786,90 @@ and the mode flips.
    `pytest`, `node --check` clean; m10–m23 regressions PASS; one live
    pass recorded in [03-milestones.md](03-milestones.md) M24.
 
+## M29 — Companion-aware onboarding (🎯 Designed 2026-10-26; implementation in review — live pass pending; §Done criteria below)
+
+Design home for the panel half of the consumer install path. The
+companion app, installer, and release pipeline live in
+[15-desktop-companion.md](15-desktop-companion.md); this section owns only
+what the panel shows and sends. The implementation is in place with
+automated static + probe coverage; one live panel pass against the
+installed companion remains before this section flips to Built.
+
+### Connection assumptions
+
+- `DEFAULT_SERVER` stays `http://127.0.0.1:8000`; a first run requires no
+  URL entry. The stored `serverBase` override is still honored (and still
+  validated by `normalizeServer`, M20) for developers running another
+  port.
+- **Local agent URL** moves into an advanced/developer block — closed by
+  default and labeled as such. Its hint no longer tells users to edit
+  manifest host permissions (the manifest already allows localhost on any
+  port; M20 owns the validation).
+- When connected, the connection line stays silent (M18 behavior). When
+  offline, every fetch path (`checkConnection`, `postRun`, status polling)
+  uses the same guidance described below, so a failed run cannot show a
+  developer-only instruction.
+
+### Offline state
+
+- Copy: **"Skill-Gap Agent isn't running. Open it from the Start menu,
+  then choose Retry."** plus a **Retry** action and a **Get the
+  companion** link to the release page.
+- No `start-server.bat` / `python -m skill_gap_agent.server` copy in
+  end-user UI. Those instructions may remain in the contributor section
+  of the READMEs.
+- The installer's finish step and the companion tray menu open the Chrome
+  Web Store listing; the panel's download link is the companion release
+  page. Both URLs are release constants (see [15](15-desktop-companion.md)
+  §CI and distribution).
+
+### Version handshake
+
+- Read `app_version` from `GET /api/status` (string; contract owned by
+  [15](15-desktop-companion.md) §Version contract).
+- A `MIN_COMPANION_VERSION` constant in `sidepanel.js` is compared with a
+  small semver compare. **Missing or older** → a non-blocking banner:
+  "The companion app is older than this extension — download the latest
+  installer." with the release-page link. **Equal or newer** → no banner.
+- The banner never disables a control and never blocks a run; the API is
+  not refused for a version mismatch. A newer extension with an older
+  companion is the expected transition after a Web Store update (the
+  companion updates manually in M29).
+
+### Store readiness
+
+The listing's companion paragraph and reviewer test instructions change
+from `.bat`/Python to the signed installer and tray behavior; permission
+justifications are unchanged (the extension still talks only to loopback).
+The register is [CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md); updates land
+with task T-M29-install-docs.
+
+### Done criteria (M29)
+
+1. With the installed companion and no stored URL, the panel connects on
+   first open; Settings is not required.
+2. Offline: the copy/Retry/release link above appears in both the
+   connection line and failed-run paths; no `.bat`/Python instructions
+   appear in end-user panel copy.
+3. A forced older/missing `app_version` shows the non-blocking banner; the
+   same panel against a current companion shows none; a run still starts.
+4. The advanced URL override still works for a developer (and still
+   validates); m20's normalization assertions stay green.
+5. `node --check sidepanel.js`; m13/m18/m20 checks green; `pytest` and
+   `ruff check .` clean; one live panel pass against the installed
+   companion, including a forced version mismatch, recorded in
+   [03-milestones.md](03-milestones.md) M29.
+
 ## Explicit non-goals (M13)
 
 In-page gap marking on the JD text
 ([03-milestones.md](03-milestones.md) §Deferred #12), generic non-LinkedIn
 JD pages (content-script matches are LinkedIn-only, like the bookmarklet),
-run history, hosting, multi-user auth, Chrome Web Store packaging,
-native-messaging server auto-launch ([03-milestones.md](03-milestones.md)
-§Deferred #14), ~~conversational intake
+run history, hosting, multi-user auth, ~~Chrome Web Store packaging~~
+(M22 prepared the submission register; M29 makes the listing the
+consumer release gate — [15-desktop-companion.md](15-desktop-companion.md)
+§CI and distribution), native-messaging server auto-launch
+([03-milestones.md](03-milestones.md) §Deferred #14), ~~conversational intake
 ([03-milestones.md](03-milestones.md) §Deferred #13 — the interaction model
 stays this panel)~~ *(superseded 2026-10-12: M9 restored conversational
 intake inside this panel — [13-intake.md](13-intake.md); the "no second
