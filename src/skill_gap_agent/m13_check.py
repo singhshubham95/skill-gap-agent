@@ -36,7 +36,6 @@ import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar
 
 from . import server
 from .judge import JudgeResult
@@ -116,37 +115,23 @@ def _fake_oss(sg, gaps, top_n=5, cfg=None, use_llm=True, **kwargs):
 
 
 class _Preserve:
-    """Save/restore real output artifacts the stub run overwrites."""
+    """Redirect the artifact store for the duration of a stub run.
 
-    NAMES: ClassVar[list[str]] = [
-        "judge_report.json",
-        "graph.json",
-        "implied_skills.json",
-    ]
+    The flat store has one location, so a check that ran against it would
+    overwrite the user's real gaps/plan/profile and leave fixture JDs
+    behind. `isolated_store()` points the store at a scratch dir instead, so
+    there is nothing to save or restore.
+    """
 
     def __enter__(self):
-        self._saved: dict[str, bytes | None] = {}
-        for name in self.NAMES:
-            p = OUTPUT_DIR / name
-            self._saved[name] = p.read_bytes() if p.exists() else None
-        # graph.json must be absent during the run: judge-reuse copies its
-        # TRANSFERS_TO edges, and real seed edges would make stub scores
-        # non-deterministic.
-        for name in self.NAMES:
-            p = OUTPUT_DIR / name
-            if p.exists():
-                p.unlink()
+        from .checksupport import isolated_store
+
+        self._ctx = isolated_store("sg-m13-")
+        self._ctx.__enter__()
         return self
 
     def __exit__(self, *exc):
-        for name, data in self._saved.items():
-            p = OUTPUT_DIR / name
-            if data is None:
-                if p.exists():
-                    p.unlink()
-            else:
-                p.write_bytes(data)
-        return False
+        return self._ctx.__exit__(*exc)
 
 
 # --- http helpers -----------------------------------------------------------
@@ -260,31 +245,41 @@ def check_two_phase_flow() -> None:
     _cli.synthesize_for_gaps = _fake_synthesize
     _cli.source_oss_for_gaps = _fake_oss
 
-    # M9: this check exercises the M13 two-phase flow, not the intake chat —
-    # pre-complete the fixture's profile so the run flows straight through
-    # (the chat itself is covered by m9_check). The session starts empty so
-    # judge-reuse cannot pick up stub edges from a previous check run.
-    from .sessions import save_profile, session_dir, source_sha
-
-    shutil.rmtree(session_dir(skills), ignore_errors=True)
-    save_profile(skills, {
-        "version": 1, "source_sha256": source_sha(skills), "phrases": {},
-        "implied": {}, "depth": {}, "intent": {}, "proficiency": {},
-        "progress": {}, "completed": True, "skipped": True, "updated_at": "",
-    })
-
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    base = f"http://127.0.0.1:{httpd.server_address[1]}"
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    with server._lock:
-        server._run.update(
-            status="idle", stage=None, phase=None,
-            started_at=None, finished_at=None, error=None,
-        )
-    server._drop_paused()
-
     try:
-        with _Preserve():
+        check_two_phase_flow_isolated(_cli, skills)
+    finally:
+        _cli.judge_all_unmatched, _cli.synthesize_for_gaps, _cli.source_oss_for_gaps = (
+            real
+        )
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def check_two_phase_flow_isolated(_cli, skills: Path) -> None:
+    with _Preserve():
+        # M9: this check exercises the M13 two-phase flow, not the intake
+        # chat — pre-complete the fixture's profile so the run flows
+        # straight through (the chat itself is covered by m9_check). Written
+        # inside the isolated store: the flat layout has one location, so a
+        # profile here must never reach the user's real workspace.
+        from .store import save_profile, source_sha
+
+        save_profile({
+            "version": 1, "source_sha256": source_sha(skills), "phrases": {},
+            "implied": {}, "depth": {}, "intent": {}, "proficiency": {},
+            "progress": {}, "completed": True, "skipped": True, "updated_at": "",
+        })
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        with server._lock:
+            server._run.update(
+                status="idle", stage=None, phase=None,
+                started_at=None, finished_at=None, error=None,
+            )
+        server._drop_paused()
+
+        try:
             # Phase 1: analyze gaps over two captured JDs.
             code, body = _post(
                 base,
@@ -300,7 +295,9 @@ def check_two_phase_flow() -> None:
             assert code == 202, (code, body)
             assert _wait_status(base, "paused") == "paused"
 
-            captured = sorted(server.CAPTURED_DIR.glob("*.txt"))
+            from .store import captured_jds_dir
+
+            captured = sorted(captured_jds_dir().glob("*.txt"))
             assert len(captured) == 2, [f.name for f in captured]
             lines = captured[0].read_text(encoding="utf-8").splitlines()
             assert lines[1].startswith("https://example.com/jobs/"), lines[:2]
@@ -339,8 +336,8 @@ def check_two_phase_flow() -> None:
                 assert b"rel='noopener noreferrer'" in a, a
             print(f"link policy OK: {len(anchors)} links target new tabs")
 
-            # Captured JD links resolve from output/captured_jds/ (not
-            # data/jds/), and unknown names still 404.
+            # Captured JD links resolve from the workspace's captured_jds/
+            # (not data/jds/), and unknown names still 404.
             code, page = _get(base, "/jds/" + urllib.parse.quote(captured[0].name))
             assert code == 200, (code, captured[0].name)
             assert b"<pre>" in page, "jd viewer page malformed"
@@ -349,7 +346,7 @@ def check_two_phase_flow() -> None:
                 raise AssertionError("expected 404 for unknown jd name")
             except urllib.error.HTTPError as e:
                 assert e.code == 404, e.code
-            print("jd viewer OK: captured JDs served from output/captured_jds/")
+            print("jd viewer OK: captured JDs served from the workspace")
             print("plan OK: projects + Good-First-Issues rendered")
 
             # Phase 2 again: nothing left to resume.
@@ -357,12 +354,8 @@ def check_two_phase_flow() -> None:
             assert code == 409, (code, body)
             assert "gaps" in body.get("error", ""), body
             print("guard OK: second phase 'plan' rejected with 409")
-    finally:
-        _cli.judge_all_unmatched, _cli.synthesize_for_gaps, _cli.source_oss_for_gaps = (
-            real
-        )
-        httpd.shutdown()
-        shutil.rmtree(tmp, ignore_errors=True)
+        finally:
+            httpd.shutdown()
 
 
 def main() -> None:

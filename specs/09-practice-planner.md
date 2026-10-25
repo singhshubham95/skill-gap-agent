@@ -49,9 +49,10 @@ repos) rather than hard-filtered, then one S2 relevance filter call per
 gap using the gap's `TRANSFERS_TO` rationale + `_background_block()`
 grounding → persist. `Project` gains `type="oss_issue"` with
 `url, repo, labels, updated_at`. `CLOSES_GAP` edge reused unchanged.
-Cache: `output/oss_issues.json` (query + attempts + timestamp + results),
-same override-file pattern as `judge_report.json` / `gate_overrides.json` —
-re-runs reuse silently. Auth: `GITHUB_TOKEN` via the existing
+Cache: `output/oss_issues.json` (query + attempts +
+timestamp + results),
+same override-file pattern as `judge_report.json` / the session
+`profile.json` — re-runs reuse silently. Auth: `GITHUB_TOKEN` via the existing
 `secrets.py` keyring pattern (`Authorization: Bearer`); unauthenticated
 still works (verified live 2026-09-28). Network via stdlib `urllib`
 (no new dependency). No pagination / ETag handling in the thin slice.

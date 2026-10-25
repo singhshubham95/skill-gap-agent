@@ -36,14 +36,15 @@ files (and later browser pages) into plain text for downstream stages.
 ## Artifacts
 
 All extraction artifacts are session-scoped since M9 (the session store in
-[13-intake.md](13-intake.md)): `output/sessions/<sha>/extracted_skills.json`
+[13-intake.md](13-intake.md)): `output/extracted_skills.json`
 (raw LLM/regex output, reviewable) and
-`output/sessions/<sha>/extracted_skills.reviewed.json` (post-approval,
+`output/extracted_skills.reviewed.json` (post-approval,
 feeds ingest), where `<sha>` is the SHA-256 of the source resume — the
 artifact is reused only when it matches, so uploading a
 second resume can never silently serve the first one's skills. The legacy
 global `output/extracted_skills.json` + `.sha256` sidecar +
-`extracted_approvals.json` are retired (M9).
+`extracted_approvals.json` are retired (M9) and are never created or read
+by any flow.
 
 ## History (links, not copies)
 

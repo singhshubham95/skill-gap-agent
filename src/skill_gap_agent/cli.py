@@ -48,7 +48,14 @@ from .oss import source_oss_for_gaps
 from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
 from .resume import resume_to_skills_json
-from .sessions import load_profile, retire_legacy_files, save_profile, session_dir
+from .store import (
+    current_dir,
+    ensure_resume_identity,
+    load_profile,
+    retire_legacy_files,
+    save_profile,
+    source_sha,
+)
 from .synthesis import save_synthesis_report, synthesize_for_gaps
 from .taxonomy import load_taxonomy
 
@@ -112,27 +119,21 @@ class AgentState(TypedDict, total=False):
     # records ({touchpoint, error}) accumulate across nodes and phases.
     unjudged: Annotated[list[dict], operator.add]
     degraded_reasons: Annotated[list[dict], operator.add]
-    # M9 session store (specs/13-intake.md §Session store): every artifact
-    # of the run lives under the skills source's SHA-keyed session dir, and
-    # human decisions live in its profile.json (the retired global
-    # extracted_approvals/implied_skills/gate_overrides files are never
-    # created or read).
-    source_input: str  # the skills source (resume or JSON) — session key
-    session_dir: str  # resolved session directory for this run
+    # M9 decision store: human decisions live in the workspace's
+    # profile.json (the retired global extracted_approvals/implied_skills/
+    # gate_overrides files are never created or read).
+    source_input: str  # the skills source (resume or JSON) — identity for reuse
 
 
 def _out(state: AgentState) -> Path:
-    """Run artifact directory: the session dir (M9), output/ as fallback."""
-    return Path(state.get("session_dir") or "output")
+    """Run artifact directory — always the one central workspace."""
+    return current_dir(create=True)
 
 
 def _profile(state: AgentState) -> dict:
-    """Session profile (chat product), reloaded from disk — its file is the
-    source of truth so answers survive every pause and process restart."""
-    src = state.get("source_input") or ""
-    if not src:
-        return {}
-    return load_profile(src) or {}
+    """Chat profile, reloaded from disk — its file is the source of truth so
+    answers survive every pause and process restart."""
+    return load_profile() or {}
 
 
 def _profile_depths(profile: dict) -> dict[str, str]:
@@ -275,14 +276,11 @@ def node_ingest(state: AgentState, config: RunnableConfig) -> dict:
 
 
 def _save_profile_key(state: AgentState, key: str, value: dict) -> None:
-    """Persist one decision map into the session profile (M9: the retired
+    """Persist one decision map into the workspace profile (M9: the retired
     global approval files are never created or read)."""
-    src = state.get("source_input") or ""
-    if not src:
-        return
-    profile = load_profile(src) or {}
+    profile = load_profile() or {}
     profile[key] = value
-    save_profile(src, profile)
+    save_profile(profile)
 
 
 class ReuseResult(NamedTuple):
@@ -680,12 +678,12 @@ def build_app(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
-    """M9 in-panel intake conversation (CLI: stdin or scripted JSON).
+def _run_intake(args, src_path: Path, cfg: LLMConfig) -> None:
+    """M9 intake conversation (CLI: stdin or scripted JSON).
 
     Extraction (or the skills JSON itself) feeds the phrase review; the
     captured-JD set feeds validation triage (JD-aware — placement revision
-    2026-10-12). Every answer lands in the session profile immediately.
+    2026-10-12). Every answer lands in the workspace profile immediately.
     """
     from .implied import detect_implied
     from .ingest import jd_target_weights
@@ -694,6 +692,7 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
     from .resume import extract_to_artifact, flatten_phrases, phrase_groups
     from .validate import Validator, triage_skills
 
+    session = current_dir(create=True)
     if src_path.suffix.lower() == ".json":
         data = json.loads(src_path.read_text(encoding="utf-8"))
         source = "json"
@@ -718,8 +717,7 @@ def _run_intake(args, src_path: Path, session: Path, cfg: LLMConfig) -> None:
         None if args.no_llm else Validator(session / "questions.json", cfg=cfg)
     )
     sess = IntakeSession(
-        source_sha=session.name,
-        source_path=src_path,
+        source_sha=source_sha(src_path),
         phrases=phrases,
         implied=implied_list,
         triaged=triaged,
@@ -807,17 +805,17 @@ def main() -> None:
         conn = sqlite3.connect(str(CHECKPOINT_PATH), check_same_thread=False)
         checkpointer = SqliteSaver(conn)
 
-    # M9 session store (specs/13-intake.md §Session store): every artifact of
-    # this run lives under the skills source's SHA-keyed session dir, and the
-    # retired global decision files are deleted (migration) and never
-    # recreated by any flow.
+    # One central workspace: the retired global decision files are deleted
+    # (migration) and never recreated by any flow. A changed resume clears
+    # the artifacts derived from the previous one.
     retire_legacy_files()
     src_path = Path(args.skills)
-    session = session_dir(src_path, create=True)
+    session = current_dir(create=True)
+    ensure_resume_identity(src_path)
     cfg = LLMConfig(provider=args.provider)
 
     if args.intake or args.intake_json:
-        _run_intake(args, src_path, session, cfg)
+        _run_intake(args, src_path, cfg)
 
     config = {"configurable": {"thread_id": "cli"}}
 
@@ -827,7 +825,7 @@ def main() -> None:
     # takes today's path unchanged.
     skills_path = args.skills
     if Path(skills_path).suffix.lower() != ".json":
-        profile = load_profile(src_path) or {}
+        profile = load_profile() or {}
         json_path, _stats = resume_to_skills_json(
             skills_path,
             artifact_path=session / "extracted_skills.json",
@@ -852,7 +850,6 @@ def main() -> None:
         "provider": args.provider,
         "use_llm": not args.no_llm,
         "source_input": str(src_path),
-        "session_dir": str(session),
     }
     config = {"configurable": {"thread_id": "cli"}}
 

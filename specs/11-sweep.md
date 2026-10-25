@@ -78,6 +78,15 @@ output/sweeps/<sweep-id>/
                            # + jds/ (the subset's JD copies = membership on disk)
 ```
 
+**Seed source (M27 target state).** The sweep's `_shared/` caches are
+seeded from the **source session** (`output/`), never from
+root `output/` — the root no longer holds session artifacts, so reading it
+would be both wrong and a step backward to the retired globals
+([13-intake.md](13-intake.md) §Artifact placement). The sweep's own
+shared-cache design is unchanged: judge / gate / OSS caches are
+subset-independent by construction (see §Key insight above), so the
+`_shared/` copies stay.
+
 ## Manifest must record subset membership explicitly
 
 `Gap.source_jds` ([ranking.py](../src/skill_gap_agent/ranking.py)) records

@@ -50,6 +50,7 @@ from .llm import (
 )
 from .ranking import Gap
 from .secrets import get_secret
+from .store import current_dir
 
 OSS_CACHE_PATH = Path("output/oss_issues.json")
 GITHUB_SEARCH_URL = "https://api.github.com/search/issues"
@@ -190,8 +191,8 @@ def _prefer_curated(issues: list[OssIssue]) -> list[OssIssue]:
     return sorted(issues, key=lambda i: (i.repo.lower() not in curated, i.repo, i.title))
 
 
-def load_oss_cache(path: str | Path = OSS_CACHE_PATH) -> dict:
-    p = Path(path)
+def load_oss_cache(path: str | Path | None = None) -> dict:
+    p = Path(path) if path is not None else current_dir() / "oss_issues.json"
     if not p.exists():
         return {}
     try:
@@ -200,8 +201,8 @@ def load_oss_cache(path: str | Path = OSS_CACHE_PATH) -> dict:
         return {}
 
 
-def save_oss_cache(cache: dict, path: str | Path = OSS_CACHE_PATH) -> Path:
-    p = Path(path)
+def save_oss_cache(cache: dict, path: str | Path | None = None) -> Path:
+    p = Path(path) if path is not None else current_dir() / "oss_issues.json"
     p.parent.mkdir(exist_ok=True)
     p.write_text(json.dumps(cache, indent=2), encoding="utf-8")
     return p
@@ -288,7 +289,7 @@ def source_oss_for_gaps(
     gaps: list[Gap],
     top_n: int = 5,
     cfg: LLMConfig | None = None,
-    cache_path: str | Path = OSS_CACHE_PATH,
+    cache_path: str | Path | None = None,
     search_fn=None,
     use_llm: bool = True,
     degraded_out: list | None = None,
@@ -407,7 +408,7 @@ def _write_projects(sg: SkillGraph, gap: Gap, issues: list[OssIssue]) -> None:
 
 
 def save_oss_report(
-    oss_by_gap: dict[str, list[OssIssue]], path: str | Path = OSS_CACHE_PATH
+    oss_by_gap: dict[str, list[OssIssue]], path: str | Path | None = None
 ) -> Path:
     """Write the cache-shaped report (thin slice: cache IS the report)."""
     cache = load_oss_cache(path)

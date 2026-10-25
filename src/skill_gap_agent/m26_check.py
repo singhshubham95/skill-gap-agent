@@ -303,7 +303,7 @@ def check_graph_stage_lines() -> None:
 
     tmp_root = Path(tempfile.mkdtemp(prefix="m26-graph-"))
     real_oss = cli.source_oss_for_gaps
-    real_sessions_env = os.environ.get("SKILL_GAP_SESSIONS_DIR")
+    real_sessions_env = os.environ.get("SKILL_GAP_DATA_DIR")
 
     def _stub_oss(sg, gaps, **kwargs):
         return {}
@@ -318,12 +318,10 @@ def check_graph_stage_lines() -> None:
         )
         targets = sorted(sg0.target_skills())
         assert targets, "seed data has no target skills"
-        os.environ["SKILL_GAP_SESSIONS_DIR"] = str(tmp_root / "sessions")
-        from . import sessions as sessions_mod
+        os.environ["SKILL_GAP_DATA_DIR"] = str(tmp_root / "workspace")
+        from . import store as store_mod
 
-        sessions_mod.save_profile(
-            str(DATA_SKILLS), {"intent": {t: "count" for t in targets}}
-        )
+        store_mod.save_profile({"intent": {t: "count" for t in targets}})
         state = {
             "skills_path": str(DATA_SKILLS),
             "jds_path": str(DATA_JDS),
@@ -333,7 +331,6 @@ def check_graph_stage_lines() -> None:
             "use_llm": False,  # rule-based: zero LLM calls
             "link_jds": False,
             "source_input": str(DATA_SKILLS),
-            "session_dir": str(tmp_root / "artifacts"),
             "two_phase": True,
         }
         config = {"configurable": {"thread_id": "server-m26-check"}}
@@ -372,9 +369,9 @@ def check_graph_stage_lines() -> None:
     finally:
         cli.source_oss_for_gaps = real_oss
         if real_sessions_env is None:
-            os.environ.pop("SKILL_GAP_SESSIONS_DIR", None)
+            os.environ.pop("SKILL_GAP_DATA_DIR", None)
         else:
-            os.environ["SKILL_GAP_SESSIONS_DIR"] = real_sessions_env
+            os.environ["SKILL_GAP_DATA_DIR"] = real_sessions_env
 
 
 def check_llm_summary() -> None:

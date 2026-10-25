@@ -91,12 +91,13 @@ from pathlib import Path
 from . import debuglog, secrets
 from . import llm as llm_mod
 from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
+from .store import current_dir, source_sha
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JD_DIR = REPO_ROOT / "data" / "jds"
 OUTPUT_DIR = REPO_ROOT / "output"
-CAPTURED_DIR = OUTPUT_DIR / "captured_jds"
-UPLOAD_DIR = OUTPUT_DIR / "uploads"  # M14: uploaded resumes (output/ gitignored)
+CAPTURED_DIR = OUTPUT_DIR / "captured_jds"  # legacy alias; live path is store
+UPLOAD_DIR = OUTPUT_DIR / "uploads"  # legacy alias; live path is store
 DEFAULT_SKILLS = REPO_ROOT / "data" / "skillsdataset.json"
 MAX_RESUME_BYTES = 10 * 1024 * 1024  # M14 upload cap
 
@@ -251,16 +252,42 @@ def _jd_files() -> list[str]:
     )
 
 
+def _captured_jd_items() -> list[dict]:
+    """Read the workspace's captured JDs back into the panel's item shape.
+
+    Files are stored as "title\\nurl\\n\\ntext" (see _write_captured_jds), so
+    the panel can rebuild its list after a load/reset instead of showing
+    entries the server no longer has.
+    """
+    d = current_dir() / "captured_jds"
+    if not d.exists():
+        return []
+    items: list[dict] = []
+    for f in sorted(d.iterdir()):
+        if not f.is_file() or f.suffix.lower() not in (".txt", ".md"):
+            continue
+        raw = f.read_text(encoding="utf-8", errors="replace")
+        head, _, text = raw.partition("\n\n")
+        lines = head.splitlines()
+        items.append({
+            "stem": f.stem,
+            "title": lines[0] if lines else f.stem,
+            "url": lines[1] if len(lines) > 1 else "",
+            "text": text,
+        })
+    return items
+
+
 def _find_jd(name: str) -> Path | None:
-    """Resolve a JD-viewer filename against data/jds/ AND output/captured_jds/.
+    """Resolve a JD-viewer filename against the workspace and data/jds/.
 
     plan.html's JD links are built from whichever folder the run ingested:
-    bookmarklet saves land in data/jds/, extension captures in
-    output/captured_jds/ (see _write_captured_jds). Exact-name match against
-    the folder listing only — the caller has already rejected path
+    bookmarklet saves land in data/jds/, extension captures in the
+    workspace's captured_jds/ (see _write_captured_jds). Exact-name match
+    against the folder listing only — the caller has already rejected path
     separators, so no traversal can reach here.
     """
-    for d in (JD_DIR, CAPTURED_DIR):
+    for d in (current_dir() / "captured_jds", JD_DIR):
         if not d.exists():
             continue
         names = {
@@ -274,19 +301,22 @@ def _find_jd(name: str) -> Path | None:
 
 
 def _write_captured_jds(jds: list) -> dict[str, str]:
-    """Write the extension's captured JDs to output/captured_jds/ and return
-    the {title-stem: filename} map used for plan.html JD links.
+    """Replace the workspace's JD set and return the {title-stem: filename} map
+    used for plan.html JD links.
 
     File shape mirrors the bookmarklet: "title\\nurl\\n\\ntext", so
     ingest.py::ingest_jds reads the folder unchanged (the stem becomes the JD
     title, exactly like bookmarklet saves into data/jds/). The folder is
-    replaced wholesale — the panel's list IS the run's JD set.
+    replaced wholesale — the panel's list IS the run's JD set. Appending
+    instead would silently change every gap weight (REQUIRES counts are per
+    JD) and the intake triage.
     """
-    if CAPTURED_DIR.exists():
-        for f in CAPTURED_DIR.iterdir():
+    dest = current_dir(create=True) / "captured_jds"
+    if dest.exists():
+        for f in dest.iterdir():
             if f.is_file():
                 f.unlink()
-    CAPTURED_DIR.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
     jd_files: dict[str, str] = {}
     for item in jds:
         title = str(item.get("title") or "jd").strip() or "jd"
@@ -298,7 +328,7 @@ def _write_captured_jds(jds: list) -> dict[str, str]:
         while name in jd_files:
             name = f"{stem}-{n}"
             n += 1
-        (CAPTURED_DIR / f"{name}.txt").write_text(
+        (dest / f"{name}.txt").write_text(
             f"{title}\n{url}\n\n{text}", encoding="utf-8"
         )
         jd_files[name] = f"{name}.txt"
@@ -472,7 +502,7 @@ go back to the Skill-Gap Agent side panel.</p>
 </body></html>"""
 
 
-def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> tuple:
+def _build_intake(source: Path, jds_path: str, options: dict) -> tuple:
     """M9 intake prep at Analyze gaps (placement revision 2026-10-12).
 
     Extraction runs here (rule-only at upload since M9), the phrase/implied
@@ -501,13 +531,14 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
     use_llm = _resolve_use_llm(options)
     free_tier = bool(options.get("free_tier", False))
     cfg = LLMConfig(provider=provider, free_tier=free_tier)
+    artifact = current_dir(create=True) / "extracted_skills.json"
 
     if source.suffix.lower() == ".json":
         data = json.loads(source.read_text(encoding="utf-8"))
     else:
         data, _src = extract_to_artifact(
             source,
-            artifact_path=session / "extracted_skills.json",
+            artifact_path=artifact,
             use_llm=(mode != "rule") and use_llm,
             cfg=cfg,
         )
@@ -520,10 +551,11 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
     ]
     weights = jd_target_weights(Path(jds_path)) if Path(jds_path).is_dir() else {}
     triaged = triage_skills(weights, sorted(canonical)) if weights else []
-    validator = None if not use_llm else Validator(session / "questions.json", cfg=cfg)
+    validator = None if not use_llm else Validator(
+        current_dir(create=True) / "questions.json", cfg=cfg
+    )
     sess = IntakeSession(
-        source_sha=session.name,
-        source_path=source,
+        source_sha=source_sha(source),
         phrases=phrases,
         implied=implied_list,
         triaged=triaged,
@@ -568,7 +600,7 @@ def _build_intake(source: Path, session: Path, jds_path: str, options: dict) -> 
     # Loud visibility (why the chat pauses — server console + panel):
     print(f"Intake: pausing at the chat for a {first.kind!r} turn ({first.id})")
     debuglog.dbg(
-        "intake", f"pause session={session.name} turn={first.kind} id={first.id}"
+        "intake", f"pause workspace turn={first.kind} id={first.id}"
     )
     return sess, None
 
@@ -601,12 +633,24 @@ def _run_pipeline(options: dict) -> None:
             debuglog.err(f"run failed: {e}")
             return
 
-    from . import sessions
+    from . import store
 
-    session = sessions.session_dir(source, create=True)
-    sessions.retire_legacy_files(OUTPUT_DIR)  # M9 migration: retired globals
-    with _lock:
-        _run.update(session_dir=str(session))
+    store.retire_legacy_files()  # migration: retired pre-M9 globals
+    store.current_dir(create=True)
+    # Bind the workspace to this resume; a changed resume clears everything
+    # derived from the previous one (profile, extraction, judgment caches).
+    identity = store.ensure_resume_identity(
+        source,
+        mode=(_resume.get("mode") or "paid"),
+        provider=(_resume.get("provider") or provider),
+    )
+    if identity["changed"]:
+        note = (
+            "resume changed: cleared "
+            + (", ".join(identity["removed"]) or "nothing")
+        )
+        print(note)
+        debuglog.dbg("store", note)
 
     captured = options.get("jds") or []
     jds_path = str(JD_DIR)
@@ -617,11 +661,10 @@ def _run_pipeline(options: dict) -> None:
     )
     if captured:
         jd_files = _write_captured_jds(captured)
-        jds_path = str(CAPTURED_DIR)
-        _copy_captured_to_session(session)
+        jds_path = str(store.captured_jds_dir(create=True))
 
     try:
-        sess, intake_note = _build_intake(source, session, jds_path, options)
+        sess, intake_note = _build_intake(source, jds_path, options)
     except Exception as e:  # noqa: BLE001 — surfaced via /api/status
         traceback.print_exc()
         with _lock:
@@ -643,11 +686,11 @@ def _run_pipeline(options: dict) -> None:
             )
         debuglog.dbg("run", f"paused phase=intake in {_run_elapsed_ms():.0f}ms")
         return
-    _run_graph_part(options, session, jds_path, jd_files)
+    _run_graph_part(options, jds_path, jd_files)
 
 
 def _run_graph_part(
-    options: dict, session: Path, jds_path: str, jd_files: dict
+    options: dict, jds_path: str, jd_files: dict
 ) -> None:
     """The graph half of a run (after any intake chat): ingest -> ... -> output."""
     from langgraph.checkpoint.memory import InMemorySaver
@@ -666,10 +709,10 @@ def _run_graph_part(
 
     if source_path.suffix.lower() != ".json":
         # M8/M9 resume front-end: the extraction artifact lives in the
-        # session (M14 SHA sidecar — same resume reuses it), and the phrase
+        # workspace (M14 SHA sidecar — same resume reuses it), and the phrase
         # review applies the intake chat's answers from the profile.
-        from . import sessions as _sessions
         from .resume import resume_to_skills_json
+        from .store import load_profile
 
         # M24 (specs/12-extension.md §M24): extraction follows the
         # INGESTION MODE, not the analysis toggle — "rule" means the
@@ -678,12 +721,12 @@ def _run_graph_part(
         # reviews one extraction while the graph consumes another.
         mode = (_resume.get("mode") or "paid").strip().lower()
         extract_llm = (mode != "rule") and use_llm
-        profile = _sessions.load_profile(source_path) or {}
+        profile = load_profile() or {}
         try:
             skills_path = str(
                 resume_to_skills_json(
                     source_path,
-                    artifact_path=session / "extracted_skills.json",
+                    artifact_path=current_dir(create=True) / "extracted_skills.json",
                     use_llm=extract_llm,
                     auto=True,
                     ask_fn=None,
@@ -713,7 +756,6 @@ def _run_graph_part(
         "use_llm": use_llm,
         "free_tier": free_tier,
         "source_input": str(source_path),
-        "session_dir": str(session),
     }
     checkpointer = None
     if two_phase:
@@ -756,33 +798,9 @@ def _run_graph_part(
     debuglog.dbg("run", f"done in {_run_elapsed_ms():.0f}ms")
 
 
-def _copy_captured_to_session(session: Path) -> None:
-    """Audit copy of this run's captured JDs into the session store.
-
-    The shared output/captured_jds/ stays (plan.html JD-link resolution,
-    M13 fix); the session copy keeps the per-run record the M9 layout
-    promises (specs/13-intake.md §Session store).
-    """
-    dest = session / "captured_jds"
-    dest.mkdir(parents=True, exist_ok=True)
-    for p in CAPTURED_DIR.iterdir():
-        if p.is_file():
-            (dest / p.name).write_bytes(p.read_bytes())
-
-
 def _session_artifact(name: str) -> Path | None:
-    """Run artifact path: the run's session dir (M9), output/ fallback.
-
-    /api/gaps and /plan.html serve from the session the current run used.
-    Strict once a session is set: a missing file is missing — never fall
-    back to another run's stale artifact.
-    """
-    with _lock:
-        sess = _run.get("session_dir")
-    if sess:
-        return Path(sess) / name
-    legacy = OUTPUT_DIR / name
-    return legacy
+    """Run artifact path: the one central workspace."""
+    return current_dir() / name
 
 
 def _resume_pipeline(options: dict) -> None:
@@ -990,6 +1008,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "no gaps yet - run phase 'gaps' first"})
                 return
             self._send(200, gaps.read_bytes(), "application/json")
+        elif path == "/api/session/saved":
+            from . import store
+
+            self._json(200, {"sessions": store.list_saved()})
+        elif path == "/api/jds/captured":
+            self._json(200, {"jds": _captured_jd_items()})
         elif path == "/api/intake/turn":
             self._handle_intake_turn()
         elif path == "/plan.html":
@@ -1051,7 +1075,9 @@ class Handler(BaseHTTPRequestHandler):
         # even a hypothetical origin-gate bypass cannot smuggle a body in.
         json_endpoints = (
             "/api/run", "/api/key", "/api/oauth/exchange", "/api/oauth/state",
-            "/api/intake/answer", "/api/session/clear-cache",
+            "/api/intake/answer", "/api/session/clear-cache", "/api/jds/clear",
+            "/api/data/reset", "/api/session/save", "/api/session/load",
+            "/api/session/delete",
         )
         if path == "/api/resume" or path in json_endpoints:
             expected = (
@@ -1070,6 +1096,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/session/clear-cache":
             self._handle_clear_cache(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/jds/clear":
+            self._handle_clear_jds(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/data/reset":
+            self._handle_reset(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/session/save":
+            self._handle_save_session(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/session/load":
+            self._handle_load_session(int(self.headers.get("Content-Length", 0) or 0))
+            return
+        if path == "/api/session/delete":
+            self._handle_delete_session(int(self.headers.get("Content-Length", 0) or 0))
             return
         if path == "/api/key":
             self._handle_key(int(self.headers.get("Content-Length", 0) or 0))
@@ -1201,36 +1242,181 @@ class Handler(BaseHTTPRequestHandler):
         """POST /api/session/clear-cache — drop the LLM judgment caches.
 
         specs/12-extension.md §Fresh analysis: removes exactly graph.json,
-        judge_report.json and questions.json from the current resume's
-        session. Chat answers, captured JDs and extraction artifacts
-        survive — clearing is not a session reset; the next analyze
-        re-judges every target with the LLM.
+        judge_report.json and questions.json from the central workspace.
+        Chat answers, captured JDs and extraction artifacts survive —
+        clearing is not a reset; the next analyze re-judges every target
+        with the LLM.
         """
-        try:
-            body = json.loads(self.rfile.read(length) or b"{}")
-            if not isinstance(body, dict):
-                raise TypeError("body must be a JSON object")
-        except (ValueError, TypeError) as e:
-            self._json(400, {"error": f"bad JSON body: {e}"})
+        if self._read_json_body(length, required=False) is None:
             return
         with _lock:
             if _run["status"] == "running":
                 self._json(409, {"error": "run already in progress"})
                 return
-        from . import sessions
+        from . import store
 
-        # Same skills-input precedence as a run (body skills_path ->
-        # uploaded resume -> server default), so the clear targets exactly
-        # the session the panel's runs use.
-        source = _resolve_skills(body)
-        session = sessions.session_dir(source, create=True)
-        removed = sessions.clear_judgment_cache(source)
+        removed = store.clear_judgment_cache()
         debuglog.dbg(
-            "cache",
-            f"clear-cache session={session.name} "
-            f"removed={','.join(removed) or '-'}",
+            "cache", f"clear-cache removed={','.join(removed) or '-'}"
         )
-        self._json(200, {"cleared": removed, "session": session.name})
+        self._json(200, {"cleared": removed})
+
+    def _handle_clear_jds(self, length: int) -> None:
+        """POST /api/jds/clear — delete the captured JD set from disk.
+
+        The panel's Clear list removes the JDs from `chrome.storage.local`;
+        without this the texts would survive on the server. Both sides must
+        agree, otherwise a later run would judge gaps against JDs the user
+        believes are gone.
+        """
+        if self._read_json_body(length, required=False) is None:
+            return
+        with _lock:
+            if _run["status"] == "running":
+                self._json(409, {"error": "run already in progress"})
+                return
+        from . import store
+
+        removed = store.clear_captured_jds()
+        debuglog.dbg("jd", f"clear removed={len(removed)} file(s)")
+        self._json(200, {"cleared": removed})
+
+    def _handle_reset(self, length: int) -> None:
+        """POST /api/data/reset — delete every artifact of the workspace.
+
+        The "delete everything" control: resume, captured JDs, profile,
+        extraction and all analysis output. Root-owned directories (logs/,
+        sweeps/, saved_sessions/) are intentionally kept.
+        """
+        if self._read_json_body(length, required=False) is None:
+            return
+        with _lock:
+            if _run["status"] == "running":
+                self._json(409, {"error": "run already in progress"})
+                return
+        from . import store
+
+        removed = store.clear_all()
+        store.clear_manifest()
+        with _lock:
+            _resume.update(
+                path=None, filename=None, count=None, source=None,
+                mode=None, provider=None,
+            )
+            _run.update(
+                status="idle", stage=None, phase=None, pause_phase=None,
+                intake_note=None, error=None, session_dir=None,
+            )
+        _drop_paused()
+        debuglog.dbg("reset", f"cleared={len(removed)}")
+        self._json(200, {"cleared": removed})
+
+    def _handle_save_session(self, length: int) -> None:
+        """POST /api/session/save — snapshot the workspace under a name."""
+        body = self._read_json_body(length)
+        if body is None:
+            return
+        with _lock:
+            if _run["status"] == "running":
+                self._json(409, {"error": "run already in progress"})
+                return
+        from . import store
+
+        name = str((body or {}).get("name") or "").strip()
+        if not name:
+            self._json(400, {"error": "name is required"})
+            return
+        try:
+            result = store.save_session(name)
+        except (ValueError, OSError) as e:
+            self._json(400, {"error": f"could not save session: {e}"})
+            return
+        debuglog.dbg("session", f"saved name={result['name']}")
+        self._json(200, result)
+
+    def _handle_load_session(self, length: int) -> None:
+        """POST /api/session/load — replace the workspace with a snapshot."""
+        body = self._read_json_body(length)
+        if body is None:
+            return
+        with _lock:
+            if _run["status"] == "running":
+                self._json(409, {"error": "run already in progress"})
+                return
+        from . import store
+
+        name = str((body or {}).get("name") or "").strip()
+        if not name:
+            self._json(400, {"error": "name is required"})
+            return
+        try:
+            result = store.load_session(name)
+        except FileNotFoundError as e:
+            self._json(404, {"error": str(e)})
+            return
+        except (ValueError, OSError) as e:
+            self._json(400, {"error": f"could not load session: {e}"})
+            return
+        # The workspace changed under us: drop in-memory run state and
+        # re-read the restored resume so /api/status reports the truth.
+        _drop_paused()
+        resume = store.current_resume()
+        with _lock:
+            _resume.update(
+                path=resume.get("path") or None,
+                filename=resume.get("filename"),
+                count=None,
+                source=None,
+                mode=resume.get("mode"),
+                provider=resume.get("provider"),
+            )
+            _run.update(
+                status="idle", stage=None, phase=None, pause_phase=None,
+                intake_note=None, error=None, session_dir=None,
+            )
+        debuglog.dbg("session", f"loaded name={result['name']}")
+        self._json(200, result)
+
+    def _handle_delete_session(self, length: int) -> None:
+        """POST /api/session/delete — remove a saved snapshot."""
+        body = self._read_json_body(length)
+        if body is None:
+            return
+        from . import store
+
+        name = str((body or {}).get("name") or "").strip()
+        if not name:
+            self._json(400, {"error": "name is required"})
+            return
+        try:
+            removed = store.delete_saved(name)
+        except (ValueError, OSError) as e:
+            self._json(400, {"error": f"could not delete session: {e}"})
+            return
+        if not removed:
+            self._json(404, {"error": f"no saved session named {name!r}"})
+            return
+        debuglog.dbg("session", f"deleted name={name}")
+        self._json(200, {"deleted": True, "name": name})
+
+    def _read_json_body(self, length: int, required: bool = True):
+        """Parse a JSON object body; answers 400 and returns None on error.
+
+        Callers must test `is None` — an empty body parses to `{}`, which is
+        falsy but valid for endpoints that take no arguments.
+        """
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, TypeError) as e:
+            self._json(400, {"error": f"bad JSON body: {e}"})
+            return None
+        if not isinstance(body, dict):
+            self._json(400, {"error": "body must be a JSON object"})
+            return None
+        if required and not body:
+            self._json(400, {"error": "body is required"})
+            return None
+        return body
 
     def _handle_intake_answer(self, length: int) -> None:
         """M9: answer one intake turn.
@@ -1328,16 +1514,15 @@ class Handler(BaseHTTPRequestHandler):
         options = _INTAKE.get("options") or {}
         jds_path = _INTAKE.get("jds_path") or str(JD_DIR)
         jd_files = _INTAKE.get("jd_files") or {}
-        session = Path(_run.get("session_dir") or OUTPUT_DIR)
         _INTAKE.update(sess=None, options=None)
-        debuglog.dbg("intake", f"resume session={session.name}")
+        debuglog.dbg("intake", "resume phase=graph")
         with _lock:
             _run.update(
                 status="running", stage="ingest", pause_phase=None, error=None,
                 started_at=time.time(),
             )
         threading.Thread(
-            target=_run_graph_part, args=(options, session, jds_path, jd_files),
+            target=_run_graph_part, args=(options, jds_path, jd_files),
             daemon=True,
         ).start()
 
@@ -1395,13 +1580,21 @@ class Handler(BaseHTTPRequestHandler):
         if suffix == ".docx" and not data.startswith(b"PK\x03\x04"):
             self._json(415, {"error": "not a DOCX (missing zip header)"})
             return
+        from . import store
         from .resume import save_upload
 
         try:
-            target = save_upload(data, name, UPLOAD_DIR)
+            target = save_upload(data, name, store.uploads_dir(create=True))
         except Exception as e:  # noqa: BLE001 — unreadable file (scanned PDF)
             self._json(415, {"error": f"resume unreadable: {e}"})
             return
+        # A new resume invalidates everything derived from the previous one
+        # (profile answers, extraction cache, judge scores, rendered plan).
+        # Exactly one resume stays on disk, matching the manifest.
+        identity = store.ensure_resume_identity(
+            target, mode=mode, provider=provider
+        )
+        store.clear_uploads(keep=target.name)
         with _lock:
             _resume.update(
                 path=str(target),
@@ -1411,12 +1604,19 @@ class Handler(BaseHTTPRequestHandler):
                 mode=mode,
                 provider=provider,
             )
+        if identity["changed"]:
+            debuglog.dbg(
+                "store",
+                "resume changed: cleared "
+                + (", ".join(identity["removed"]) or "nothing"),
+            )
         self._json(200, {
             "ok": True,
             "filename": target.name,
             "stored": True,
             "mode": mode,
             "extract_at_analyze": True,
+            "cleared": identity["removed"],
         })
 
     def _handle_key(self, length: int) -> None:
@@ -1574,9 +1774,22 @@ def main() -> None:
     if args.skills:
         global DEFAULT_SKILLS
         DEFAULT_SKILLS = Path(args.skills)
-    from . import sessions
+    from . import store
 
-    sessions.retire_legacy_files(OUTPUT_DIR)  # M9 migration: retired globals
+    # One central workspace: retire the pre-M9 globals and re-read the
+    # resume the last run left behind (so a restart keeps the session).
+    store.retire_legacy_files()
+    resume = store.current_resume()
+    if resume.get("path") and Path(resume["path"]).exists():
+        _resume.update(
+            path=resume.get("path"),
+            filename=resume.get("filename"),
+            count=None,
+            source=None,
+            mode=resume.get("mode"),
+            provider=resume.get("provider"),
+        )
+        print(f"Resume: {resume.get('filename')} (restored from the workspace)")
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"M11 UI: http://localhost:{args.port}/  (JD folder: {JD_DIR})")
     print("Bookmarklet: tools/linkedin_jd_bookmarklet.js -> save JDs into data/jds/")

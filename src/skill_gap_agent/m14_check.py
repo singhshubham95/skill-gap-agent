@@ -36,7 +36,6 @@ import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar
 
 from . import resume as resume_mod
 from . import server
@@ -51,45 +50,22 @@ RESUME_B = "Worked on graph databases neo4j and data governance policies."
 
 
 class _Preserve:
-    """Save/restore the extraction artifacts + uploads dir the checks use."""
+    """Redirect the artifact store for the duration of the upload checks.
 
-    NAMES: ClassVar[list[str]] = [
-        "extracted_skills.json",
-        "extracted_skills.sha256",
-        "extracted_skills.reviewed.json",
-        "extracted_approvals.json",
-    ]
+    The flat store has one location, so these checks would otherwise upload
+    fixtures into the user's real workspace and replace the bound resume.
+    `isolated_store()` points the store (uploads included) at a scratch dir.
+    """
 
     def __enter__(self):
-        self._saved: dict[str, bytes | None] = {}
-        for name in self.NAMES:
-            p = OUTPUT_DIR / name
-            self._saved[name] = p.read_bytes() if p.exists() else None
-            if p.exists():
-                p.unlink()
-        self._uploads_existed = server.UPLOAD_DIR.exists()
-        self._uploads = (
-            {f.name for f in server.UPLOAD_DIR.iterdir()}
-            if self._uploads_existed
-            else set()
-        )
+        from .checksupport import isolated_store
+
+        self._ctx = isolated_store("sg-m14-")
+        self._ctx.__enter__()
         return self
 
     def __exit__(self, *exc):
-        for name, data in self._saved.items():
-            p = OUTPUT_DIR / name
-            if data is None:
-                if p.exists():
-                    p.unlink()
-            else:
-                p.write_bytes(data)
-        if server.UPLOAD_DIR.exists():
-            for f in server.UPLOAD_DIR.iterdir():
-                if f.name not in self._uploads:
-                    f.unlink()
-            if not self._uploads_existed and not any(server.UPLOAD_DIR.iterdir()):
-                server.UPLOAD_DIR.rmdir()
-        return False
+        return self._ctx.__exit__(*exc)
 
 
 # --- http helpers -----------------------------------------------------------
@@ -184,44 +160,41 @@ def check_resume_endpoint() -> None:
             assert body.get("stored") is True and body.get("extract_at_analyze"), body
             assert body["mode"] == "rule", body
 
-            # Extraction (analyze-time) is SHA-keyed per resume (M14 rules,
-            # now in the session store): same resume -> artifact reuse,
-            # different resume -> re-extract.
-            from .sessions import session_dir
+            # Extraction (analyze-time) is SHA-guarded per resume (M14 rules,
+            # now in the central workspace): same resume -> artifact reuse,
+            # different resume -> re-extract. The store keeps one location,
+            # so the guard is what stops one resume's artifact reaching
+            # another's run.
+            from .store import current_dir
 
-            up_a = server.UPLOAD_DIR / "resume a.txt"
-            sess_a = session_dir(up_a)
-            import shutil
-
-            shutil.rmtree(sess_a, ignore_errors=True)  # hermetic across runs
-            resume_mod.extract_to_artifact(
-                up_a, artifact_path=sess_a / "extracted_skills.json", use_llm=False
-            )
+            up_a = current_dir() / "uploads" / "resume a.txt"
             sha_a = hashlib.sha256(RESUME_A.encode("utf-8")).hexdigest()
-            sidecar = sess_a / "extracted_skills.sha256"
+            artifact_path = current_dir() / "extracted_skills.json"
+            resume_mod.extract_to_artifact(
+                up_a, artifact_path=artifact_path, use_llm=False
+            )
+            sidecar = artifact_path.with_suffix(".sha256")
             assert sidecar.exists(), "hash sidecar missing"
             # Sidecar line 1 = source hash, line 2 = extraction source (M15).
             assert sidecar.read_text(encoding="utf-8").splitlines()[0] == sha_a
-            artifact_a = (sess_a / "extracted_skills.json").read_bytes()
+            artifact_a = artifact_path.read_bytes()
 
             # Same resume -> cache hit (M24: reuse is mode-scoped; artifacts
             # never cross rule/llm classes).
             _data, source = resume_mod.extract_to_artifact(
-                up_a, artifact_path=sess_a / "extracted_skills.json", use_llm=False
+                up_a, artifact_path=artifact_path, use_llm=False
             )
             assert source == "artifact", source
 
             # Different resume -> hash mismatch -> re-extract.
             code, body = _upload(base, "resume b.txt", RESUME_B.encode("utf-8"))
             assert code == 200 and body.get("stored"), (code, body)
-            up_b = server.UPLOAD_DIR / "resume b.txt"
-            sess_b = session_dir(up_b)
-            shutil.rmtree(sess_b, ignore_errors=True)  # hermetic across runs
+            up_b = current_dir() / "uploads" / "resume b.txt"
             _data_b, source_b = resume_mod.extract_to_artifact(
-                up_b, artifact_path=sess_b / "extracted_skills.json", use_llm=False
+                up_b, artifact_path=artifact_path, use_llm=False
             )
             assert source_b == "regex", source_b
-            artifact_b = (sess_b / "extracted_skills.json").read_bytes()
+            artifact_b = artifact_path.read_bytes()
             assert artifact_b != artifact_a, "second resume reused stale extraction"
             assert b"Graph" in artifact_b and b"Graph" not in artifact_a, (
                 "extraction did not follow the new resume"
@@ -248,7 +221,9 @@ def check_resume_endpoint() -> None:
             )
             assert code == 200, (code, body)
             assert body["filename"] == "evil.txt", body
-            assert (server.UPLOAD_DIR / "evil.txt").is_file()
+            from .store import uploads_dir
+
+            assert (uploads_dir() / "evil.txt").is_file()
             assert not (REPO_ROOT / "evil.txt").exists()
             assert not (REPO_ROOT.parent / "evil.txt").exists()
             print(

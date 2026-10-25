@@ -19,7 +19,9 @@ gate compensates; auto re-judge loop explicitly deferred (see
 Scope: top edge per sub-threshold target (<0.75). Asks self-assessment
 only (user cannot judge unknown targets): depth 1–5 → multiplier
 (0.3/0.6/0.85/1.0/1.0) + intent (count vs declared-gap). Persists
-`output/gate_overrides.json`, writes `gate_*` edge props, silent re-runs.
+`output/gate_overrides.json` → the session's `profile.json` (M9; the
+retired global is never created or read), writes `gate_*` edge props,
+silent re-runs.
 Validated interactively on 4 targets (M4).
 
 ## Ranking (`ranking.py`, `requirements.py`)

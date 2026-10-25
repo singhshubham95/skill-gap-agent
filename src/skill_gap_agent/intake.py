@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from .sessions import load_profile, save_profile
+from .store import load_profile, save_profile
 
 PROFILE_VERSION = 1
 
@@ -55,8 +55,13 @@ def new_profile(source_sha: str) -> dict:
     }
 
 
-def load_or_create_profile(source_sha: str, source_path) -> dict:
-    p = load_profile(source_path)
+def load_or_create_profile(source_sha: str) -> dict:
+    """Reuse the stored profile only when it belongs to this resume.
+
+    The guard is what makes a single flat workspace safe: a different
+    resume's depth answers must never reach the judge prompt.
+    """
+    p = load_profile()
     if p and p.get("source_sha256") == source_sha:
         return p
     return new_profile(source_sha)
@@ -129,7 +134,6 @@ class IntakeSession:
     def __init__(
         self,
         source_sha: str,
-        source_path,
         phrases: list[str],
         implied: list[dict],  # [{skill, evidence}]
         triaged: list[str],
@@ -139,7 +143,6 @@ class IntakeSession:
         groups: dict[str, str] | None = None,
     ) -> None:
         self.source_sha = source_sha
-        self.source_path = source_path
         self.phrases = list(phrases)
         self.implied = [i for i in implied if i.get("skill")]
         self.triaged = list(triaged)
@@ -151,7 +154,7 @@ class IntakeSession:
         # non-JD runs get the flat, unfiltered listing.
         self.focus = set(focus) if focus is not None else set(self.phrases)
         self.groups = dict(groups or {})
-        self.profile = load_or_create_profile(source_sha, source_path)
+        self.profile = load_or_create_profile(source_sha)
         # Durable view flag: once 'show background' is asked, later runs keep
         # listing everything (panel-close safe, like every other answer).
         self._show_background = bool(self.profile.get("phrases_expanded"))
@@ -160,7 +163,7 @@ class IntakeSession:
 
     def _save(self) -> None:
         self.profile["updated_at"] = datetime.now(UTC).isoformat()
-        save_profile(self.source_path, self.profile)
+        save_profile(self.profile)
 
     # -- turn sequencing ---------------------------------------------------
 

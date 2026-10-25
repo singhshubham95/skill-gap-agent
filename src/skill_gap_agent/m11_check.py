@@ -53,8 +53,6 @@ def main() -> None:
 
     # Stub the pipeline: no LLM/graph — write a fake plan.html fast, but
     # hold the 'running' state briefly so the 409 guard can be exercised.
-    real_worker = server._run_pipeline
-
     def stub(options: dict) -> None:
         from . import cli as _cli
 
@@ -65,8 +63,9 @@ def main() -> None:
         with server._lock:
             assert server._run["stage"] == "judge", server._run
         time.sleep(0.7)
-        plan = server.OUTPUT_DIR / "plan.html"
-        plan.parent.mkdir(exist_ok=True)
+        from .store import current_dir
+
+        plan = current_dir(create=True) / "plan.html"
         plan.write_text("<html><body><h1>stub plan</h1></body></html>", encoding="utf-8")
         with server._lock:
             server._run.update(status="done", stage=None, finished_at=time.time(), error=None)
@@ -77,7 +76,18 @@ def main() -> None:
             status="idle", stage=None, started_at=None, finished_at=None, error=None
         )
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    # The stub writes plan.html into the artifact store. Isolate it: the flat
+    # layout has one location, so running this check would otherwise replace
+    # the user's real plan.
+    from .checksupport import isolated_store
+
+    with isolated_store("sg-m11-"):
+        _run_http_checks(jds, server, httpd_factory=ThreadingHTTPServer)
+    print("(note: isolated store - the real workspace was not modified)")
+
+
+def _run_http_checks(jds, server, httpd_factory=None) -> None:
+    httpd = httpd_factory(("127.0.0.1", 0), server.Handler)
     port = httpd.server_address[1]
     base = f"http://127.0.0.1:{port}"
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -164,14 +174,11 @@ def main() -> None:
     finally:
         httpd.shutdown()
         httpd.server_close()
-        server._run_pipeline = real_worker  # type: ignore[assignment]
         with server._lock:
             server._run.update(
                 status="idle", stage=None, started_at=None,
                 finished_at=None, error=None,
             )
-        # Restore: re-render is a pipeline job; just note the stub wrote it.
-        print("(note: output/plan.html currently holds stub content from this check)")
 
     print(f"M11 CHECK PASS: {len(jds)} JDs listed, run+guard+stage+plan+jds OK.")
 

@@ -28,6 +28,8 @@ from .graph import SkillGraph
 AskFn = Callable[[str], str]
 
 DEFAULT_THRESHOLD = 0.75
+# Retired (pre-M9) global path: kept only as an explicit opt-in argument.
+# The live path is the workspace profile via `on_save`.
 DEFAULT_OVERRIDES_PATH = Path("output/gate_overrides.json")
 
 # Depth level -> multiplier on the judge's confidence.
@@ -60,8 +62,14 @@ class GateDecision:
     note: str = ""
 
 
-def load_overrides(path: str | Path = DEFAULT_OVERRIDES_PATH) -> dict[str, dict]:
-    """Persisted decisions: target -> {final_confidence, depth, intent, note}."""
+def load_overrides(path: str | Path | None = None) -> dict[str, dict]:
+    """Persisted decisions: target -> {final_confidence, depth, intent, note}.
+
+    Used only when a caller passes an explicit retired-global path; the live
+    path is the workspace profile (`overrides=` / `on_save=`).
+    """
+    if path is None:
+        return {}
     p = Path(path)
     if not p.exists():
         return {}
@@ -107,7 +115,7 @@ def _apply_decision(
 def review_targets(
     sg: SkillGraph,
     threshold: float = DEFAULT_THRESHOLD,
-    overrides_path: str | Path = DEFAULT_OVERRIDES_PATH,
+    overrides_path: str | Path | None = None,
     auto: bool = False,
     ask_fn: AskFn | None = None,
     overrides: dict[str, dict] | None = None,
@@ -219,10 +227,11 @@ def review_targets(
             on_save(dict(sorted(saved.items())))
             print("Decisions saved to the session profile")
         else:
-            p = Path(overrides_path)
-            p.parent.mkdir(exist_ok=True)
-            p.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
-            print(f"Decisions saved to {p}")
+            if overrides_path is not None:
+                p = Path(overrides_path)
+                p.parent.mkdir(exist_ok=True)
+                p.write_text(json.dumps(dict(sorted(saved.items())), indent=2), encoding="utf-8")
+                print(f"Decisions saved to {p}")
 
     return decisions
 

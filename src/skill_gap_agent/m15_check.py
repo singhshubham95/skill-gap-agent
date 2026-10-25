@@ -41,7 +41,6 @@ import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar
 
 from . import judge as judge_mod
 from . import llm as llm_mod
@@ -133,37 +132,23 @@ def _stub_search(query, token=None, **_kw):
 
 
 class _Preserve:
-    """Save/restore the real output artifacts the stub runs overwrite."""
+    """Redirect the artifact store for the duration of a stub run.
 
-    NAMES: ClassVar[list[str]] = [
-        "judge_report.json",
-        "graph.json",
-        "implied_skills.json",
-        "gaps.json",
-        "plan.md",
-        "plan.html",
-        "synthesis_report.json",
-        "oss_issues.json",
-    ]
+    The flat store has one location, so a check that ran against it would
+    overwrite the user's real gaps/plan/profile. `isolated_store()` points
+    the store at a scratch dir instead, so there is nothing to save or
+    restore.
+    """
 
     def __enter__(self):
-        self._saved: dict[str, bytes | None] = {}
-        for name in self.NAMES:
-            p = OUTPUT_DIR / name
-            self._saved[name] = p.read_bytes() if p.exists() else None
-            if p.exists():
-                p.unlink()
+        from .checksupport import isolated_store
+
+        self._ctx = isolated_store("sg-m15-")
+        self._ctx.__enter__()
         return self
 
     def __exit__(self, *exc):
-        for name, data in self._saved.items():
-            p = OUTPUT_DIR / name
-            if data is None:
-                if p.exists():
-                    p.unlink()
-            else:
-                p.write_bytes(data)
-        return False
+        return self._ctx.__exit__(*exc)
 
 
 # --- http helpers -----------------------------------------------------------
@@ -224,16 +209,19 @@ def _start() -> tuple[ThreadingHTTPServer, str]:
 def _run_body(tmp: Path, use_llm: bool, **extra) -> dict:
     skills = tmp / "skills.json"
     if not skills.exists():
-        # The tmp dir name makes each scenario's content (and thus its
-        # SHA-keyed session — M9) unique: scenarios must not share judge/OSS
-        # caches across the run history.
-        payload = {"skills": list(SKILLS["skills"]) + [f"session variant {tmp.name}"]}
+        # The tmp dir name makes each scenario's content unique, so scenarios
+        # never share judge/OSS caches across the run history.
+        payload = {"skills": list(SKILLS["skills"]) + [f"variant {tmp.name}"]}
         skills.write_text(json.dumps(payload), encoding="utf-8")
         # M9: these runs exercise LLM-presence policy, not the intake chat —
-        # pre-complete the session profile so runs flow straight through.
-        from .sessions import save_profile, source_sha
+        # pre-complete the workspace profile so runs flow straight through.
+        # Bind the manifest first (as a real upload does): the workspace now
+        # belongs to this fixture resume, so the run's own identity check
+        # sees no change and keeps the profile.
+        from .store import ensure_resume_identity, save_profile, source_sha
 
-        save_profile(skills, {
+        ensure_resume_identity(skills)
+        save_profile({
             "version": 1, "source_sha256": source_sha(skills), "phrases": {},
             "implied": {}, "depth": {}, "intent": {}, "proficiency": {},
             "progress": {}, "completed": True, "skipped": True, "updated_at": "",
@@ -492,12 +480,10 @@ def check_llm_mode_labels() -> None:
             # the affected targets are re-judged and label "LLM" again.
             # The stale source is picked from the real graph: candidate
             # pruning decides which skills actually source edges.
-            from .sessions import load_profile, save_profile, session_dir
+            from .store import current_dir, load_profile, save_profile
 
-            skills = tmp / "skills.json"
-            sdir = session_dir(skills)
             gdata = json.loads(
-                (sdir / "graph.json").read_text(encoding="utf-8")
+                (current_dir() / "graph.json").read_text(encoding="utf-8")
             )
             transfers = [
                 ln for ln in gdata["links"] if ln.get("type") == "TRANSFERS_TO"
@@ -509,9 +495,9 @@ def check_llm_mode_labels() -> None:
                 for ln in transfers
                 if ln["source"] == stale_src
             }
-            prof = load_profile(skills)
+            prof = load_profile()
             prof["depth"] = {stale_src.removeprefix("skill:"): "4"}
-            save_profile(skills, prof)
+            save_profile(prof)
             before = len(judge_calls)
             code, body = _post(
                 base, "/api/run", _run_body(tmp, True, reuse_judged=True)
@@ -528,17 +514,19 @@ def check_llm_mode_labels() -> None:
             # Fresh analysis (specs/12-extension.md §Fresh analysis): clears
             # the judgment caches only — the chat profile survives.
             code, body = _post(
-                base, "/api/session/clear-cache", {"skills_path": str(skills)}
+                base, "/api/session/clear-cache",
+                {"skills_path": str(tmp / "skills.json")},
             )
             assert code == 200, (code, body)
             assert set(body.get("cleared") or ()) == {
                 "graph.json", "judge_report.json",
             }, body
-            from .sessions import session_dir
+            from .store import current_dir
 
-            sdir = session_dir(skills)
-            assert (sdir / "profile.json").exists(), "chat answers must survive"
-            assert not (sdir / "graph.json").exists()
+            assert (current_dir() / "profile.json").exists(), (
+                "chat answers must survive"
+            )
+            assert not (current_dir() / "graph.json").exists()
 
             # Run 4: no cache left -> re-judged fresh, labels "LLM".
             before = len(judge_calls)

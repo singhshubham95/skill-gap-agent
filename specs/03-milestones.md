@@ -112,7 +112,7 @@ been designed and scheduled as milestone M7 (below).
 Model pick resolved at milestone 3: DeepSeek V4 Flash 0731 via OpenRouter
 (see §Open: model pick below).
 
-## Milestones (linear and global — M1…M26; M9 built 2026-10-12)
+## Milestones (linear and global — M1…M28; M9 built 2026-10-12, M28 built 2026-10-25)
 
 Versions are labels on milestone ranges (v1 = M1–M6 shipped; v2 = M7+
 target), not spec boundaries. Numbering stays linear and global. M12 is an
@@ -1091,6 +1091,128 @@ pipeline stage.
       not log as a node failure: the stage hook names it `interrupt`
       (class-name check keeps `debuglog.py` stdlib-only).
 
+27. **Artifact placement — one session, one place.** 🎯 **Designed**
+    2026-10-19 (design home: [13-intake.md](13-intake.md) §Artifact
+    placement; work order:
+    [specs/tasks/T-M27-artifact-placement.md](../specs/tasks/T-M27-artifact-placement.md)).
+    Not a pipeline stage — a placement rule over the built stages.
+    Origin: user report 2026-10-19 — the `output/` root held loose files
+    that duplicated the concepts of the per-session folders, and the ideal
+    is one place per session. Decision rows in [02-decisions.md](02-decisions.md)
+    (M27). The intent was already M9's; the code had drifted from the spec.
+    **Target state:** every session artifact lives in
+    `output/sessions/<sha256>/`; `output/captured_jds/` is folded into the
+    session; `output/{checkpoints.sqlite, uploads/, logs/, sweeps/}` stay
+    root-owned; the 86 existing session folders are untouched.
+    **Diagnosis — three causes, one per origin:** (1) *pre-M9 leftovers* —
+    the migration deleted the retired globals but left their writers in
+    place, and the old layout's files were never swept (the twelve loose
+    files at the root are orphans: SHA-256 hashing shows none matches any
+    session copy); (2) *root-defaulted write paths* — every stage's output
+    path is a default argument on a module-level function, so a caller that
+    omits it writes to the root (the default is the bug, not the caller);
+    (3) *deliberate sharing* — `output/captured_jds/` was a shared staging
+    area by design.
+    **Slices:** 27a — close the two live defects (the retired globals are
+    currently neither safe from creation nor from being read); 27b — fold
+    `captured_jds/` into the session and re-point the JD resolution;
+    27c — drop the root defaults at every seam and make a session-less
+    flow fail loudly; 27d — seed the sweep from a session; 27e — clean the
+    check harnesses and correct the stale path references in the specs and
+    the README.
+    **Learnings (diagnosis, 2026-10-19):** (a) The M9 "retired globals are
+    never created or read" guarantee was **incomplete** — the README's own
+    quickstart (`m5_plan --auto`) recreated `output/implied_skills.json` in
+    a clean directory, because `propose_implied` writes its approvals path
+    whenever `on_save` is `None` and `build_seed_graph` forwards no path.
+    `m9_check.py`'s "they stay gone" assertion only covered the flows it
+    exercised. (b) That file was also **read**: `propose_implied` reads
+    the approvals path unconditionally, even when persistence is routed
+    into the session profile — so a stale root global silently applied
+    one source's answers to a *different* source's session, defeating
+    M9's "cross-profile misapplication is structurally impossible".
+    Reproduced end to end. (c) The gap stayed invisible because
+    `retire_legacy_files()` deletes the file at the start of every
+    *primary* run — so the file is normally absent, is created *during* a
+    run, and survives on disk until the next run's retire. The verified
+    reach is therefore narrower than it looks: the **sweep** (which seeds
+    `_shared/` from root `output/` and reads it back) and the milestone
+    check harnesses (`m3_judge`, `m26_check`, which never retire). The
+    CLI and extension paths are unaffected. (d) The generalizable lesson:
+    a *default argument* pointing at a shared location is a latent
+    write-anywhere seam — the fix is to make the safe path the only path
+    and to fail loudly when there is no session, not to rely on every
+    caller remembering to pass the right argument. A second lesson: a
+    *delete-at-start* migration hides write bugs from the next run while
+    leaving their output on disk in between.
+
+## M28 — One central workspace; the extension as the only interface (built 2026-10-25)
+
+**Status: Built.** User decision 2026-10-25: drop the per-input session
+store, keep one central directory, and retire the CLI surface. Design home:
+[13-intake.md](13-intake.md) — §Workspace store (and the two §Superseded
+sections it replaces). Decision rows: [02-decisions.md](02-decisions.md) M28
+rows (which also strike the M9-restore store rows and the M27 placement
+rows).
+
+**What changed.**
+
+- `output/` **is** the current session: extraction, `profile.json`,
+  `questions.json`, graph/judge/gaps, plan artifacts, `uploads/` and
+  `captured_jds/`. `output/sessions/` was deleted (95 folders, 2.2 MB of
+  gitignored scratch data).
+- `store.py` replaces `sessions.py`. `ensure_resume_identity()` binds the
+  workspace to the run's source and, when the SHA differs from
+  `current.json`, deletes everything derived from the previous resume.
+- `current.json` carries the resume identity across a server restart
+  (previously it lived only in process memory).
+- New endpoints: `POST /api/jds/clear`, `GET /api/jds/captured`,
+  `POST /api/data/reset`, `POST /api/session/{save,load,delete}`,
+  `GET /api/session/saved`. The panel gained **Delete all data** and a
+  save/load section; **Clear list** now also deletes the server-side files.
+- The CLI interface was removed: `cli.py:main()`/`_run_intake()`/argparse,
+  the `skill-gap` console script, `m5_plan.py`, `m4_gate.py`, `m3_judge.py`,
+  `m2_check.py`, `m7_check.py`, `m8_check.py`, `smoke_test.py`. `cli.py`
+  keeps the pipeline engine — the server imports it.
+
+**Verification (2026-10-25).** `pytest` 58 passed; `ruff check .` clean.
+The eight kept checks (`m9`, `m11`, `m13`, `m14`, `m15`, `m19`, `m24`,
+`m26`) all pass and — after adding `checksupport.isolated_store()` — leave
+the real workspace byte-identical (verified by listing `output/` before and
+after the suite). The new endpoints were exercised end to end against a
+live localhost server: save/list/load round-trip, JD clear, data reset
+(profile gone, saved sessions kept), delete-missing → 404, empty name →
+400, and `../..` rejected by name sanitization without escaping the root.
+
+**Learnings.**
+
+- *Flattening the store is only safe together with the reuse guards.* The
+  old layout got its isolation from the folder name; with one folder the
+  guard has to be explicit. Two latent bugs would have appeared silently:
+  `IntakeSession(source_sha=session.name)` compared the **folder name** to
+  itself forever once the name stopped being a SHA, and
+  `_copy_previous_transfers` reuses edges keyed only on `depth_val`, so two
+  resumes with empty depth would have shared cached scores. Both were found
+  by reading the code, not by a test — the checks asserted the old layout,
+  not the property.
+- *A single location makes check isolation load-bearing.* Running the suite
+  against the flat store put fixture JDs and fixture resumes into the real
+  `output/` (observed: `Governance_Lead.txt`, `Streaming_Engineer.txt`,
+  `resume.txt`, `current.json` pointing at `r4.txt`). The per-SHA layout
+  hid this because checks and real runs happened to land in different
+  folders. `SKILL_GAP_DATA_DIR` + `isolated_store()` is now the only
+  supported way for a check to touch the store.
+- *`{}` is falsy.* A `if not self._read_json_body(...)` guard on
+  body-optional endpoints returned without writing a response, so the
+  client saw a closed connection instead of a 200. Body-optional endpoints
+  must test `is None`.
+- *M27's diagnosis was right and its prescription was not.* The redundancy
+  it found (loose root files duplicating per-session concepts) disappears
+  completely once there is only one session — the root stops being a
+  duplicate of anything. M27's two defect findings (a retired global could
+  still be created and still be read) were real and are fixed here by
+  removing the root-path defaults entirely.
+
 ## Deferred — every v1 simplification + restore trigger (folded from `6-deferred-enhancements.md`, 2026-09-27)
 
 This file churns; `02-decisions.md` is append-only. Entries marked
@@ -1116,6 +1238,23 @@ This file churns; `02-decisions.md` is append-only. Entries marked
 | 16 | **PII minimization** ~~+ manual no-cloud extraction toggle~~ (strip names/contact details before LLM calls) | M21's disclosure-only contract: accurate copy + named destinations + first-use consent; the regex fallback still runs automatically when no key is set | User decision 2026-10-11 — T-M21 is disclosure-only. ~~The no-cloud toggle is superseded by M24 (2026-10-11): Rule-based mode now governs extraction — the restore trigger is met.~~ Restore triggers (PII half): store review pushes for data minimization, or users report discomfort sending contact details to providers (skill extraction never needs them). |
 
 ## Open — unresolved items that don't block the next milestone (folded from `7-open-items.md`, 2026-09-27)
+
+- **M27 live defects (block the M27 implementation, not the diagnosis).**
+  The retired globals are currently neither safe from creation nor from
+  being read — reproduced 2026-10-19. `python -m skill_gap_agent.m5_plan
+  --auto` (the README quickstart) recreates
+  `output/implied_skills.json` in a clean directory; and that file, if
+  left on disk, is read back by the **sweep** (which seeds
+  `output/sweeps/<id>/_shared/` from root `output/`) and by the
+  `m3_judge` / `m26_check` harnesses, so one source's answers can be
+  applied to a *different* source's session without the user being
+  asked. The primary CLI and extension paths are not affected — they
+  call `retire_legacy_files()` first, which deletes the file at the
+  start of the run. Until the M27 slices land, delete any stale
+  `output/implied_skills.json` before a sweep, and do not treat a
+  leftover root global as authoritative. Work order:
+  `specs/tasks/T-M27-artifact-placement.md`; design:
+  [13-intake.md](13-intake.md) §Two live defects.
 
 - **M26 live panel pass.** The debug flow is verified offline
   (`board/verify-T-M26.md`) plus a live `--debug` server smoke (request
@@ -1182,8 +1321,8 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   implications (e.g. "NL-to-SQL agents" → SQL depth); consider if the gap
   list looks wrong.
 - **Vocabulary-bridge wiring (S4).** `vocab_bridge.py`
-  (`bridge_vocabulary()` + `apply_bridge()`, decisions in
-  `output/vocab_bridge.json`) is code-complete but unwired — no caller in
+  (`bridge_vocabulary()` + `apply_bridge()`, decisions destined for the
+  session's `profile.json`) is code-complete but unwired — no caller in
   `ingest.py` / `cli.py` imports it (status in S4 `07-skill-cleaner.md`).
   Open work: call it on unmatched canonical terms during ingestion and
   verify end-to-end on resume + seed data. Does not block M11.

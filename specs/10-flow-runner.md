@@ -21,7 +21,8 @@ intake); M12 sweep harness and M13 extension shell are separate components
   `interrupt()` after ranking); a `Command(resume=...)` continues through
   synthesize → oss → output — the extension's Analyze/Generate buttons.
   Nodes report progress via `set_stage_listener()` (M13 completion of the
-  M11 seam); `rank` writes `output/gaps.json` (served as `GET /api/gaps`).
+  M11 seam); `rank` writes the session's `gaps.json`
+  (`output/gaps.json`, served as `GET /api/gaps`).
 - `m5_plan.py`: sequential runner, still works.
 - `sweep.py` (M12): evaluation harness — runs the same stage functions once
   per seeded JD subset, sharing judge/gate/OSS caches across subsets
@@ -65,7 +66,8 @@ intake); M12 sweep harness and M13 extension shell are separate components
   `urllib`): `GET /` lists `data/jds/*.txt|*.md` + Generate button;
   `POST /api/run` starts the `cli.py` graph `--auto` in a background
   thread (poll `GET /api/status`; loading screen until `node_output`
-  finishes); `GET /plan.html` serves `output/plan.html` (same
+  finishes); `GET /plan.html` serves the session's `plan.html`
+  (`output/plan.html`, same
   `render_plan_html` data, clickable GFI links). Options via JSON body:
   `top_n`, `skip_judge`, `skip_oss`, `no_llm_oss` (defaults mirror
   `cli.py`). Single-run guard (409 while running); status is

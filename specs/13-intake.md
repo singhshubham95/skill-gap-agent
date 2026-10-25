@@ -89,12 +89,13 @@ default). Whenever the chat is skipped, `/api/status` carries
 `intake_note` (the reason) and the panel shows it — a silently skipped
 conversation is never acceptable.
 
-**Validation runs are isolated from real sessions** (operational rule,
-same date): scripted/interactive validation runs must point the session
-store at a scratch directory via the `SKILL_GAP_SESSIONS_DIR` env
-override (default stays `output/sessions`). A validation run sharing the
-real store can complete a real user's profile with scripted answers — the
-exact incident this rule prevents (roadmap M9 learnings).
+**Validation runs are isolated from real sessions** (operational rule, same
+date; env var renamed `SKILL_GAP_DATA_DIR` at M28): scripted/interactive
+validation runs must point the store at a scratch directory via that
+override (default stays `output/`). A validation run sharing the real store
+can complete a real user's profile with scripted answers — the exact
+incident this rule prevents (roadmap M9 learnings). Every offline check now
+enforces this through `checksupport.isolated_store()`.
 
 The existing capture paths are reused, not rewritten: the bookmarklet /
 extension capture JDs ([12-extension.md](12-extension.md)), and
@@ -254,36 +255,131 @@ format, `graph.py` edge props ([06-skill-map.md](06-skill-map.md)). The M12
 sweep runs with an **empty** depth profile (see below), so its cache key is
 constant and its behavior is unchanged.
 
-## Session store — all artifacts tied to the input (user decision 2026-10-12)
+## Workspace store — one central location (user decision 2026-10-25)
 
-Every data artifact of a run belongs to the session of the skills source it
-came from, keyed by **SHA-256 of that source file** (uploaded resume or
-skills JSON) — the M14 extraction sidecar generalized to the whole store:
+**Status: Built (M28).** Supersedes the SHA-keyed per-input session store
+described below, and supersedes the M27 "one session, one place" work order
+(whose target — exactly one artifact location — is satisfied by a different
+layout).
+
+The extension is a single-user surface, so the product keeps **one current
+session** on disk. Every stage reads and writes the central directory; no
+code is given a per-session destination:
 
 ```
-output/sessions/<sha256>/
-├── extracted_skills.json      # extraction artifact (M14 rules, in-session)
-├── profile.json               # phrase review + implied decisions + depth/intent
-│                              #   + proficiency grades (the chat's product)
-├── captured_jds/              # this session's captured JDs
+output/                         ← THE current session; every stage lives here
+├── current.json                # manifest: which resume this belongs to
+├── extracted_skills.json + .sha256
+├── profile.json                # phrase review, implied, depth/intent, grades
+├── questions.json              # validation question cache
 ├── graph.json, judge_report.json, gaps.json
-└── plan.md, plan.html, oss_issues.json
+├── plan.md, plan.html, synthesis_report.json, oss_issues.json
+├── uploads/                    # the current resume (replaced on upload)
+├── captured_jds/               # the current JD set
+└── saved_sessions/<name>/      # user-created snapshots (not session state)
 ```
 
-- **Same input re-uploaded → session resumes** (extraction cache honored
-  via the existing SHA sidecar; stamped judge caches honored per the rule
-  above; the chat only asks new questions). **Different input → fresh
-  session.** Cross-profile misapplication is structurally impossible:
-  one user's CLI-era answers can no longer leak into another profile.
-- **CLI runs follow the same keying** (user decision 2026-10-12):
-  `m5_plan.py` / `cli.py` write into the session store of their input
-  file's SHA. The seams already exist — `approvals_path`, `overrides_path`,
-  `artifact_path` parameters are simply routed to session paths.
-- **Retired global files:** `output/extracted_approvals.json`,
-  `output/implied_skills.json`, `output/gate_overrides.json`, and the
-  global `output/extracted_skills.json` (+ sidecar) are **no longer created
-  or read** by any flow. Migration = delete them. Their replacement is
-  `profile.json` per session.
+Root-owned, never snapshotted: `checkpoints.sqlite`, `logs/`, `sweeps/`.
+
+**What replaces the per-SHA folder as the safety mechanism.** The old layout
+made cross-profile contamination structurally impossible by giving each
+resume its own directory. With one directory that guarantee has to be
+explicit, so it lives in three places:
+
+1. **Reuse guards stay.** A profile is reused only when its recorded
+   `source_sha256` matches the current resume (`intake.load_or_create_profile`);
+   an extraction artifact is reused only when its sidecar SHA matches
+   (`resume.load_extracted`). Folder flattening must never flatten these.
+2. **Resume replacement invalidates.** `store.ensure_resume_identity()`
+   binds the workspace to the run's source; when the SHA differs from
+   `current.json`, it deletes `profile.json`, `questions.json`, the
+   extraction artifact + sidecar and the judgment caches. Captured JDs are
+   the user's JD list, not resume-derived, so they survive.
+3. **Judge stamps still decide replay.** `_copy_previous_transfers` reuses
+   an edge only while `depth_val` matches, so changed depth re-judges.
+
+**The JD set is replace-per-run, never append.** `_write_captured_jds`
+wipes the folder and writes the panel's current list, because the folder
+*is* the run's input: `ingest_jds` weights every target by "number of JDs
+mentioning it" and `jd_target_weights` drives intake triage. Appending
+would silently change gap weights.
+
+**Clearing is explicit and complete.** Each control maps to one deletion:
+
+| Control | Endpoint | Deletes |
+|---|---|---|
+| Clear list | `POST /api/jds/clear` | the captured JD files |
+| Fresh analysis | `POST /api/session/clear-cache` | `graph.json`, `judge_report.json`, `questions.json` |
+| Delete all data | `POST /api/data/reset` | every artifact + `current.json` + the upload |
+
+**Saving and loading.** `POST /api/session/save {name}` snapshots the
+workspace (artifacts + resume + JDs) into `output/saved_sessions/<name>/`;
+`POST /api/session/load {name}` clears the workspace and copies the snapshot
+in; `GET /api/session/saved` lists them; `POST /api/session/delete {name}`
+removes one. Names are sanitized to a directory-safe stem (no separators,
+no traversal) and re-saving a name replaces it. These four endpoints are the
+**only** code that reads or writes outside the central directory.
+
+**Validation isolation.** `SKILL_GAP_DATA_DIR` redirects the whole store at
+a scratch directory; every offline check enters `checksupport.isolated_store()`
+so a check run can never overwrite a real workspace (the flat layout has one
+location, so this is load-bearing — the old per-SHA layout hid the hazard).
+
+**The CLI interface is retired (user decision 2026-10-25).** `cli.py` keeps
+the pipeline engine (`AgentState`, `build_app`, the nodes) because the server
+imports it; its `main()` / `_run_intake()` argparse layer, the
+`skill-gap` console script, `m5_plan.py`, `m4_gate.py`, `m3_judge.py` and the
+CLI-only checks are deleted. The extension is the only interface.
+
+### Superseded: session store, all artifacts tied to the input (2026-10-12)
+
+~~Every data artifact of a run belongs to the session of the skills source
+it came from, keyed by SHA-256 of that source file. Same input re-uploaded
+→ session resumes; different input → fresh session. CLI runs follow the
+same keying.~~ (superseded by the M28 row, 2026-10-25)
+
+Retained from that design: the **retired global files**
+(`output/extracted_approvals.json`, `output/implied_skills.json`,
+`output/gate_overrides.json`) are still never created or read; migration
+deletes them. Their replacement is the workspace `profile.json`.
+
+### Superseded: artifact placement — the one-place rule (M27, 2026-10-19)
+
+~~`output/` holds every session artifact;
+`output/captured_jds/` is retired and folded into the session; the sweep
+seeds from a session; the 86 existing session folders are untouched.~~
+(superseded by the M28 row, 2026-10-25 — M28 satisfies the same
+one-place intent with a single central directory and removes the per-SHA
+folders entirely)
+
+The two defects M27 found remain fixed by M28's design: no writer defaults
+to a root path that duplicates a session concept (there is only one
+location), and `propose_implied` / `review_extracted` no longer read a
+retired global when the caller routes persistence into the profile.
+
+### M27 findings (superseded by M28, retained as history)
+
+The M27 investigation (2026-10-19) recorded *why* the old layout held
+duplicate concepts: pre-M9 leftovers, root-defaulted write paths on every
+stage function, and the deliberately shared `output/captured_jds/` staging
+folder. It also documented two live defects in the retired-global
+guarantee:
+
+- **D1 — a retired global could still be created.** `propose_implied`
+  wrote `approvals_path` whenever `on_save` was None, and
+  `ingest_skills_json` defaulted that path to
+  `output/implied_skills.json`; the README's own quickstart hit it.
+- **D2 — a retired global could still be read, breaking isolation.**
+  `propose_implied` read `approvals_path` unconditionally, so a stale root
+  file was applied to a *different* source's session without asking.
+
+Both are fixed by M28: `approvals_path`, `overrides_path`,
+`artifact_path` and `cache_path` now default to `None` and resolve to the
+central workspace, and the `on_save` / `decisions` routing is the only live
+path — neither a write nor a read of a retired global can happen. The full
+diagnosis and reproduction steps stay in the archived work order,
+[specs/tasks/T-M27-artifact-placement.md](tasks/T-M27-artifact-placement.md)
+(status: superseded).
 
 ## What this pass does not change
 
@@ -332,7 +428,7 @@ interactive validation recorded in `03-milestones.md`). All met:
 2. The retired files (`extracted_approvals.json`, `implied_skills.json`,
    `gate_overrides.json`, global `extracted_skills.json`) are no longer
    created or read by any flow — all state lives under
-   `output/sessions/<sha>/`; same-input re-upload resumes the session,
+   `output/`; same-input re-upload resumes the session,
    different input starts fresh.
 3. Depth-aware judge: scores reflect elicited depth; edge/cache stamps
    enforce the depth-profile hash (changed depth re-judges affected
