@@ -6,8 +6,8 @@
 
 - **Owner:** Shubham Singh
 - **Cadence:** before each release (version tag or Chrome Web Store submission); otherwise on demand
-- **Last run:** none yet — pilot pass pending
-- **Next due:** before the next release
+- **Last run:** 2026-11-01 — [report](../board/maintenance/2026-11-01.md)
+- **Next due:** before the next release (version tag or Chrome Web Store submission)
 
 ## Why this exists
 
@@ -86,4 +86,4 @@ The files that must be true right now:
 - [x] Fill in the commands above.
 - [x] Choose a cadence and record the next due date.
 - [x] List active and historical sources.
-- [ ] Run one pilot pass and adjust this charter from what it finds.
+- [x] Run one pilot pass and adjust this charter from what it finds (2026-11-01 — see the report above).
