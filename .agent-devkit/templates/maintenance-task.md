@@ -34,12 +34,16 @@ it before editing something new.
 
 1. All six audits were run and their findings recorded in the report.
 2. Every finding has evidence (`file:line`), a category, and a decision.
-3. Clear drift/entropy/rot was fixed; larger items became follow-up tasks.
-4. No history was rewritten and no append-only row was deleted.
-5. No test was weakened, skipped, or deleted to get green.
-6. Full verification is green; behavior changes have spec + tests.
-7. `board/maintenance/<date>.md` is complete and the charter is updated.
-8. The normal agent instruction file was not expanded with the audit.
+3. Non-destructive drift/entropy/rot was fixed; larger items became
+   follow-up tasks.
+4. No destructive change (spec/section, code, test, or register removal;
+   status downgrade) was made without explicit human approval recorded in
+   the report.
+5. No history was rewritten and no append-only row was deleted.
+6. No test was weakened, skipped, or deleted to get green.
+7. Full verification is green; behavior changes have spec + tests.
+8. `board/maintenance/<date>.md` is complete and the charter is updated.
+9. The normal agent instruction file was not expanded with the audit.
 
 ## Tests to run
 
@@ -51,5 +55,6 @@ it before editing something new.
 
 1. Work exclusively; do not run alongside feature agents.
 2. Audit first, fix second, verify last.
-3. Write the report, update the charter, add the changelog line.
-4. Mark this task done and release any locks.
+3. Propose destructive fixes and wait for explicit approval before acting.
+4. Write the report, update the charter, add the changelog line.
+5. Mark this task done and release any locks.
