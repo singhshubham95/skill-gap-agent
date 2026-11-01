@@ -16,11 +16,12 @@ constraint "any restored version must live inside the panel flow" is
 satisfied and no second interaction model appears. The restore trigger's evidence clause (§Deferred #13
 brainstorm) is bypassed by explicit user decision 2026-10-12, logged in the
 decision row. Scope: **full C3 in one implementation pass** — intake chat +
-skill validation + the depth-aware judge. Built as `sessions.py` (session
-store), `intake.py` (conversation state machine), `validate.py`
-(calibration protocol), with depth-aware judging in `judge.py` and
-session routing through `resume.py` / `cli.py` / `server.py` / `m5_plan.py`
-/ `m4_gate.py`. Design originally folded from `2-architecture.md` §§11–12.
+skill validation + the depth-aware judge. Built as the workspace store
+(now `store.py`, one central directory since M28), `intake.py`
+(conversation state machine), `validate.py` (calibration protocol), with
+depth-aware judging in `judge.py` and session routing through `resume.py`
+/ `cli.py` / `server.py`. Design originally folded from
+`2-architecture.md` §§11–12.
 
 ## In-panel conversational intake (at Analyze gaps)
 

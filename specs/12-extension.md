@@ -413,7 +413,8 @@ keyring path (`secrets.py`, locked 2026-09-27: OS keyring only).
   process) is deferred — registered host + registry entry + pinned
   extension ID that breaks when an unpacked folder moves. Restore trigger
   in [03-milestones.md](03-milestones.md) §Deferred #14.
-- **M29 changes the end-user launch path** (🎯 Designed 2026-10-26): the
+- **M29 changes the end-user launch path** (🎯 Designed 2026-10-26; 29c
+  implemented, live pass pending): the
   installed companion replaces the `.bat` as what an end user uses;
   `start-server.bat` stays the developer launcher, and the panel's
   end-user copy stops pointing at it. See

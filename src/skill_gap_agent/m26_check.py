@@ -300,6 +300,7 @@ def check_graph_stage_lines() -> None:
     run-id (specs/14-observability.md §Local debug mode). No LLM, no
     network (use_llm=False; the OSS seam is stubbed like m13_check)."""
     from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
 
     tmp_root = Path(tempfile.mkdtemp(prefix="m26-graph-"))
     real_oss = cli.source_oss_for_gaps
@@ -342,7 +343,7 @@ def check_graph_stage_lines() -> None:
             assert cli.pending_interrupt(app, config) is not None, (
                 "two-phase run must pause after rank"
             )
-            app.invoke(cli.Command(resume={"phase": "plan"}), config=config)
+            app.invoke(Command(resume={"phase": "plan"}), config=config)
         lines = cap.lines
         assert lines, "debug run emitted nothing"
         for ln in lines:

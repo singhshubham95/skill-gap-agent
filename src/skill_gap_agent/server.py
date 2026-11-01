@@ -838,7 +838,9 @@ def _session_artifact(name: str) -> Path | None:
 
 def _resume_pipeline(options: dict) -> None:
     """Phase 2 worker: resume the paused run through synthesize -> oss -> output."""
-    from .cli import Command, set_stage_listener
+    from langgraph.types import Command
+
+    from .cli import set_stage_listener
 
     _enter_working_dir()
     app = _paused["app"]

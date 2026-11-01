@@ -24,7 +24,8 @@ Chrome extension panel alongside the job description being viewed.
 
 ## Status
 
-v1 pipeline built and validated (M1–M16, incl. M9 conversational intake +
-skill validation); M17 (observability + judge evaluation) designed — see
+v1 pipeline built and validated (M1–M28, incl. M9 conversational intake +
+skill validation); M17 (observability + judge evaluation) designed; M29
+(companion installer + panel onboarding) in progress — see
 [specs/03-milestones.md](../specs/03-milestones.md) for the authoritative
 status of each milestone.

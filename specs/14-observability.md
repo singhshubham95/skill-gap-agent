@@ -15,8 +15,8 @@ yet). Build order and slices: [03-milestones.md](03-milestones.md) M17
 (17a–17d) and M26 (26a–26c). Decision rows:
 [02-decisions.md](02-decisions.md) M17 + M26 rows. Per-runner hook notes
 live in [05-ai-caller.md](05-ai-caller.md) §Tracing hook and
-[10-flow-runner.md](10-flow-runner.md) (`--trace` / `--debug` flags) —
-this file is the design home.
+[10-flow-runner.md](10-flow-runner.md) (`--debug` flag; M17 tracing
+surface) — this file is the design home.
 
 ## Scope boundary — developer tooling only (🔒 locked 2026-10-12)
 
@@ -40,12 +40,12 @@ decision row**. Concrete exclusions:
    *other* projects must not silently start shipping extension runs to
    LangSmith.
 5. **`/api/key`** — refuses LangSmith as a provider (a LangSmith key is
-   settable only via CLI/env, by a contributor).
+   settable only via env/keyring, by a contributor).
 
 Trace enablement exists only at developer entry points run from source:
-`cli.py --trace`, `sweep.py --trace`, `judge_eval.py --langsmith`. The
-`langsmith` import stays confined to `tracing.py` (the S2-style single
-owner rule).
+`sweep.py --trace`, `judge_eval.py --langsmith` (the CLI was retired at
+M28). The `langsmith` import stays confined to `tracing.py` (the S2-style
+single owner rule).
 
 **Enforcement (mechanical, not prompt-based):** `m17_check.py` asserts the
 boundary offline — `server.py` contains no tracing enablement,
@@ -90,8 +90,8 @@ LLM calls are invisible until the client is wrapped (below).
 resumes and JDs never leave the machine except to the LLM provider. With
 tracing on, prompts — which contain resume-derived skills and JD text — are
 also sent to LangSmith. So a run is traced **only** when a contributor asks
-at a developer entry point: `--trace` on `cli.py` / `sweep.py`, or
-`LANGSMITH_TRACING=true` in the environment while running those (LangSmith's
+at a developer entry point: `--trace` on `sweep.py`, or
+`LANGSMITH_TRACING=true` in the environment while running it (LangSmith's
 own variable). **Never `server.py`** — end users cannot enable tracing at
 all (§Scope boundary above). Redaction for sensitive runs: LangSmith's
 `LANGSMITH_HIDE_INPUTS` / `LANGSMITH_HIDE_OUTPUTS` env vars keep the tree
@@ -208,9 +208,9 @@ JS (and the pipeline `server.py` triggers is never traced at all —
 §Scope boundary); online
 production monitoring/alerts (single local user today).
 
-**Done criteria:** (1) `--trace` run of `cli.py` on seed data produces one
-LangSmith trace tree with every graph node and every LLM call nested under
-its stage function; the same run without `--trace` sends nothing and
+**Done criteria:** (1) a `--trace` run of `sweep.py` on seed data produces
+one LangSmith trace tree with every graph node and every LLM call nested
+under its stage function; the same run without `--trace` sends nothing and
 behaves exactly as before; missing key → warning, run completes. (2)
 `evals/judge_golden.jsonl` has ≥30 labeled rows; `judge_eval.py` prints
 `in_band` / `pruner_recall` locally, and with `--langsmith` creates an

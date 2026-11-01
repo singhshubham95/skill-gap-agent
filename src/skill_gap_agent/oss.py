@@ -52,7 +52,6 @@ from .ranking import Gap
 from .secrets import get_secret
 from .store import current_dir
 
-OSS_CACHE_PATH = Path("output/oss_issues.json")
 GITHUB_SEARCH_URL = "https://api.github.com/search/issues"
 PER_PAGE = 10
 MAX_ATTEMPTS = 2
@@ -405,27 +404,3 @@ def _write_projects(sg: SkillGraph, gap: Gap, issues: list[OssIssue]) -> None:
             )
         )
         sg.add_closes_gap(node_id, gap.target)
-
-
-def save_oss_report(
-    oss_by_gap: dict[str, list[OssIssue]], path: str | Path | None = None
-) -> Path:
-    """Write the cache-shaped report (thin slice: cache IS the report)."""
-    cache = load_oss_cache(path)
-    for gap_target, issues in oss_by_gap.items():
-        entry = cache.get(gap_target, {})
-        entry["issues"] = [
-            {
-                "title": it.title,
-                "url": it.url,
-                "repo": it.repo,
-                "labels": it.labels,
-                "updated_at": it.updated_at,
-                "body": it.body,
-                "relevance_why": it.relevance_why,
-                "provenance": it.provenance,
-            }
-            for it in issues
-        ]
-        cache[gap_target] = entry
-    return save_oss_cache(cache, path)

@@ -729,8 +729,9 @@ likewise not a pipeline stage.
       `wrap_client()` (wraps the OpenAI client in `llm._client()` — covers
       every LLM caller at once), `traced()` stage labels on `judge_target`,
       `synthesize_project`, `filter_issues_relevance`, `extract_skills_llm`,
-      `bridge_vocabulary`; `--trace` flag on `cli.py` / `server.py` /
-      `sweep.py`. Off by default; missing key = warning, never a failure.
+      `bridge_vocabulary`; `--trace` flag on `sweep.py` (the CLI was
+      retired at M28; tracing is never enabled on `server.py`). Off by
+      default; missing key = warning, never a failure.
       Discovery while designing: `llm.py` imported `openai` without a
       `pyproject.toml` declaration (only a runtime ImportError message).
       Fixed 2026-10-08, ahead of 17a: `openai` and `langchain-core` are
@@ -754,7 +755,7 @@ likewise not a pipeline stage.
       ("how often does the gate flip a verdict"), **not** as judge ground
       truth — per M4, the user never judges transfer scores.
     - **Done criteria:** see [14-observability.md](14-observability.md) (trace
-      tree for a `--trace` CLI run and zero network traffic without it;
+      tree for a `--trace` sweep run and zero network traffic without it;
       ≥30-row golden set with local + LangSmith reports; `m17_check.py` offline
       PASS; CI offline tier green; `ruff check .` and `pytest` clean).
     - **Explicit non-goals:** self-hosted LangSmith/Langfuse, LLM-as-judge
@@ -1409,7 +1410,3 @@ This file churns; `02-decisions.md` is append-only. Entries marked
   skill pairs); plan-level ground truth stays open.
 - **Hosting choice for demo (S7).** Local only for v1; AuraDB free tier
   when Neo4j is restored (Deferred #1).
-- **Model pick (S2).** ~~Resolved at M3: DeepSeek V4 Flash 0731 via
-  OpenRouter (see M3).~~ **Closed** — no longer an open item; the decision
-  lives in [02-decisions.md](02-decisions.md) (M3 provider row) and the
-  record in M3 above. Kept here only as a pointer.

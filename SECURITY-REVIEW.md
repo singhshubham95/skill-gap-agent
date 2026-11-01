@@ -8,7 +8,13 @@ central store).
 > This document is a technical risk analysis, **not legal advice**. Have a
 > lawyer review the LinkedIn ToS position and the privacy policy before release.
 
-## Verdict
+> **Historical (2026-10-05).** Findings S1 (unauthenticated local API) and S2
+> (inaccurate disclosure) were fixed by T-M20/T-M21; the CLI and store layout
+> changed at M28. Line references reflect the review date. Current security
+> posture: [specs/12-extension.md](specs/12-extension.md) §Security posture;
+> release gates: [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md).
+
+## Verdict (as of 2026-10-05)
 
 **No-Go for store release until the four blockers in §5 are fixed.** Code
 quality is high — no XSS, no leaked secrets, minimal extension permissions —
