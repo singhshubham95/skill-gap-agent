@@ -41,6 +41,9 @@ M29; store gate: [CHROMEWEBSTORE.md](../../CHROMEWEBSTORE.md).
 - `packaging/build.ps1` (new — local/CI build, version check, checksums)
 - `packaging/make_icon.py` + `packaging/app.ico` (icon asset for exe/setup)
 - `packaging/README.md` (new — build/sign/release steps)
+- `src/skill_gap_agent/server.py` (frozen resource root + workspace cwd)
+- `src/skill_gap_agent/m29_check.py`, `src/skill_gap_agent/test_m29.py`
+  (regressions for bundled defaults and frozen cwd)
 - `.github/workflows/windows-release.yml` (new — tag/dispatch build)
 - `.gitignore` (build/dist intermediates)
 - `THIRD-PARTY-NOTICES.md` (bundled runtime + packaging dependencies)
@@ -102,6 +105,23 @@ M29; store gate: [CHROMEWEBSTORE.md](../../CHROMEWEBSTORE.md).
   a running app and silent uninstall while running both returned 0, killed
   the app, removed files/shortcut/autostart, and preserved the data marker
   (silent uninstall keeps data).
+- **Fix during review (2026-10-31) — frozen default input.**
+  The installed build failed Analyze gaps with
+  `[Errno 2] ... \Programs\SkillGapAgent\data\skillsdataset.json`: in the
+  one-directory bundle `server.REPO_ROOT` is derived from `__file__`
+  inside `_internal`, so it resolved to the **install directory**, and the
+  sample `data/` was never bundled. Fixed by resolving read-only assets
+  through `sys._MEIPASS` (`server.resource_root()`, used for `data/jds`
+  and the default `skillsdataset.json`), bundling both in the PyInstaller
+  spec with a post-build presence assertion, and making a frozen run's
+  working directory the workspace instead of the install directory.
+  `m29_check` now asserts dataset/JD presence, `_MEIPASS` resolution,
+  spec bundling, and the frozen workdir. Rebuilt artifact: 35,333,064
+  bytes, SHA-256
+  `18c5db73484f6c7586b8022a9cce06419b21794077716a8b504c5e58589199af`
+  (unsigned test build). Re-verified: `ruff`, `pytest` 69, `node --check`,
+  m29/m13/m18/m20/m22/m26 all PASS; `_MEIPASS` pointed at the built
+  `_internal` resolves the dataset and all 16 sample JDs.
 - **Pending:** a clean Windows 10/11 x64 VM pass and a signed-build check
   (this host has no signing certificate/signtool; the artifact here is
   explicitly unsigned). These are tracked in `03-milestones.md` §Open and

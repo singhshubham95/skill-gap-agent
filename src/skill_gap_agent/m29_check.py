@@ -82,6 +82,59 @@ def check_runtime_paths() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_resource_defaults() -> None:
+    """The default skills source and sample JDs must exist in dev and in a
+    frozen bundle (specs/15-desktop-companion.md §Frozen build)."""
+    assert server.RESOURCE_ROOT == server.REPO_ROOT, server.RESOURCE_ROOT
+    assert server.DEFAULT_SKILLS.is_file(), server.DEFAULT_SKILLS
+    payload = json.loads(server.DEFAULT_SKILLS.read_text(encoding="utf-8"))
+    assert payload, "the sample skills dataset is empty"
+    assert server.JD_DIR.is_dir() and any(server.JD_DIR.iterdir()), (
+        f"sample JDs missing: {server.JD_DIR}"
+    )
+    real_meipass = getattr(sys, "_MEIPASS", None)
+    with tempfile.TemporaryDirectory(prefix="m29-meipass-") as tmp:
+        sys._MEIPASS = tmp
+        try:
+            assert server.resource_root() == Path(tmp), server.resource_root()
+        finally:
+            if real_meipass is None:
+                del sys._MEIPASS
+            else:
+                sys._MEIPASS = real_meipass
+    spec = (REPO_ROOT / "packaging" / "skill-gap-agent.spec").read_text("utf-8")
+    assert "skillsdataset.json" in spec and '"data/jds"' in spec, (
+        "the frozen build must bundle data/skillsdataset.json and data/jds"
+    )
+    print(
+        "resource defaults OK: dataset + JDs exist, _MEIPASS wins when "
+        "frozen, spec bundles data/"
+    )
+
+
+def check_frozen_workdir() -> None:
+    """A frozen run works from the workspace, never the install directory."""
+    assert server._working_dir() == REPO_ROOT, server._working_dir()
+    real_frozen = getattr(sys, "frozen", None)
+    previous = os.environ.get(desktop.DATA_DIR_ENV)
+    with tempfile.TemporaryDirectory(prefix="m29-workdir-") as tmp:
+        os.environ[desktop.DATA_DIR_ENV] = tmp
+        sys.frozen = True
+        try:
+            work = server._working_dir()
+            assert work == Path(tmp), work
+        finally:
+            if real_frozen is None:
+                del sys.frozen
+            else:
+                sys.frozen = real_frozen
+            if previous is None:
+                os.environ.pop(desktop.DATA_DIR_ENV, None)
+            else:
+                os.environ[desktop.DATA_DIR_ENV] = previous
+    print("frozen workdir OK: runs from the data root, not the install dir")
+
+
 def check_no_gui_imports() -> None:
     source = Path(desktop.__file__).read_text(encoding="utf-8")
     roots: set[str] = set()
@@ -235,6 +288,8 @@ def check_output_redirect() -> None:
 def main() -> None:
     check_version_sync()
     check_runtime_paths()
+    check_resource_defaults()
+    check_frozen_workdir()
     check_no_gui_imports()
     check_status_version()
     check_backend_lifecycle()

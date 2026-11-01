@@ -80,6 +80,7 @@ import html
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -94,11 +95,23 @@ from .llm import PROVIDERS, LLMConfig, LLMError, require_api_key
 from .store import current_dir, source_sha
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-JD_DIR = REPO_ROOT / "data" / "jds"
+
+
+def resource_root() -> Path:
+    """Read-only bundled assets: PyInstaller's _MEIPASS when frozen, else the
+    source checkout. A frozen one-dir build has no repo tree — using
+    ``__file__`` alone would resolve next to the installed executable."""
+    bundled = getattr(sys, "_MEIPASS", None)
+    return Path(bundled) if bundled else REPO_ROOT
+
+
+RESOURCE_ROOT = resource_root()
+DATA_DIR = RESOURCE_ROOT / "data"
+JD_DIR = DATA_DIR / "jds"
 OUTPUT_DIR = REPO_ROOT / "output"
 CAPTURED_DIR = OUTPUT_DIR / "captured_jds"  # legacy alias; live path is store
 UPLOAD_DIR = OUTPUT_DIR / "uploads"  # legacy alias; live path is store
-DEFAULT_SKILLS = REPO_ROOT / "data" / "skillsdataset.json"
+DEFAULT_SKILLS = DATA_DIR / "skillsdataset.json"
 MAX_RESUME_BYTES = 10 * 1024 * 1024  # M14 upload cap
 
 
@@ -122,8 +135,9 @@ def _origin_ok(origin: str | None, port: int) -> bool:
 
 def _validate_skills_path(value) -> str | None:
     """M20 containment: an explicit run-body skills_path must be an
-    existing .json under the repo root or the OS temp dir (check fixtures
-    live there). Returns an error message, or None when acceptable.
+    existing .json under the app's read-only resource root (the repo in
+    dev, the bundled ``_internal`` when frozen) or the OS temp dir (check
+    fixtures live there). Returns an error message, or None when acceptable.
 
     Defense in depth — the origin gate is the primary barrier; this kills
     the file-ingest primitive (arbitrary local file -> LLM prompt) even if
@@ -134,7 +148,7 @@ def _validate_skills_path(value) -> str | None:
     p = Path(value).expanduser().resolve()
     if p.suffix.lower() != ".json":
         return f"skills_path must be a .json file: {value!r}"
-    roots = (REPO_ROOT.resolve(), Path(tempfile.gettempdir()).resolve())
+    roots = (RESOURCE_ROOT.resolve(), Path(tempfile.gettempdir()).resolve())
     if not any(p.is_relative_to(root) for root in roots):
         return (
             "skills_path must live under the repo root or the OS temp dir: "
@@ -605,6 +619,25 @@ def _build_intake(source: Path, jds_path: str, options: dict) -> tuple:
     return sess, None
 
 
+def _working_dir() -> Path:
+    """Stable base for a run: the checkout in dev, the workspace when frozen.
+
+    A frozen build has no repo tree, and the install directory is replaced
+    on upgrade — relative paths must never resolve there.
+    """
+    if not getattr(sys, "frozen", False):
+        return REPO_ROOT
+    from . import store
+
+    return store.data_root()
+
+
+def _enter_working_dir() -> None:
+    target = _working_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    os.chdir(target)
+
+
 def _run_pipeline(options: dict) -> None:
     """Background worker (phase "gaps"/"full"): M9 intake first, then the graph.
 
@@ -615,7 +648,7 @@ def _run_pipeline(options: dict) -> None:
     """
     from .cli import set_stage_listener
 
-    os.chdir(REPO_ROOT)
+    _enter_working_dir()
     set_stage_listener(_set_stage)
     debuglog.set_run_id(_run.get("run_id"))
     _drop_paused()
@@ -807,7 +840,7 @@ def _resume_pipeline(options: dict) -> None:
     """Phase 2 worker: resume the paused run through synthesize -> oss -> output."""
     from .cli import Command, set_stage_listener
 
-    os.chdir(REPO_ROOT)
+    _enter_working_dir()
     app = _paused["app"]
     config = _paused["config"]
     if app is None or config is None:

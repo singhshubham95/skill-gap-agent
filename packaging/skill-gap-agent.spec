@@ -11,6 +11,8 @@ repo = Path(SPECPATH).resolve().parent  # noqa: F821 — PyInstaller defines SPE
 icon = repo / "packaging" / "app.ico"
 
 datas = [
+    (str(repo / "data" / "skillsdataset.json"), "data"),
+    (str(repo / "data" / "jds"), "data/jds"),
     (str(repo / "extension" / "icons" / "icon128.png"), "icons"),
     (str(repo / "LICENSE"), "."),
     (str(repo / "THIRD-PARTY-NOTICES.md"), "."),

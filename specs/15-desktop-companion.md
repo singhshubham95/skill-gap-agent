@@ -148,6 +148,14 @@ the panel's **Delete all data** control remains the in-app wipe.
   tooling are excluded.
 - Package metadata is bundled so `__version__` and runtime metadata agree;
   a build check asserts `pyproject.toml` version == `__version__`.
+- **Bundled read-only inputs:** the sample `data/skillsdataset.json` and
+  `data/jds/` ship under `_internal/data`. A one-directory build has no
+  repo tree, so the server resolves them through `sys._MEIPASS`
+  (`server.resource_root()`), never through `__file__` next to the
+  installed executable; the build fails if the assets are missing. A run
+  without an uploaded resume therefore still has its documented default
+  input, and a frozen run's working directory is the workspace, not the
+  install directory.
 - The build must be reproducible from a clean checkout on a GitHub-hosted
   Windows runner; no system Python is required on the target machine.
 

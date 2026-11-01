@@ -7,8 +7,10 @@ free checks so `pytest` guards them too.
 from skill_gap_agent.m29_check import (
     check_backend_lifecycle,
     check_backend_port_error,
+    check_frozen_workdir,
     check_no_gui_imports,
     check_output_redirect,
+    check_resource_defaults,
     check_runtime_paths,
     check_single_instance,
     check_startup_toggle,
@@ -23,6 +25,14 @@ def test_version_sync() -> None:
 
 def test_runtime_paths() -> None:
     check_runtime_paths()
+
+
+def test_resource_defaults() -> None:
+    check_resource_defaults()
+
+
+def test_frozen_workdir() -> None:
+    check_frozen_workdir()
 
 
 def test_no_gui_imports() -> None:

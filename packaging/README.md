@@ -28,8 +28,9 @@ Artifacts:
 - `dist\SkillGapAgent-Setup.exe` — per-user installer
 - `dist\SkillGapAgent-Setup.exe.sha256` — SHA-256 checksum
 
-The script asserts `pyproject.toml` version == `skill_gap_agent.__version__`
-and generates `packaging\app.ico` from the extension icon when missing.
+The script asserts `pyproject.toml` version == `skill_gap_agent.__version__`,
+bundle contents (`_internal\data\skillsdataset.json` + `data\jds`), and
+generates `packaging\app.ico` from the extension icon when missing.
 `-SkipInstaller` builds only the frozen app; `-SkipSign` produces a clearly
 labeled unsigned test build.
 
