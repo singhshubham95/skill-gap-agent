@@ -63,6 +63,10 @@ maintenance on `main` or beside feature agents.
      that no longer exist.
    - Compare task acceptance criteria and tests with implemented behavior.
    - Check that Built/Designed/Deferred statuses still match reality.
+   - A `Designed` spec with no code is planned work, not drift; never treat
+     absence of code as evidence that the spec should be removed.
+   - Code with no spec home is a spec gap first: record it, then propose
+     documenting or removing it — do not delete it while auditing.
 
    ### A2. Spec-spec contradictions
    - Extract normative claims from the owning component specs, the
@@ -124,8 +128,12 @@ maintenance on `main` or beside feature agents.
    - Propose archives and links; never delete append-only history.
 
 4. **Classify and fix.** For each finding decide:
-   - **Fix now** — clear drift, contradiction, stale text, dead code, weak
-     test, or context bloat with an unambiguous correct answer.
+   - **Fix now** — a non-destructive fix for clear drift, contradiction,
+     stale text, weak test, or context bloat with an unambiguous correct
+     answer.
+   - **Needs approval** — a destructive fix with an unambiguous answer:
+     deleting a spec, code, test, or register entry, or downgrading a
+     status claim. Propose it and wait; see "Destructive actions" below.
    - **Follow-up task** — new behavior, a large refactor, or anything that
      needs its own design and review.
    - **Issue** — the correct side is genuinely unclear, or shared state
@@ -158,14 +166,56 @@ maintenance on `main` or beside feature agents.
      `.agent-devkit/templates/maintenance-report.md`.
    - Update `maintenance/README.md` with the last run and next due date.
    - Add one line to `docs/changelog.md`.
+   - Record destructive approvals (or `none`) in the report.
    - Mark the maintenance task done.
    - Release any locks: `python scripts/release.py --task T-MAINT-<date>`.
    - Leave the working tree clean except for the report and committed fixes.
 
+## Destructive actions (propose, then wait)
+
+Drift does not prove the code or the spec is the disposable side. Any
+finding whose fix removes something needs explicit human approval; a
+maintenance pass does not pre-approve deletions.
+
+Destructive changes include: deleting or emptying a spec file or section;
+deleting source, config, scripts, tests, migrations, or data; removing an
+entry from a historical register; downgrading a status claim (Built to
+Designed, dropping a Deferred restore trigger); or making working behavior
+unreachable.
+
+For a destructive finding:
+
+1. Record it in the report with category, severity, evidence
+   (`file:line`), and decision `needs approval`. Do not act while
+   auditing.
+2. Show the human what would go, the exact paths, the evidence, what
+   working behavior or recorded intent would be lost, the alternative
+   (document it, follow-up task, defer), and your recommendation.
+3. Wait for an explicit confirmation naming the finding or the files. The
+   start of the pass, a general "continue", or silence is not approval.
+4. On approval, make the change and record the approver, scope, and date in
+   the report's Approvals table.
+5. Without approval, leave everything unchanged and classify the finding
+   as deferred, a follow-up task, or an issue.
+
+Treat these as propose-only — never delete or downgrade them on your own:
+
+- a spec or section marked Designed or Deferred that is internally
+  consistent — no code yet is the intended state, not drift;
+- code that is reachable, tested, shipped, or whose use you cannot rule
+  out, even when no spec records it. Unrecorded working code is a spec
+  gap: propose updating the spec or file an issue, not deleting the code.
+
+The existing prohibitions still hold: never weaken, skip, or delete a test
+to get green, and never rewrite or delete append-only history. Routine
+closeout of an Open item whose result is already recorded in the same
+register is not a destructive change.
+
 ## Output standard
 
 Every finding cites `file:line` and one of the six categories. Every fix
-traces to a spec section, decision row, or issue. Every unresolved item has
-a follow-up task/issue and an owner. A pass that finds nothing must say what
+traces to a spec section, decision row, or issue; every destructive fix
+also traces to a recorded human approval. Every unresolved item has a
+follow-up task/issue and an owner. A pass that finds nothing must say what
 was checked and why it is clean; "no issues" without evidence is not a
 report.

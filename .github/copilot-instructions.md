@@ -94,7 +94,9 @@ what to build). Roles, templates, and scripts are installed from the
 
 Maintenance is not part of normal task work. Do not run it unless the human
 explicitly starts a maintenance pass. When asked, read
-`.agent-devkit/roles/maintenance.md` and `maintenance/README.md`.
+`.agent-devkit/roles/maintenance.md` and `maintenance/README.md`. That role
+requires explicit human approval before any destructive repair (deleting a
+spec, code, test, or register entry; downgrading a status).
 
 ## Spec evolution rules
 

@@ -17,14 +17,14 @@
 
 ## Summary
 
-| Category | Findings | Fixed | Follow-up | Deferred |
-|---|---:|---:|---:|---:|
-| A1 Spec-code drift | | | | |
-| A2 Spec-spec contradictions | | | | |
-| A3 Stale specs | | | | |
-| A4 Code entropy | | | | |
-| A5 Test rot | | | | |
-| A6 Context bloat | | | | |
+| Category | Findings | Fixed | Needs approval | Follow-up | Deferred |
+|---|---:|---:|---:|---:|---:|
+| A1 Spec-code drift | | | | | |
+| A2 Spec-spec contradictions | | | | | |
+| A3 Stale specs | | | | | |
+| A4 Code entropy | | | | | |
+| A5 Test rot | | | | | |
+| A6 Context bloat | | | | | |
 
 ## Findings
 
@@ -33,7 +33,7 @@
 - **Category:** `A1 | A2 | A3 | A4 | A5 | A6`
 - **Severity:** `high | medium | low`
 - **Evidence:** `path:line` (quote or describe)
-- **Decision:** `fix now | follow-up task | issue | deferred`
+- **Decision:** `fix now | needs approval | follow-up task | issue | deferred`
 - **Action:** `<what changed or which task/issue was created>`
 - **Verification:** `<command/result or link>`
 
@@ -43,6 +43,15 @@
 - Code: `<links>`
 - Tests: `<links>`
 - Docs/context: `<links>`
+
+## Approvals
+
+Destructive fixes require explicit human approval before they are applied.
+Write `none` when no destructive finding was proposed.
+
+| Finding | Approved by | Scope (files/paths) | Date |
+|---|---|---|---|
+| | | | |
 
 ## Verification
 
@@ -64,6 +73,7 @@
 ## Sign-off
 
 - [ ] Report complete, every finding classified
-- [ ] Fixes verified
+- [ ] Non-destructive fixes verified
+- [ ] Destructive fixes explicitly approved and recorded (or none)
 - [ ] Follow-ups filed
 - [ ] Charter last-run/next-due updated

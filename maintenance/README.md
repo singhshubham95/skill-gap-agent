@@ -58,9 +58,13 @@ The files that must be true right now:
 - Work order: `specs/tasks/T-MAINT-<YYYYMMDD>.md` (from
   `.agent-devkit/templates/maintenance-task.md`)
 - Files this pass may touch: `specs/`, `src/skill_gap_agent/`, `extension/`,
-  `packaging/`, `docs/`, `.github/`, `README.md`, `CHROMEWEBSTORE.md`,
-  `maintenance/`, `board/maintenance/`
+  `packaging/`, `tools/`, `docs/`, `.github/`, `maintenance/`,
+  `board/maintenance/`, `README.md`, `CHROMEWEBSTORE.md`,
+  `SECURITY-REVIEW.md`, `THIRD-PARTY-NOTICES.md`, `pyproject.toml`
 - Run exclusively: no other agents/worktrees while this pass runs.
+- Destructive repairs (spec/code/test/register removal, status downgrade)
+  require your explicit approval during the pass; the work order does not
+  pre-approve them.
 
 ## Project-specific focus
 
