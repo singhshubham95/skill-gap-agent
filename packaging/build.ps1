@@ -139,6 +139,14 @@ try {
     if (-not (Test-Path -LiteralPath $AppExe)) {
         throw "PyInstaller did not produce $AppExe"
     }
+    foreach ($Bundled in @(
+        (Join-Path $AppDir "_internal\data\skillsdataset.json"),
+        (Join-Path $AppDir "_internal\data\jds")
+    )) {
+        if (-not (Test-Path -LiteralPath $Bundled)) {
+            throw "The frozen build is missing bundled asset: $Bundled"
+        }
+    }
 
     $CanSign = $false
     $SignTool = $null
