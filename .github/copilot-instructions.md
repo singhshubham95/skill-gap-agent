@@ -90,6 +90,12 @@ what to build). Roles, templates, and scripts are installed from the
 - **Human docs** (`docs/`): derived, short, non-authoritative. The agent
   writes the changelog line at task close.
 
+## Periodic maintenance (separate mode)
+
+Maintenance is not part of normal task work. Do not run it unless the human
+explicitly starts a maintenance pass. When asked, read
+`.agent-devkit/roles/maintenance.md` and `maintenance/README.md`.
+
 ## Spec evolution rules
 
 The specs are **living target-state documents**, not per-version snapshots:

@@ -9,6 +9,10 @@
 # top model (Xiaomi MiMo-V2.6-Pro) is ALSO the cheapest — so there is no
 # cheap-coder to slot in, and splitting only adds handoff cost and context
 # loss. One session keeps full design context from spec through review.
+#
+# Maintenance sessions reuse the `agent` settings below; a whole-repo audit
+# needs the same reasoning depth. Add a `maintenance:` entry only if you
+# deliberately want a different model/effort.
 
 agent:
   model: xiaomi/mimo-v2.6-pro
