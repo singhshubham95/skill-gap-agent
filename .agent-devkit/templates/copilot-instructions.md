@@ -50,6 +50,12 @@ locks. There is no session chaining and no role split.
 - `docs/` is the derived human tier (short, non-authoritative): `overview.md`
   (intent) and `changelog.md` (one line per completed task).
 
+## Periodic maintenance (separate mode)
+
+Maintenance is not part of normal task work. Do not run it unless the human
+explicitly starts a maintenance pass. When asked, read
+`.agent-devkit/roles/maintenance.md` and `maintenance/README.md`.
+
 ## Verification before declaring done
 
 - Run `python scripts/verify.py --task T-<id>` (lint + tests + project

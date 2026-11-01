@@ -11,29 +11,13 @@ component list below route to them. (Folded from
 S-files. The M9 design and graph schema that survived that merge have since
 moved to `13-intake.md` and `06-skill-map.md`, their owning files.)
 
-**Status: v1 built and validated** (M1–M6) **; M7–M28 delivered except
-M17 (designed); M29 install path in progress** (29a launcher built; 29b/29c
-in review; 29d designed). Order
-notes: M13's
-extension shell jumped ahead of M9 on user priority 2026-10-03 — the
-capture → analyze → plan flow works on the M8 resume path; M9's skill
-validation improves plan quality but is not a mechanical prerequisite for
-it. 2026-10-04: the conversational half of M9 was deferred;
-**2026-10-12: restored and built** — the conversation returned
-*inside the panel* at Analyze gaps (upload stays rule-only; extraction →
-chat → profile saved run with the captured-JD context), full C3 in one
-pass; supersession logged in
-[02-decisions.md](02-decisions.md). M14
-[extension self-serve setup](12-extension.md) §M14 was built in between;
-M28 (2026-10-25) made the extension the only interface with one central
-workspace.
-All pipeline stages are built and validated against a sealed hand-performed
+**Status: v1 built and validated** (M1–M6); **M7–M28 delivered except
+M17 (designed; M27 folded into M28); M29 install path in progress** (29a
+built; 29b/29c implemented, verification pending; 29d planned). The
+extension is the only user surface since M28, with one central workspace;
+all pipeline stages are built and validated against a sealed hand-performed
 gap analysis of the same data (rubric in S5 `08-gap-measurer.md`
-§Validation rubric — the acceptance criteria and results live there). The
-target adds
-conversational intake, resume (PDF/DOCX) ingestion, evidence-backed skill
-validation, and true LangGraph orchestration — components marked 🎯 Designed
-below.
+§Validation rubric). M17 tooling is the only designed component below.
 
 This is a **living target-state document**: it describes the full system we
 are building (current end goal = v2), with every component labeled Built
@@ -63,7 +47,7 @@ steps (design: [13-intake.md](13-intake.md)).
 ```mermaid
 flowchart TB
     subgraph L1["Interface layer"]
-        CLI["Runners<br/>(server, sweep)"]
+        CLI["Entry points<br/>(server, sweep)"]
     end
     subgraph L2["Pipeline nodes (LangGraph wiring = M7)"]
         ING["Ingestion<br/>(skills JSON → graph)"]
@@ -113,7 +97,7 @@ flowchart TB
 | Component | Purpose | Code | Spec | Status |
 |---|---|---|---|---|
 | C1 sweep harness | JD-subset evaluation over the built pipeline | `sweep.py`, `m12_check.py` | [11-sweep.md](11-sweep.md) | ✅ Built (M12) |
-| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16); M29 companion onboarding 🎯 Designed |
+| C2 extension shell | Browser capture + side-panel gaps/plan | [../extension/](../extension/), `m13_check.py`, `m14_check.py` | [12-extension.md](12-extension.md) | ✅ Built (M13 + M14 self-serve setup); M15 toggle ✅ Built; M16 connect + free mode ✅ Built (M16); M29 companion onboarding 🎯 Designed (29c implemented; live pass pending) |
 | C3 intake + validation | In-panel intake chat + evidence-backed skill depth (depth-aware judge); one central workspace store | `intake.py`, `validate.py`, `store.py` | [13-intake.md](13-intake.md) | ✅ Built (M9, 2026-10-12; store simplified M28, 2026-10-25) |
 | C4 observability + judge evaluation | Debug logging + LangSmith tracing + judge golden-set eval | `debuglog.py` (M26), `tracing.py`, `judge_eval.py`, `evals/` (planned) | [14-observability.md](14-observability.md) | ✅ Built (M26 debug mode); 🎯 Designed (M17) |
 | C5 desktop companion + distribution | Tray companion, bundled runtime, Windows installer, release pipeline, consumer onboarding | `desktop.py`, `packaging/`, `.github/workflows/windows-release.yml` | [15-desktop-companion.md](15-desktop-companion.md) | 🎯 Designed (M29); 29a built; 29b/29c in review |
@@ -149,19 +133,16 @@ PERSISTED: output/graph.json (whole graph),
            output/profile.json (intake + approval record, M9/M28)
 ```
 
-_Counts are a fresh ingestion snapshot on the current seed data (2026-10-03):
-118 canonical + 41 implied (the persisted approval record in the session
-profile; 23 of those are
-still re-proposed by today's patterns) vs. 16 JDs → 19 target skills (of 48
-required-skill terms; the rest resolve to held skills) → 17 unmatched. The
-judge-edge count is LLM output and varies per run — the M12 sweep
-([11-sweep.md](11-sweep.md)) is the mechanism for refreshing numbers like these._
+_Counts are a fresh ingestion snapshot on 2026-10-03: 118 canonical + 41
+implied vs. 16 JDs → 19 target skills → 17 unmatched. The judge-edge count
+is LLM output and varies per run — the M12 sweep
+([11-sweep.md](11-sweep.md)) refreshes numbers like these._
 
 **Target flow (C3, restored 2026-10-12):** resume upload (rule-only) → JD
 capture → Analyze gaps: LLM extraction → in-panel intake chat (phrase +
 implied-skill review, skill validation, depth — JD-aware triage) → profile
-saved in the resume's SHA-keyed session store → the depth-aware judge
-consumes it (the gate shrinks to unvalidated skills).
+saved in the central workspace (resume-identity guarded) → the depth-aware
+judge consumes it (the gate shrinks to unvalidated skills).
 Design home: [13-intake.md](13-intake.md).
 
 ## Component designs (high level here — details live in the owning file)
@@ -174,34 +155,24 @@ link. If you need the mechanics, open the linked file.
   records which subset produced which plan.
 - **C2 extension shell (M13 + M14, Built)** —
   [12-extension.md](12-extension.md). Chrome side panel: capture JDs on
-  LinkedIn, analyze gaps, generate the plan; the pipeline runs in the
-  local `server.py`. M14 (same file §M14, Built 2026-10-04) made the
-  panel self-serve: resume upload, LLM key entry (OS keyring), and a
-  double-click server launcher. M15 (same file §M15, ✅ Built 2026-10-05) adds the
-  LLM-mode toggle, keyless-run refusal and the degraded banner — policy
-  home: [05-ai-caller.md](05-ai-caller.md) §LLM presence policy. M16
-  (same file §M16, ✅ Built 2026-10-06) adds a "Connect free LLM" button
-  (OpenRouter OAuth PKCE → OS keyring), an opt-in free-model mode behind
-  a consent gate, and retry hardening — mechanics home:
-  [05-ai-caller.md](05-ai-caller.md) §Free-tier routing.
+  LinkedIn, analyze gaps, generate the plan against the local server. M14
+  made setup self-serve, M15 added LLM modes, M16 free-tier OAuth, and M29
+  companion-aware onboarding (29c implemented; live pass pending).
+  Mechanics and policy live in the linked files.
 - **C3 intake + skill validation (M9, ✅ Built 2026-10-12)** —
   [13-intake.md](13-intake.md). In-panel chat at Analyze gaps (upload stays
-  rule-only; extraction + validation run with the captured-JD context)
-  replaces the y/n/a approval flows; skills are validated with calibration
-  questions so depth is evidence-backed; the judge is depth-aware
-  (profile-stamped caches, no double-count with the gate). Supersedes the
-  2026-10-04 deferral (see [02-decisions.md](02-decisions.md)).
+  rule-only); calibration questions make depth evidence-backed and the
+  judge depth-aware (profile-stamped caches, no gate double-count).
+  Supersedes the 2026-10-04 deferral ([02-decisions.md](02-decisions.md)).
 - **C4 observability + judge evaluation (M17, 🎯 Designed)** —
   [14-observability.md](14-observability.md). Opt-in LangSmith tracing of
   every run (what happened inside it) plus a golden-set evaluation of the
   judge (is it right) — tooling around the pipeline, not a stage.
 - **C5 desktop companion + distribution (M29, 🎯 Designed; 29a built,
   29b/29c in review)** — [15-desktop-companion.md](15-desktop-companion.md).
-  A windowed, bundled Python companion (no system Python), per-user Windows
-  installer with login autostart, and a CI-signed release artifact; the
-  end-user path is two installs (companion + Chrome Web Store extension)
-  with no terminal or developer mode. Panel onboarding lives in
-  [12-extension.md](12-extension.md) §M29.
+  Bundled tray companion (no system Python), per-user Windows installer,
+  signed CI release, and the two-install consumer journey. Panel
+  onboarding: [12-extension.md](12-extension.md) §M29.
 
 ## Skill graph schema (summary — canonical reference in S3)
 
@@ -216,6 +187,11 @@ Full tables, properties and per-edge writers: S3
 ```
 skill-gap-agent/
 ├── README.md                  ← project entry point (user quickstart)
+├── .github/                   ← agent-gates + Windows release workflows
+├── board/                     ← locks/, issues/, verify + maintenance reports
+├── docs/                      ← derived human docs (overview, changelog, privacy policy)
+├── maintenance/               ← maintenance charter (human-owned)
+├── scripts/                   ← devkit task scripts (claim/release/verify/path_guard)
 ├── specs/                     ← you are here (numbered by reading order)
 ├── data/                      ← seed data (gitignored)
 │   ├── skillsdataset.json
@@ -228,7 +204,9 @@ skill-gap-agent/
 │   └── README.md              ← load-unpacked instructions
 ├── packaging/                 ← M29: PyInstaller frozen build + Inno Setup installer + release workflow
 ├── tools/
-│   └── linkedin_jd_bookmarklet.js ← S1 helper (pre-extension JD saver)
+│   ├── linkedin_jd_bookmarklet.js ← S1 helper (pre-extension JD saver)
+│   ├── start-server.bat       ← developer launcher (M14; M29 ships the companion)
+│   └── generate_icons.py      ← M22: regenerate extension icons
 ├── src/skill_gap_agent/
 │   ├── graph.py               ← CORE: schema + queries (the system's backbone)
 │   ├── normalize.py           ← CORE: canonical terms + aliases
@@ -254,10 +232,11 @@ skill-gap-agent/
 │   ├── desktop.py             ← M29: tray companion entry point + data/log paths (built 2026-10-26)
 │   ├── intake.py              ← M9: intake conversation state machine (phrases→implied→depth→checklist)
 │   ├── validate.py            ← M9: skill validation protocol (author/grade, leakage, JD triage)
-│   ├── m10_check.py           ← milestone-10 verification: oss thin slice (offline stub + cache reuse)
-│   ├── m11_check.py           ← milestone-11 verification: local UI server (offline stub)
-│   ├── m12_check.py           ← milestone-12 verification: sweep harness (offline stub)
-│   ├── m13_check.py           ← milestone-13 verification: extension server contract (offline stub)
+│   ├── debuglog.py            ← M26: local-only debug logging (off by default)
+│   ├── checksupport.py        ← shared isolated-store helper for offline checks
+│   ├── m3_judge.py, mN_check.py ← offline milestone checks
+│   ├── test_m*.py             ← pytest wrappers for the light checks
+│   └── (tracing.py, judge_eval.py planned for M17)
 ├── output/                    ← pipeline artifacts (gitignored):
 │                                 the CURRENT session, one central location
 │                                 (M28): profile.json, extracted_skills.json,
@@ -266,7 +245,7 @@ skill-gap-agent/
 │                                 plan.html, synthesis_report.json,
 │                                 oss_issues.json, current.json;
 │                                 saved_sessions/<name>/ — user snapshots;
-│                                 root-owned: checkpoints.sqlite, logs/, sweeps/.
+│                                 root-owned: logs/, sweeps/.
 │                                 Legacy global decision files retired at M9
 │                                 (see 13-intake.md).
 └── (no .env file)             ← API keys live in the OS keyring only (secrets.py;

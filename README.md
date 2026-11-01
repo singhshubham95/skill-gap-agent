@@ -82,7 +82,7 @@ depth answers can never reach another's analysis. Clearing the JD list in
 the panel deletes those files here too; **delete everything** wipes the
 session artifacts while keeping `logs/`, `sweeps/` and `saved_sessions/`.
 
-Root-owned (not session state): `checkpoints.sqlite`, `logs/`, `sweeps/`.
+Root-owned (not session state): `logs/`, `sweeps/`.
 
 ## What v1 does — and deliberately doesn't
 
@@ -100,18 +100,20 @@ Root-owned (not session state): `checkpoints.sqlite`, `logs/`, `sweeps/`.
 
 Full trade-off list with restore triggers: [specs/03-milestones.md](specs/03-milestones.md) §Deferred.
 
-**Roadmap (M7–M16 built — M9 built 2026-10-12):** LangGraph
-orchestration with resumable human-in-the-loop steps, resume PDF/DOCX
-ingestion, GFI issue sourcing, minimal local UI
+**Roadmap (M1–M28 delivered except M17 designed; M29 install path in
+progress):** LangGraph orchestration with resumable human-in-the-loop
+steps, resume PDF/DOCX ingestion, GFI issue sourcing, the local UI
 (`python -m skill_gap_agent.server`), the JD-subset sweep evaluation
 harness (`python -m skill_gap_agent.sweep`), and the Chrome extension with
 self-serve setup (JD capture → gaps → plan in a side panel; resume upload,
-keyring key entry, [tools/start-server.bat](tools/start-server.bat)
-launcher) are built. Conversational intake returned **inside
-the panel** at Analyze gaps (M9) — upload stays rule-only; extraction, the
-profile chat and skill validation run with the captured-JD context, and
-every artifact is tied to the uploaded resume via a SHA-keyed session
-store ([specs/13-intake.md](specs/13-intake.md)).
+keyring key entry) are built. M29 adds the bundled companion, Windows
+installer, and companion-aware panel onboarding (design:
+[specs/15-desktop-companion.md](specs/15-desktop-companion.md); in review).
+Conversational intake returned **inside the panel** at Analyze gaps (M9) —
+upload stays rule-only; extraction, the profile chat and skill validation
+run with the captured-JD context, and every artifact is tied to the
+uploaded resume via the workspace reuse guard
+([specs/13-intake.md](specs/13-intake.md)).
 Design detail in
 [specs/13-intake.md](specs/13-intake.md),
 [specs/11-sweep.md](specs/11-sweep.md) and
@@ -137,6 +139,7 @@ The specs are the onboarding path — they document not just the design but the
 3. [specs/03-milestones.md](specs/03-milestones.md) — roadmap: build order + learnings + deferred trade-offs + open questions
 4. S1–S7 stage files ([specs/04-reader.md](specs/04-reader.md) … [specs/10-flow-runner.md](specs/10-flow-runner.md)) — per-stage mechanics + status
 5. Non-stage component files ([specs/11-sweep.md](specs/11-sweep.md), [specs/12-extension.md](specs/12-extension.md), [specs/13-intake.md](specs/13-intake.md)) — sweep harness, extension shell, intake + validation
+6. [specs/14-observability.md](specs/14-observability.md) and [specs/15-desktop-companion.md](specs/15-desktop-companion.md) — debug logging/tracing + judge eval, companion + distribution
 
 Conventions: specs are numbered by reading order and are **living
 target-state documents** — they describe the full system being built, with
@@ -162,4 +165,6 @@ then dive as needed:
 | [specs/04-reader.md](specs/04-reader.md) … [specs/10-flow-runner.md](specs/10-flow-runner.md) | Per-stage mechanics (S1–S7); skill-graph schema in [06-skill-map.md](specs/06-skill-map.md) |
 | [specs/11-sweep.md](specs/11-sweep.md) | JD-subset sweep evaluation harness (M12) |
 | [specs/12-extension.md](specs/12-extension.md) | Chrome extension + self-serve setup (M13 + M14) |
-| [specs/13-intake.md](specs/13-intake.md) | Intake + skill validation (M9, Built 2026-10-12 — in-panel chat + session store) |
+| [specs/13-intake.md](specs/13-intake.md) | Intake + skill validation (M9, Built 2026-10-12 — in-panel chat + workspace store) |
+| [specs/14-observability.md](specs/14-observability.md) | Local debug logging (M26, Built) + LangSmith tracing/judge eval (M17, Designed) |
+| [specs/15-desktop-companion.md](specs/15-desktop-companion.md) | Desktop companion, Windows installer, release pipeline (M29 — in progress) |

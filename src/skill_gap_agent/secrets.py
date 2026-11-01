@@ -47,14 +47,3 @@ def set_secret(env_name: str, value: str) -> None:
     import keyring
 
     keyring.set_password(_KEYRING_SERVICE, env_name, value)
-
-
-def delete_secret(env_name: str) -> None:
-    """Remove a secret from the OS keyring (no-op if absent)."""
-    import keyring
-    from keyring.errors import KeyRingError
-
-    try:
-        keyring.delete_password(_KEYRING_SERVICE, env_name)
-    except KeyRingError:
-        pass

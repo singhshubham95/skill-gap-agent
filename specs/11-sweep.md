@@ -53,12 +53,13 @@ prompt). So: **shared caches, per-subset graphs and plans.**
 `sweep.py` calls the pipeline's stage functions directly —
 `ingest_skills_json` + `ingest_jds`, cached judging, `review_targets`,
 `rank_gaps`, `synthesize_for_gaps`, `source_oss_for_gaps`, `write_plan` —
-the same functions `m5_plan.py` and the `cli.py` graph nodes call, with
+the same functions the `cli.py` engine nodes call, with
 every path passed explicitly. The first design drove the `cli.py` LangGraph
-graph once per subset; in `--auto` mode (the only mode a sweep runs) the
-graph adds no conditional behaviour and no interrupts, while its hardcoded
-`output/` paths would have to be threaded through nodes that M11's server
-also uses. Direct calls keep the harness isolated from the shipped runners.
+graph once per subset; in auto/no-interrupt mode (the only mode a sweep
+would use) the graph adds no conditional behaviour and no interrupts,
+while its hardcoded `output/` paths would have to be threaded through
+nodes that M11's server also uses. Direct calls keep the harness isolated
+from the shipped engine.
 The invariant the first design protected — **never re-implement a pipeline
 stage inside the harness** — still holds (decision rows in
 [02-decisions.md](02-decisions.md)).
@@ -78,11 +79,10 @@ output/sweeps/<sweep-id>/
                            # + jds/ (the subset's JD copies = membership on disk)
 ```
 
-**Seed source (M27 target state).** The sweep's `_shared/` caches are
-seeded from the **source session** (`output/`), never from
-root `output/` — the root no longer holds session artifacts, so reading it
-would be both wrong and a step backward to the retired globals
-([13-intake.md](13-intake.md) §Artifact placement). The sweep's own
+**Seed source (M28).** The sweep's `_shared/` caches are seeded from the
+**central workspace** (`output/`), the only session store since M28, never
+from the retired per-session folders or the legacy global files
+([13-intake.md](13-intake.md) §Workspace store). The sweep's own
 shared-cache design is unchanged: judge / gate / OSS caches are
 subset-independent by construction (see §Key insight above), so the
 `_shared/` copies stay.

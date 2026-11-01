@@ -13,53 +13,46 @@ Wires the v1 pipeline nodes into a real LangGraph graph:
 
 Interactive prompts are routed through an ask_fn that raises an interrupt with
 the prompt text and returns the user's answer on resume. Re-runs are cheap:
-persisted decisions (implied_skills.json, gate_overrides.json) are applied
-silently, so interrupts only fire for genuinely new questions.
+persisted decisions (the workspace profile's implied/depth answers) are
+applied silently, so interrupts only fire for genuinely new questions.
 
 M13 additions: a `pause` node after rank powers the extension's two-phase
 flow (analyze gaps -> generate plan); the `oss` node sources good-first-issues
 after synthesis; nodes report progress through set_stage_listener().
 
-Run: python -m skill_gap_agent.cli [--auto] [--no-judge] [--top N] [--resume]
+The CLI console layer was retired at M28; this module is the engine the
+server imports (specs/10-flow-runner.md).
 """
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import json
 import operator
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 
 from . import debuglog
 from .gate import DEFAULT_THRESHOLD, gate_summary, review_targets
 from .graph import SkillGraph
 from .ingest import build_seed_graph
 from .judge import judge_all_unmatched, save_judge_report
-from .llm import LLMConfig, LLMError, require_api_key
+from .llm import LLMConfig
 from .oss import source_oss_for_gaps
 from .output import write_plan, write_plan_html
 from .ranking import format_ranking, rank_gaps
-from .resume import resume_to_skills_json
 from .store import (
     current_dir,
-    ensure_resume_identity,
     load_profile,
-    retire_legacy_files,
     save_profile,
-    source_sha,
 )
 from .synthesis import save_synthesis_report, synthesize_for_gaps
 from .taxonomy import load_taxonomy
-
-CHECKPOINT_PATH = Path("output/checkpoints.sqlite")
 
 # Runtime registry for non-serializable objects (the SkillGraph). The
 # checkpointer serializes every state channel, so the graph object must NOT
@@ -233,24 +226,6 @@ def pending_interrupt(app, config: dict) -> Any | None:
 def prompt_text(value: Any) -> str:
     """Extract the human-readable prompt from an Interrupt value."""
     return value.get("prompt", "") if isinstance(value, dict) else str(value)
-
-
-def _ask_or_interrupt(prompt: str, checkpointer, config: dict) -> str:
-    """Ask one question outside the graph: interrupt() if resumable, else stdin.
-
-    The M8 resume-approval flow runs BEFORE the graph starts, so it cannot
-    rely on a node context. With a checkpointer, interrupt()/Command(resume)
-    still works (the pause is recorded in the checkpoint); without one, fall
-    back to plain input() — same seam semantics as inside nodes.
-    """
-    if checkpointer is None:
-        return input(prompt)
-
-    value = interrupt({"prompt": prompt})
-    return str(value)
-
-
-# --- nodes -----------------------------------------------------------------
 
 
 @debuglog.stage("ingest")
@@ -474,15 +449,6 @@ def _top_edge_data(sg: SkillGraph, target: str):
     return max(edges, key=lambda e: e[0]["confidence"]) if edges else None
 
 
-def _top_confidence(sg: SkillGraph, target: str) -> float | None:
-    confs = [
-        float(d.get("confidence", 0.0))
-        for u, _, d in sg.g.in_edges(f"skill:{target}", data=True)
-        if d.get("type") == "TRANSFERS_TO"
-    ]
-    return max(confs) if confs else None
-
-
 @debuglog.stage("gate")
 def node_gate(state: AgentState, config: RunnableConfig) -> dict:
     _stage("gate")
@@ -676,197 +642,3 @@ def build_app(checkpointer=None):
     g.add_edge("oss", "output")
     g.add_edge("output", END)
     return g.compile(checkpointer=checkpointer)
-
-
-def _run_intake(args, src_path: Path, cfg: LLMConfig) -> None:
-    """M9 intake conversation (CLI: stdin or scripted JSON).
-
-    Extraction (or the skills JSON itself) feeds the phrase review; the
-    captured-JD set feeds validation triage (JD-aware — placement revision
-    2026-10-12). Every answer lands in the workspace profile immediately.
-    """
-    from .implied import detect_implied
-    from .ingest import jd_target_weights
-    from .intake import IntakeSession, drive, focus_phrases
-    from .normalize import canonical_term
-    from .resume import extract_to_artifact, flatten_phrases, phrase_groups
-    from .validate import Validator, triage_skills
-
-    session = current_dir(create=True)
-    if src_path.suffix.lower() == ".json":
-        data = json.loads(src_path.read_text(encoding="utf-8"))
-        source = "json"
-    else:
-        data, source = extract_to_artifact(
-            src_path,
-            artifact_path=session / "extracted_skills.json",
-            use_llm=not args.no_llm,
-            cfg=cfg,
-        )
-    print(f"Intake: skills from {source}")
-    phrases = flatten_phrases(data)
-    canonical = {canonical_term(p) for p in phrases}
-    canonical.discard("")
-    implied_list = [
-        {"skill": i.skill, "evidence": i.evidence}
-        for i in detect_implied(phrases, canonical, None)
-    ]
-    weights = jd_target_weights(args.jds) if Path(args.jds).is_dir() else {}
-    triaged = triage_skills(weights, sorted(canonical)) if weights else []
-    validator = (
-        None if args.no_llm else Validator(session / "questions.json", cfg=cfg)
-    )
-    sess = IntakeSession(
-        source_sha=source_sha(src_path),
-        phrases=phrases,
-        implied=implied_list,
-        triaged=triaged,
-        validator=validator,
-        use_llm=not args.no_llm,
-        focus=focus_phrases(phrases, weights),
-        groups=phrase_groups(data),
-    )
-    # Item-level freshness (specs/13-intake.md §Freshness): the chat asks
-    # only what the profile hasn't answered — say so when there is nothing
-    # new instead of going quiet.
-    first = sess.next_turn()
-    if first is None or first.kind == "complete":
-        print("Intake: nothing new to ask - profile complete for this session.")
-    if args.intake_json:
-        # utf-8-sig: tolerate a BOM (PowerShell's Set-Content -Encoding utf8
-        # writes one).
-        answers = json.loads(
-            Path(args.intake_json).read_text(encoding="utf-8-sig")
-        )
-        drive(sess, answers=answers)
-    else:
-        drive(sess, ask=input, echo=print)
-    print(f"Intake profile saved: {session / 'profile.json'}")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Skill-gap agent (LangGraph runner)")
-    parser.add_argument(
-        "skills",
-        nargs="?",
-        default="data/skillsdataset.json",
-        help="skills JSON, or a resume file (.pdf/.docx/.txt) to extract from",
-    )
-    parser.add_argument("jds", nargs="?", default="data/jds")
-    parser.add_argument("--auto", action="store_true", help="no interactive prompts")
-    parser.add_argument("--no-judge", action="store_true", help="reuse TRANSFERS_TO edges")
-    parser.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="Rule-based mode (M15): no LLM calls anywhere — regex extraction, "
-        "unjudged transfers, keyword GFI, no project synthesis",
-    )
-    parser.add_argument(
-        "--provider",
-        default="openrouter",
-        help="LLM provider id: openrouter / glm / openai (default openrouter)",
-    )
-    parser.add_argument("--top", type=int, default=5, dest="top_n")
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="persist checkpoints to output/checkpoints.sqlite so an interrupted "
-        "run can be resumed by re-running with --resume",
-    )
-    parser.add_argument(
-        "--intake",
-        action="store_true",
-        help="M9: run the in-panel intake conversation on stdin before the graph "
-        "(phrase/implied review, depth/intent, validation)",
-    )
-    parser.add_argument(
-        "--intake-json",
-        default=None,
-        metavar="PATH",
-        help="M9: scripted intake — JSON {turn_id: answer} (+ optional _skip:true)",
-    )
-    args = parser.parse_args()
-
-    # M15 pre-flight (specs/05-ai-caller.md §Availability): LLM mode with no
-    # key refuses before any work instead of silently degrading mid-run.
-    if not args.no_llm:
-        try:
-            require_api_key(args.provider)
-        except LLMError as e:
-            print(f"error: {e}", file=sys.stderr)
-            raise SystemExit(2) from e
-
-    checkpointer = None
-    if args.resume:
-        import sqlite3
-
-        from langgraph.checkpoint.sqlite import SqliteSaver
-
-        conn = sqlite3.connect(str(CHECKPOINT_PATH), check_same_thread=False)
-        checkpointer = SqliteSaver(conn)
-
-    # One central workspace: the retired global decision files are deleted
-    # (migration) and never recreated by any flow. A changed resume clears
-    # the artifacts derived from the previous one.
-    retire_legacy_files()
-    src_path = Path(args.skills)
-    session = current_dir(create=True)
-    ensure_resume_identity(src_path)
-    cfg = LLMConfig(provider=args.provider)
-
-    if args.intake or args.intake_json:
-        _run_intake(args, src_path, cfg)
-
-    config = {"configurable": {"thread_id": "cli"}}
-
-    # M8 front-end: a resume file is converted to skills JSON BEFORE the
-    # graph starts (extraction needs no interrupt; M9 intake reuses the same
-    # function — its phrase review applies the chat's answers). A .json input
-    # takes today's path unchanged.
-    skills_path = args.skills
-    if Path(skills_path).suffix.lower() != ".json":
-        profile = load_profile() or {}
-        json_path, _stats = resume_to_skills_json(
-            skills_path,
-            artifact_path=session / "extracted_skills.json",
-            use_llm=not args.no_llm,
-            auto=args.auto,
-            ask_fn=None if args.auto else (lambda p: _ask_or_interrupt(p, checkpointer, config)),
-            cfg=cfg,
-            review_decisions=profile.get("phrases") or None,
-            review_on_save=lambda saved: _save_profile_key(
-                {"source_input": str(src_path)}, "phrases", saved
-            ),
-        )
-        skills_path = str(json_path)
-
-    app = build_app(checkpointer=checkpointer)
-    state: AgentState = {
-        "skills_path": skills_path,
-        "jds_path": args.jds,
-        "auto": args.auto,
-        "skip_judge": args.no_judge,
-        "top_n": args.top_n,
-        "provider": args.provider,
-        "use_llm": not args.no_llm,
-        "source_input": str(src_path),
-    }
-    config = {"configurable": {"thread_id": "cli"}}
-
-    # Drive the run, surfacing interrupts on the console and resuming.
-    # get_state() requires a checkpointer; without one, interrupts cannot
-    # occur in auto mode anyway (ask_fn is None).
-    app.invoke(state, config=config)
-    while checkpointer is not None:
-        pending = pending_interrupt(app, config)
-        if pending is None:
-            break
-        prompt = prompt_text(pending.value)
-        if prompt:
-            print(prompt, end="", flush=True)
-        answer = input()
-        app.invoke(Command(resume=answer), config=config)
-
-
-if __name__ == "__main__":
-    main()

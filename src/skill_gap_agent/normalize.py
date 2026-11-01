@@ -349,11 +349,6 @@ def canonical_term(raw: str) -> str:
     return text
 
 
-def normalize_name(name: str) -> str:
-    """Case-insensitive dedup key for a canonical term."""
-    return canonical_term(name).lower()
-
-
 def resolve(surface: str) -> str | None:
     """Resolve a surface form (e.g. from a JD) to a canonical name, or None."""
     low = surface.strip().lower()

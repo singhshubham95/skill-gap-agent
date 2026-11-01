@@ -24,7 +24,6 @@ self-report rather than served.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from .judge import prune_candidates
@@ -188,9 +187,3 @@ class Validator:
         except Exception:  # noqa: BLE001 — grading failure = checklist fallback
             return None
         return max(1, min(5, g))
-
-
-def concepts_to_flags(text: str, n: int) -> list[str]:
-    """Parse a checklist answer like 'y,n,y,y,n' into flags."""
-    flags = re.findall(r"[yn]", (text or "").lower())
-    return flags[:n]

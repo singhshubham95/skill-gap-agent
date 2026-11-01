@@ -12,6 +12,13 @@ session). Milestone history M1–M15 predates this file and lives in
 
 ## Entries
 
+- T-MAINT-20261101: First periodic maintenance pass — removed the retired
+  CLI console from `cli.py`, pruned dead helpers/`seed.py` and an unused
+  sqlite-checkpoint dependency, and corrected M28/M17/M29 drift across the
+  specs, README, overview, and the historical security review. Verified:
+  `ruff` clean; `pytest` 69 passed; all kept checks + m10/m11/m12/m29 pass;
+  path guard green; origin-gate red→green. (report:
+  [board/maintenance/2026-11-01.md](../board/maintenance/2026-11-01.md))
 - T-M29-desktop-launcher: Desktop companion tray lifecycle — tray entry
   point (`python -m skill_gap_agent.desktop`), single-instance mutex,
   LocalAppData (installed) vs repo `output/` (dev) paths, start-with-Windows

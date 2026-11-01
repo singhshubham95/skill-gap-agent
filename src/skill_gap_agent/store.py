@@ -165,10 +165,6 @@ def profile_path() -> Path:
     return current_dir() / "profile.json"
 
 
-def questions_path() -> Path:
-    return current_dir() / "questions.json"
-
-
 def load_profile() -> dict | None:
     """Load the chat profile, or None if no chat ran yet."""
     p = profile_path()
